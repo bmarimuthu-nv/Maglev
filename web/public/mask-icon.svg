@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Monochrome mask icon - single color, no gradients -->
+
+  <!-- Terminal prompt >_ -->
+  <g>
+    <path d="M 198 68 L 218 80 L 198 92" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="224" y1="92" x2="244" y2="92" stroke="#000" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- M letter - left vertical -->
+  <path d="M 100 108 L 100 330 L 148 330 L 148 108 Z" fill="#000"/>
+
+  <!-- M letter - left diagonal -->
+  <path d="M 100 108 L 256 280 L 256 330 L 148 208 L 148 108 Z" fill="#000"/>
+
+  <!-- M letter - right diagonal -->
+  <path d="M 412 108 L 256 280 L 256 330 L 364 208 L 364 108 Z" fill="#000"/>
+
+  <!-- M letter - right vertical -->
+  <path d="M 364 108 L 412 108 L 412 330 L 364 330 Z" fill="#000"/>
+
+  <!-- Train -->
+  <path d="M 95 265 Q 105 250 130 242 L 200 228 L 380 205 Q 410 200 420 215 Q 425 225 415 235 L 380 242 L 200 260 L 130 268 Q 105 272 95 265 Z" fill="#000"/>
+
+  <!-- Swoosh curves -->
+  <path d="M 70 300 Q 160 330 256 335 Q 352 330 442 300" fill="none" stroke="#000" stroke-width="8" stroke-linecap="round"/>
+  <path d="M 90 322 Q 170 355 256 360 Q 342 355 422 322" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M 115 340 Q 185 368 256 373 Q 327 368 397 340" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+
+  <!-- MAGLEV text -->
+  <text x="256" y="430" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="70" font-weight="900" letter-spacing="10" fill="#000">MAGLEV</text>
+</svg>

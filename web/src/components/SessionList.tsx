@@ -1,0 +1,656 @@
+import { useEffect, useMemo, useState } from 'react'
+import type { SessionSummary } from '@/types/api'
+import type { ApiClient } from '@/api/client'
+import { useLongPress } from '@/hooks/useLongPress'
+import { usePlatform } from '@/hooks/usePlatform'
+import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { StartupCommandDialog } from '@/components/StartupCommandDialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useTranslation } from '@/lib/use-translation'
+import { useAppContext } from '@/lib/app-context'
+import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
+import { openSessionReviewWindow } from '@/utils/sessionReview'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+
+type SessionGroup = {
+    directory: string
+    displayName: string
+    sessions: SessionSummary[]
+    latestUpdatedAt: number
+    hasActiveSession: boolean
+}
+
+type SessionRow = {
+    key: string
+    sessions: SessionSummary[]
+    paired: boolean
+}
+
+function getGroupDisplayName(directory: string): string {
+    if (directory === 'Other') return directory
+    const parts = directory.split(/[\\/]+/).filter(Boolean)
+    if (parts.length === 0) return directory
+    if (parts.length === 1) return parts[0]
+    return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+}
+
+function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
+    const groups = new Map<string, SessionSummary[]>()
+
+    sessions.forEach(session => {
+        const path = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+        if (!groups.has(path)) {
+            groups.set(path, [])
+        }
+        groups.get(path)!.push(session)
+    })
+
+    return Array.from(groups.entries())
+        .map(([directory, groupSessions]) => {
+            const sortedSessions = [...groupSessions].sort((a, b) => {
+                const rankA = a.active ? 0 : 1
+                const rankB = b.active ? 0 : 1
+                if (rankA !== rankB) return rankA - rankB
+                return b.updatedAt - a.updatedAt
+            })
+            const latestUpdatedAt = groupSessions.reduce(
+                (max, s) => (s.updatedAt > max ? s.updatedAt : max),
+                -Infinity
+            )
+            const hasActiveSession = groupSessions.some(s => s.active)
+            const displayName = getGroupDisplayName(directory)
+
+            return { directory, displayName, sessions: sortedSessions, latestUpdatedAt, hasActiveSession }
+        })
+        .sort((a, b) => {
+            if (a.hasActiveSession !== b.hasActiveSession) {
+                return a.hasActiveSession ? -1 : 1
+            }
+            return b.latestUpdatedAt - a.latestUpdatedAt
+        })
+}
+
+function PlusIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+    )
+}
+
+function PinIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M12 17v5" />
+            <path d="M8 3h8l-1 5 3 3v2H6v-2l3-3-1-5Z" />
+        </svg>
+    )
+}
+
+function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`${props.className ?? ''} transition-transform duration-200 ${props.collapsed ? '' : 'rotate-90'}`}
+        >
+            <polyline points="9 18 15 12 9 6" />
+        </svg>
+    )
+}
+
+function getSessionTitle(session: SessionSummary): string {
+    if (session.metadata?.name) {
+        return session.metadata.name
+    }
+    if (session.metadata?.summary?.text) {
+        return session.metadata.summary.text
+    }
+    if (session.metadata?.path) {
+        const parts = session.metadata.path.split('/').filter(Boolean)
+        return parts.length > 0 ? parts[parts.length - 1] : session.id.slice(0, 8)
+    }
+    return session.id.slice(0, 8)
+}
+
+function getAgentLabel(session: SessionSummary): string {
+    const flavor = session.metadata?.flavor?.trim()
+    if (flavor) return flavor
+    return 'unknown'
+}
+
+function getTerminalSupervisionTone(session: SessionSummary): string {
+    const role = session.metadata?.terminalPair?.role ?? session.metadata?.terminalSupervision?.role
+    if (role === 'worker') {
+        return 'bg-amber-500/8'
+    }
+    if (role === 'supervisor' || role === 'orchestrator') {
+        return 'bg-sky-500/8'
+    }
+    return ''
+}
+
+function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
+    const byId = new Map(groupSessions.map((session) => [session.id, session]))
+    const visited = new Set<string>()
+    const rows: SessionRow[] = []
+
+    for (const session of groupSessions) {
+        if (visited.has(session.id)) {
+            continue
+        }
+        const pairId = session.metadata?.terminalPair?.pairId
+        const peerId = pairId
+            ? groupSessions.find((candidate) =>
+                candidate.id !== session.id && candidate.metadata?.terminalPair?.pairId === pairId
+            )?.id
+            : session.metadata?.terminalSupervision?.peerSessionId
+        const peer = peerId ? byId.get(peerId) : undefined
+        if (peer && !visited.has(peer.id)) {
+            const ordered = [session, peer].sort((a, b) => {
+                const aRank = (a.metadata?.terminalPair?.role ?? a.metadata?.terminalSupervision?.role) === 'worker' ? 0 : 1
+                const bRank = (b.metadata?.terminalPair?.role ?? b.metadata?.terminalSupervision?.role) === 'worker' ? 0 : 1
+                return aRank - bRank
+            })
+            ordered.forEach((item) => visited.add(item.id))
+            rows.push({
+                key: ordered.map((item) => item.id).join(':'),
+                sessions: ordered,
+                paired: true
+            })
+            continue
+        }
+
+        visited.add(session.id)
+        rows.push({
+            key: session.id,
+            sessions: [session],
+            paired: false
+        })
+    }
+
+    return rows
+}
+
+function formatRelativeTime(value: number, t: (key: string, params?: Record<string, string | number>) => string): string | null {
+    const ms = value < 1_000_000_000_000 ? value * 1000 : value
+    if (!Number.isFinite(ms)) return null
+    const delta = Date.now() - ms
+    if (delta < 60_000) return t('session.time.justNow')
+    const minutes = Math.floor(delta / 60_000)
+    if (minutes < 60) return t('session.time.minutesAgo', { n: minutes })
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return t('session.time.hoursAgo', { n: hours })
+    const days = Math.floor(hours / 24)
+    if (days < 7) return t('session.time.daysAgo', { n: days })
+    return new Date(ms).toLocaleDateString()
+}
+
+function SessionItem(props: {
+    session: SessionSummary
+    sessions: SessionSummary[]
+    onSelect: (sessionId: string) => void
+    showPath?: boolean
+    api: ApiClient | null
+    selected?: boolean
+}) {
+    const { t } = useTranslation()
+    const { baseUrl } = useAppContext()
+    const { session: s, sessions, onSelect, showPath = true, api, selected = false } = props
+    const { haptic } = usePlatform()
+    const [menuOpen, setMenuOpen] = useState(false)
+    const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+    const [renameOpen, setRenameOpen] = useState(false)
+    const [startupCommandOpen, setStartupCommandOpen] = useState(false)
+    const [archiveOpen, setArchiveOpen] = useState(false)
+    const [deleteOpen, setDeleteOpen] = useState(false)
+
+    const {
+        archiveSession,
+        renameSession,
+        deleteSession,
+        setPinned,
+        setShellOptions,
+        attachTerminalSupervision,
+        setTerminalSupervisionPaused,
+        detachTerminalSupervision,
+        restartTerminalPair,
+        setTerminalPairPaused,
+        rebindTerminalPair,
+        addTerminalPairSupervisor,
+        isPending
+    } = useSessionActions(
+        api,
+        s.id,
+        s.metadata?.flavor ?? null
+    )
+    const [attachOpen, setAttachOpen] = useState(false)
+    const [addSupervisorOpen, setAddSupervisorOpen] = useState(false)
+    const [pairNameInput, setPairNameInput] = useState('')
+    const pairLink = s.metadata?.terminalPair
+    const supervision = s.metadata?.terminalSupervision
+    const attachCandidates = sessions.filter((candidate) =>
+        candidate.id !== s.id
+        && candidate.metadata?.flavor === 'shell'
+        && candidate.metadata?.shellTerminalState === 'ready'
+        && !candidate.metadata?.terminalSupervision
+        && !candidate.metadata?.terminalPair
+    )
+
+    const longPressHandlers = useLongPress({
+        onLongPress: (point) => {
+            haptic.impact('medium')
+            setMenuAnchorPoint(point)
+            setMenuOpen(true)
+        },
+        onClick: () => {
+            if (!menuOpen) {
+                onSelect(s.id)
+            }
+        },
+        threshold: 500
+    })
+
+    const sessionName = getSessionTitle(s)
+    const statusDotClass = s.active
+        ? (s.thinking ? 'bg-[#007AFF]' : 'bg-[var(--app-badge-success-text)]')
+        : 'bg-[var(--app-hint)]'
+    return (
+        <>
+            <button
+                type="button"
+                {...longPressHandlers}
+                className={`session-list-item flex w-full flex-col gap-1.5 px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                style={{ WebkitTouchCallout: 'none' }}
+                aria-current={selected ? 'page' : undefined}
+            >
+                <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
+                            <span
+                                className={`h-2 w-2 rounded-full ${statusDotClass}`}
+                            />
+                        </span>
+                        <div className="truncate text-base font-medium">
+                            {sessionName}
+                        </div>
+                        {s.metadata?.pinned ? (
+                            <span className="text-[var(--app-link)]" title="Pinned shell">
+                                <PinIcon />
+                            </span>
+                        ) : null}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 text-xs">
+                        {s.thinking ? (
+                            <span className="text-[#007AFF] animate-pulse">
+                                {t('session.item.thinking')}
+                            </span>
+                        ) : null}
+                        <span className="text-[var(--app-hint)]">
+                            {formatRelativeTime(s.updatedAt, t)}
+                        </span>
+                    </div>
+                </div>
+                {showPath ? (
+                    <div className="truncate text-xs text-[var(--app-hint)]">
+                        {s.metadata?.path ?? s.id}
+                    </div>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--app-hint)]">
+                    <span className="inline-flex items-center gap-2">
+                        <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
+                            ❖
+                        </span>
+                        {getAgentLabel(s)}
+                    </span>
+                    {pairLink ? (
+                        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] uppercase tracking-wide">
+                            {pairLink.role}
+                            {pairLink.state !== 'active' ? ` ${pairLink.state}` : ''}
+                        </span>
+                    ) : null}
+                    {supervision ? (
+                        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] uppercase tracking-wide">
+                            {supervision.role}
+                            {supervision.state === 'paused' ? ' paused' : ''}
+                        </span>
+                    ) : null}
+                    {s.metadata?.worktree?.branch ? (
+                        <span>{t('session.item.worktree')}: {s.metadata.worktree.branch}</span>
+                    ) : null}
+                </div>
+            </button>
+
+            <SessionActionMenu
+                isOpen={menuOpen}
+                onClose={() => setMenuOpen(false)}
+                sessionActive={s.active}
+                canPin={s.metadata?.flavor === 'shell'}
+                pinned={s.metadata?.pinned === true}
+                onTogglePin={() => {
+                    void setPinned(!(s.metadata?.pinned === true))
+                }}
+                canEditStartupCommand={s.metadata?.flavor === 'shell'}
+                onEditStartupCommand={() => setStartupCommandOpen(true)}
+                canOpenFolder={Boolean(s.metadata?.path)}
+                onOpenFolder={() => {
+                    if (!s.metadata?.path) return
+                    openSessionExplorerWindow(baseUrl, s.id, { tab: 'directories' })
+                }}
+                canOpenReview={Boolean(s.active && s.metadata?.path)}
+                onOpenReview={() => {
+                    if (!s.metadata?.path || !s.active) return
+                    openSessionReviewWindow(baseUrl, s.id, { mode: 'branch' })
+                }}
+                canAttachTerminalSupervision={s.metadata?.flavor === 'shell' && !supervision && !pairLink}
+                onAttachTerminalSupervision={() => setAttachOpen(true)}
+                canPauseTerminalSupervision={Boolean(supervision)}
+                terminalSupervisionPaused={supervision?.state === 'paused'}
+                onToggleTerminalSupervisionPaused={() => {
+                    if (!supervision) return
+                    void setTerminalSupervisionPaused(supervision.state !== 'paused')
+                }}
+                canDetachTerminalSupervision={Boolean(supervision)}
+                onDetachTerminalSupervision={() => {
+                    void detachTerminalSupervision()
+                }}
+                canRestartTerminalPair={Boolean(pairLink)}
+                onRestartTerminalPair={() => {
+                    void restartTerminalPair()
+                }}
+                canRebindTerminalPair={Boolean(pairLink)}
+                onRebindTerminalPair={() => setAttachOpen(true)}
+                canAddTerminalPairSupervisor={Boolean(!pairLink && !supervision && s.metadata?.flavor === 'shell' && s.metadata?.shellTerminalState === 'ready')}
+                onAddTerminalPairSupervisor={() => {
+                    setPairNameInput(s.metadata?.name || getSessionTitle(s))
+                    setAddSupervisorOpen(true)
+                }}
+                canPauseTerminalPair={Boolean(pairLink)}
+                terminalPairPaused={pairLink?.state === 'paused'}
+                onToggleTerminalPairPaused={() => {
+                    if (!pairLink) return
+                    void setTerminalPairPaused(pairLink.state !== 'paused')
+                }}
+                onRename={() => setRenameOpen(true)}
+                onArchive={() => setArchiveOpen(true)}
+                onDelete={() => setDeleteOpen(true)}
+                anchorPoint={menuAnchorPoint}
+            />
+
+            <Dialog open={attachOpen} onOpenChange={setAttachOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{pairLink ? 'Rebind Pair Side' : 'Attach Babysitter'}</DialogTitle>
+                        <DialogDescription>
+                            {pairLink
+                                ? `Choose the replacement shell for the ${pairLink.role} side of this pair.`
+                                : 'Choose the worker terminal this session should supervise.'}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="mt-4 flex max-h-[320px] flex-col gap-2 overflow-y-auto">
+                        {attachCandidates.length > 0 ? attachCandidates.map((candidate) => (
+                            <button
+                                key={candidate.id}
+                                type="button"
+                                className="rounded-lg border border-[var(--app-border)] px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                onClick={() => {
+                                    const action = pairLink
+                                        ? rebindTerminalPair(candidate.id)
+                                        : attachTerminalSupervision(candidate.id)
+                                    void action.then(() => setAttachOpen(false))
+                                }}
+                            >
+                                <div className="font-medium">{getSessionTitle(candidate)}</div>
+                                <div className="mt-1 text-xs text-[var(--app-hint)]">{candidate.metadata?.path ?? candidate.id}</div>
+                            </button>
+                        )) : (
+                            <div className="rounded-lg border border-dashed border-[var(--app-border)] px-3 py-4 text-sm text-[var(--app-hint)]">
+                                {pairLink
+                                    ? 'No eligible replacement shell sessions are available.'
+                                    : 'No eligible worker terminals are available.'}
+                            </div>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={addSupervisorOpen} onOpenChange={setAddSupervisorOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Add New Supervisor</DialogTitle>
+                        <DialogDescription>
+                            Upgrade this terminal into a linked worker/supervisor shell pair.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="mt-4 flex flex-col gap-3">
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-medium text-[var(--app-hint)]">Pair tag</label>
+                            <input
+                                type="text"
+                                value={pairNameInput}
+                                onChange={(event) => setPairNameInput(event.target.value)}
+                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                                placeholder="Required"
+                                disabled={isPending}
+                            />
+                        </div>
+                        <div className="rounded-lg border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-hint)]">
+                            This will make the current terminal the worker, spawn a new supervisor shell, and keep both shells linked as <code>{pairNameInput.trim() || '<pair>'} worker</code> and <code>{pairNameInput.trim() || '<pair>'} supervisor</code>.
+                        </div>
+                        <button
+                            type="button"
+                            className="inline-flex items-center justify-center rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={isPending || pairNameInput.trim().length === 0}
+                            onClick={() => {
+                                void addTerminalPairSupervisor({
+                                    name: pairNameInput.trim()
+                                }).then(() => setAddSupervisorOpen(false))
+                            }}
+                        >
+                            Create Shell Pair
+                        </button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <RenameSessionDialog
+                isOpen={renameOpen}
+                onClose={() => setRenameOpen(false)}
+                currentName={sessionName}
+                onRename={renameSession}
+                isPending={isPending}
+            />
+
+            <StartupCommandDialog
+                isOpen={startupCommandOpen}
+                onClose={() => setStartupCommandOpen(false)}
+                currentCommand={s.metadata?.startupCommand ?? ''}
+                currentAutoRespawn={s.metadata?.autoRespawn === true}
+                currentPinned={s.metadata?.pinned === true}
+                onSave={(options) => setShellOptions(options)}
+                isPending={isPending}
+            />
+
+            <ConfirmDialog
+                isOpen={archiveOpen}
+                onClose={() => setArchiveOpen(false)}
+                title={t('dialog.archive.title')}
+                description={t('dialog.archive.description', { name: sessionName })}
+                confirmLabel={t('dialog.archive.confirm')}
+                confirmingLabel={t('dialog.archive.confirming')}
+                onConfirm={archiveSession}
+                isPending={isPending}
+                destructive
+            />
+
+            <ConfirmDialog
+                isOpen={deleteOpen}
+                onClose={() => setDeleteOpen(false)}
+                title={t('dialog.delete.title')}
+                description={t('dialog.delete.description', { name: sessionName })}
+                confirmLabel={t('dialog.delete.confirm')}
+                confirmingLabel={t('dialog.delete.confirming')}
+                onConfirm={deleteSession}
+                isPending={isPending}
+                destructive
+            />
+        </>
+    )
+}
+
+export function SessionList(props: {
+    sessions: SessionSummary[]
+    onSelect: (sessionId: string) => void
+    onNewSession: () => void
+    onRefresh: () => void
+    isLoading: boolean
+    renderHeader?: boolean
+    api: ApiClient | null
+    selectedSessionId?: string | null
+}) {
+    const { t } = useTranslation()
+    const { renderHeader = true, api, selectedSessionId } = props
+    const groups = useMemo(
+        () => groupSessionsByDirectory(props.sessions),
+        [props.sessions]
+    )
+    const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
+        () => new Map()
+    )
+    const isGroupCollapsed = (group: SessionGroup): boolean => {
+        const override = collapseOverrides.get(group.directory)
+        if (override !== undefined) return override
+        return !group.hasActiveSession
+    }
+
+    const toggleGroup = (directory: string, isCollapsed: boolean) => {
+        setCollapseOverrides(prev => {
+            const next = new Map(prev)
+            next.set(directory, !isCollapsed)
+            return next
+        })
+    }
+
+    useEffect(() => {
+        setCollapseOverrides(prev => {
+            if (prev.size === 0) return prev
+            const next = new Map(prev)
+            const knownGroups = new Set(groups.map(group => group.directory))
+            let changed = false
+            for (const directory of next.keys()) {
+                if (!knownGroups.has(directory)) {
+                    next.delete(directory)
+                    changed = true
+                }
+            }
+            return changed ? next : prev
+        })
+    }, [groups])
+
+    return (
+        <div className="mx-auto w-full max-w-content flex flex-col">
+            {renderHeader ? (
+                <div className="flex items-center justify-between px-3 py-1">
+                    <div className="text-xs text-[var(--app-hint)]">
+                        {t('sessions.count', { n: props.sessions.length, m: groups.length })}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={props.onNewSession}
+                        className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
+                        title={t('sessions.new')}
+                    >
+                        <PlusIcon className="h-5 w-5" />
+                    </button>
+                </div>
+            ) : null}
+
+            <div className="flex flex-col">
+                {groups.map((group) => {
+                    const isCollapsed = isGroupCollapsed(group)
+                    const rows = getSessionRows(group.sessions)
+                    return (
+                        <div key={group.directory}>
+                            <button
+                                type="button"
+                                onClick={() => toggleGroup(group.directory, isCollapsed)}
+                                className="sticky top-0 z-10 flex w-full items-center gap-2 px-3 py-2 text-left bg-[var(--app-bg)] border-b border-[var(--app-divider)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            >
+                                <ChevronIcon
+                                    className="h-4 w-4 text-[var(--app-hint)]"
+                                    collapsed={isCollapsed}
+                                />
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className="font-medium text-base break-words" title={group.directory}>
+                                        {group.displayName}
+                                    </span>
+                                    <span className="shrink-0 text-xs text-[var(--app-hint)]">
+                                        ({group.sessions.length})
+                                    </span>
+                                </div>
+                            </button>
+                            {!isCollapsed ? (
+                                <div className="flex flex-col divide-y divide-[var(--app-divider)] border-b border-[var(--app-divider)]">
+                                    {rows.map((row) => (
+                                        <div
+                                            key={row.key}
+                                            className={row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''}
+                                        >
+                                            {row.sessions.map((s, index) => (
+                                                <div
+                                                    key={s.id}
+                                                    className={`${getTerminalSupervisionTone(s)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''}`}
+                                                >
+                                                    <SessionItem
+                                                        session={s}
+                                                        sessions={props.sessions}
+                                                        onSelect={props.onSelect}
+                                                        showPath={false}
+                                                        api={api}
+                                                        selected={s.id === selectedSessionId}
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </div>
+                    )
+                })}
+            </div>
+        </div>
+    )
+}

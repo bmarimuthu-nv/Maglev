@@ -1,0 +1,17 @@
+{
+  "name": "maglev-docs",
+  "version": "1.0.0",
+  "description": "Maglev Documentation",
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev",
+    "docs:build": "vitepress build",
+    "docs:preview": "vitepress preview"
+  },
+  "keywords": ["maglev", "ai", "agent", "documentation"],
+  "author": "",
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

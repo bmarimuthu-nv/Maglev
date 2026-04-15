@@ -1,0 +1,449 @@
+import chalk from 'chalk'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { readBrokerUrl, readRemoteGitHubAuthState } from '../../../hub/src/broker/key'
+import { signBrokerSessionToken } from '../../../hub/src/web/brokerSession'
+import type { CommandContext, CommandDefinition } from './types'
+
+const BROKER_SERVICE_NAME = 'maglev-broker.service'
+
+type ParsedBrokerArgs = {
+    host?: string
+    port?: string
+    publicUrl?: string
+    token?: string
+    showHelp: boolean
+    unexpectedArgs: string[]
+}
+
+function parseBrokerArgs(args: string[]): ParsedBrokerArgs {
+    const result: ParsedBrokerArgs = { showHelp: false, unexpectedArgs: [] }
+
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i]
+        if (arg === 'help' || arg === '-h' || arg === '--help') {
+            result.showHelp = true
+        } else if (arg === '--host' && i + 1 < args.length) {
+            result.host = args[++i]
+        } else if (arg === '--port' && i + 1 < args.length) {
+            result.port = args[++i]
+        } else if (arg === '--public-url' && i + 1 < args.length) {
+            result.publicUrl = args[++i]
+        } else if (arg === '--broker-token' && i + 1 < args.length) {
+            result.token = args[++i]
+        } else if (arg.startsWith('--host=')) {
+            result.host = arg.slice('--host='.length)
+        } else if (arg.startsWith('--port=')) {
+            result.port = arg.slice('--port='.length)
+        } else if (arg.startsWith('--public-url=')) {
+            result.publicUrl = arg.slice('--public-url='.length)
+        } else if (arg.startsWith('--broker-token=')) {
+            result.token = arg.slice('--broker-token='.length)
+        } else {
+            result.unexpectedArgs.push(arg)
+        }
+    }
+
+    return result
+}
+
+function escapeSystemdArg(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/\s/g, '\\ ')
+}
+
+function buildExecStart(): string {
+    const runtime = resolve(process.execPath)
+    const entrypoint = process.argv[1] ? resolve(process.argv[1]) : null
+    const runtimeName = runtime.split('/').pop()?.toLowerCase() ?? ''
+
+    if (runtimeName === 'node' || runtimeName === 'bun') {
+        if (!entrypoint) {
+            throw new Error('Unable to determine current CLI entrypoint for service installation')
+        }
+        return `${escapeSystemdArg(runtime)} ${escapeSystemdArg(entrypoint)} broker`
+    }
+
+    return `${escapeSystemdArg(runtime)} broker`
+}
+
+function ensureLinuxSystemdUser(action: string): void {
+    if (process.platform !== 'linux') {
+        throw new Error(`\`maglev broker service ${action}\` currently supports Linux user-level systemd only`)
+    }
+}
+
+function runSystemctl(args: string[]): void {
+    const result = spawnSync('systemctl', ['--user', ...args], {
+        stdio: 'inherit',
+        env: process.env
+    })
+
+    if (result.error) {
+        throw new Error(`Failed to run systemctl --user ${args.join(' ')}: ${result.error.message}`)
+    }
+    if (result.status !== 0) {
+        throw new Error(`systemctl --user ${args.join(' ')} exited with status ${result.status}`)
+    }
+}
+
+function isSystemdUserServiceActive(serviceName: string): boolean {
+    const result = spawnSync('systemctl', ['--user', 'is-active', '--quiet', serviceName], {
+        stdio: 'ignore',
+        env: process.env
+    })
+
+    if (result.error) {
+        throw new Error(`Failed to run systemctl --user is-active ${serviceName}: ${result.error.message}`)
+    }
+
+    return result.status === 0
+}
+
+function requireHome(): string {
+    const home = process.env.HOME?.trim()
+    if (!home) {
+        throw new Error('HOME is not set')
+    }
+    return home
+}
+
+function getServicePath(): string {
+    return resolve(requireHome(), '.config/systemd/user', BROKER_SERVICE_NAME)
+}
+
+function ensureServiceExists(): void {
+    if (!existsSync(getServicePath())) {
+        throw new Error('Service is not installed. Run `maglev broker service install` first')
+    }
+}
+
+function installBrokerUserService(commandArgs: string[]): void {
+    ensureLinuxSystemdUser('install')
+
+    const home = requireHome()
+    const serviceDir = resolve(home, '.config/systemd/user')
+    const servicePath = resolve(serviceDir, BROKER_SERVICE_NAME)
+    const passthroughArgs = commandArgs.slice(2)
+    const filteredArgs = passthroughArgs.filter((arg) => arg !== '--follow' && arg !== '-f')
+    const extraArgs = filteredArgs.length > 0 ? ` ${filteredArgs.map(escapeSystemdArg).join(' ')}` : ''
+    const execStart = `${buildExecStart()}${extraArgs}`
+    const service = `[Unit]
+Description=maglev broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${escapeSystemdArg(home)}
+ExecStart=${execStart}
+Restart=on-failure
+RestartSec=5
+Environment=HOME=${escapeSystemdArg(home)}
+Environment=MAGLEV_HOME=${escapeSystemdArg(resolve(home, '.maglev'))}
+
+[Install]
+WantedBy=default.target
+`
+
+    mkdirSync(serviceDir, { recursive: true })
+    const wasActive = existsSync(servicePath) && isSystemdUserServiceActive(BROKER_SERVICE_NAME)
+    writeFileSync(servicePath, service, 'utf8')
+    runSystemctl(['daemon-reload'])
+    runSystemctl(['enable', BROKER_SERVICE_NAME])
+    runSystemctl([wasActive ? 'restart' : 'start', BROKER_SERVICE_NAME])
+
+    console.log(chalk.green(`Installed and ${wasActive ? 'restarted' : 'started'} user service: ${BROKER_SERVICE_NAME}`))
+    console.log(chalk.gray(`Service file: ${servicePath}`))
+    console.log(chalk.gray('Manage it with:'))
+    console.log(chalk.gray('  maglev broker service status'))
+    console.log(chalk.gray('  maglev broker service logs'))
+    console.log(chalk.gray('  maglev broker service restart'))
+    console.log(chalk.gray('Optional: keep it running after logout with `loginctl enable-linger $USER`'))
+}
+
+function startBrokerUserService(): void {
+    ensureLinuxSystemdUser('start')
+    ensureServiceExists()
+    runSystemctl(['start', BROKER_SERVICE_NAME])
+}
+
+function stopBrokerUserService(): void {
+    ensureLinuxSystemdUser('stop')
+    ensureServiceExists()
+    runSystemctl(['stop', BROKER_SERVICE_NAME])
+}
+
+function restartBrokerUserService(): void {
+    ensureLinuxSystemdUser('restart')
+    ensureServiceExists()
+    runSystemctl(['restart', BROKER_SERVICE_NAME])
+}
+
+function statusBrokerUserService(): void {
+    ensureLinuxSystemdUser('status')
+    ensureServiceExists()
+    runSystemctl(['status', BROKER_SERVICE_NAME])
+}
+
+function logsBrokerUserService(commandArgs: string[]): void {
+    ensureLinuxSystemdUser('logs')
+    ensureServiceExists()
+
+    const follow = commandArgs.includes('--follow') || commandArgs.includes('-f')
+    const result = spawnSync('journalctl', ['--user', '-u', BROKER_SERVICE_NAME, ...(follow ? ['-f'] : ['-n', '100'])], {
+        stdio: 'inherit',
+        env: process.env
+    })
+
+    if (result.error) {
+        throw new Error(`Failed to run journalctl: ${result.error.message}`)
+    }
+    if (result.status !== 0) {
+        throw new Error(`journalctl exited with status ${result.status}`)
+    }
+}
+
+function uninstallBrokerUserService(): void {
+    ensureLinuxSystemdUser('uninstall')
+    const servicePath = getServicePath()
+    if (!existsSync(servicePath)) {
+        throw new Error('Service is not installed')
+    }
+
+    runSystemctl(['disable', '--now', BROKER_SERVICE_NAME])
+    rmSync(servicePath)
+    runSystemctl(['daemon-reload'])
+    console.log(chalk.green(`Removed user service: ${BROKER_SERVICE_NAME}`))
+}
+
+function runBrokerServiceCommand(commandArgs: string[]): void {
+    const action = commandArgs[1]
+
+    switch (action) {
+        case 'install':
+            installBrokerUserService(commandArgs)
+            return
+        case 'start':
+            startBrokerUserService()
+            return
+        case 'stop':
+            stopBrokerUserService()
+            return
+        case 'restart':
+            restartBrokerUserService()
+            return
+        case 'status':
+            statusBrokerUserService()
+            return
+        case 'logs':
+            logsBrokerUserService(commandArgs)
+            return
+        case 'uninstall':
+            uninstallBrokerUserService()
+            return
+        default:
+            console.log(`
+${chalk.bold('maglev broker service')} - Manage the user-level broker daemon
+
+${chalk.bold('Usage:')}
+  maglev broker service install [broker args]
+  maglev broker service start
+  maglev broker service stop
+  maglev broker service restart
+  maglev broker service status
+  maglev broker service logs [-f|--follow]
+  maglev broker service uninstall
+`)
+    }
+}
+
+type BrokerHubRecord = {
+    hubId: string
+    owner: string
+    jobId?: string | null
+    jobName?: string | null
+    hostname?: string | null
+    localUrl: string
+    createdAt: number
+    lastSeenAt: number
+    publicUrl: string
+    socket: string | null
+    launchFolders?: Array<{
+        label: string
+        path: string
+        branch?: string
+        source: 'path' | 'wt'
+    }>
+    configError?: string | null
+}
+
+type BrokerHubsResponse = {
+    hubs?: BrokerHubRecord[]
+    recentHubs?: BrokerHubRecord[]
+    error?: string
+}
+
+async function listBrokerHubs(): Promise<void> {
+    const brokerUrlState = await readBrokerUrl()
+    if (!brokerUrlState?.url) {
+        throw new Error('Broker URL not found. Start `maglev broker` first so it can write ~/.maglev/broker-url.')
+    }
+
+    const githubAuthState = await readRemoteGitHubAuthState()
+    const githubAuth = githubAuthState?.state.githubAuth
+    if (!githubAuth) {
+        throw new Error('Broker auth requires cached GitHub auth. Run `maglev auth github login` first.')
+    }
+
+    const brokerSessionToken = await signBrokerSessionToken({
+        uid: githubAuth.userId,
+        login: githubAuth.login
+    })
+
+    const apiUrl = new URL('/api/hubs', brokerUrlState.url)
+    const response = await fetch(apiUrl, {
+        headers: {
+            cookie: `maglev_broker_session=${encodeURIComponent(brokerSessionToken)}`
+        }
+    })
+
+    const body = await response.json().catch(() => null) as BrokerHubsResponse | null
+    if (!response.ok) {
+        throw new Error(body?.error || `Broker request failed with status ${response.status}`)
+    }
+
+    const activeHubs = body?.hubs ?? []
+    const recentHubs = body?.recentHubs ?? []
+
+    console.log(chalk.bold(`\nBroker Hubs (${brokerUrlState.url})\n`))
+
+    const printFolders = (hub: BrokerHubRecord) => {
+        if (hub.configError) {
+            console.log(chalk.yellow(`  config error: ${hub.configError}`))
+        }
+        for (const folder of hub.launchFolders ?? []) {
+            const branch = folder.branch ? ` [${folder.branch}]` : ''
+            console.log(chalk.gray(`  - ${folder.label}${branch}`))
+            console.log(chalk.gray(`    ${folder.path}`))
+        }
+    }
+
+    if (activeHubs.length === 0) {
+        console.log(chalk.gray('No active hubs.'))
+    } else {
+        console.log(chalk.bold('Active'))
+        for (const hub of activeHubs) {
+            const details = [
+                hub.owner,
+                hub.hostname ? `host=${hub.hostname}` : null,
+                hub.jobId ? `job=${hub.jobId}` : null,
+                hub.jobName ? `name=${hub.jobName}` : null,
+                hub.socket ? 'connected' : null
+            ].filter(Boolean).join(' | ')
+            console.log(`${chalk.cyan(hub.hubId)} ${chalk.gray(`(${details})`)}`)
+            console.log(chalk.gray(`  ${hub.publicUrl}`))
+            console.log(chalk.gray(`  last seen ${new Date(hub.lastSeenAt).toLocaleString()}`))
+            printFolders(hub)
+        }
+    }
+
+    if (recentHubs.length > 0) {
+        console.log('')
+        console.log(chalk.bold('Recent'))
+        for (const hub of recentHubs) {
+            const details = [
+                hub.owner,
+                hub.hostname ? `host=${hub.hostname}` : null,
+                hub.jobId ? `job=${hub.jobId}` : null,
+                hub.jobName ? `name=${hub.jobName}` : null
+            ].filter(Boolean).join(' | ')
+            console.log(`${chalk.yellow(hub.hubId)} ${chalk.gray(`(${details})`)}`)
+            console.log(chalk.gray(`  ${hub.publicUrl}`))
+            console.log(chalk.gray(`  last seen ${new Date(hub.lastSeenAt).toLocaleString()}`))
+            printFolders(hub)
+        }
+    }
+}
+
+export const brokerCommand: CommandDefinition = {
+    name: 'broker',
+    requiresRuntimeAssets: false,
+    run: async (context: CommandContext) => {
+        try {
+            if (context.commandArgs[0] === 'service') {
+                runBrokerServiceCommand(context.commandArgs)
+                return
+            }
+            if (context.commandArgs[0] === 'hubs') {
+                await listBrokerHubs()
+                return
+            }
+
+            const { host, port, publicUrl, token, showHelp, unexpectedArgs } = parseBrokerArgs(context.commandArgs)
+
+            if (showHelp) {
+                console.log(`
+${chalk.bold('maglev broker')}
+
+Start the self-hosted remote broker on a stable machine such as a VNC/login node.
+
+${chalk.bold('Usage:')}
+  maglev broker [options]
+  maglev broker hubs
+  maglev broker service install [options]
+  maglev broker service status
+  maglev broker service logs --follow
+
+${chalk.bold('Options:')}
+  --host <host>           Bind host (default: 0.0.0.0)
+  --port <port>           Optional listen port; defaults to a free auto-picked port
+  --public-url <url>      Optional public base URL; defaults to http://<hostname>:<port>
+  --broker-token <token>  Optional override for hub registration; default: ~/.maglev/broker-key
+
+${chalk.bold('Environment:')}
+  MAGLEV_BROKER_LISTEN_HOST
+  MAGLEV_BROKER_LISTEN_PORT
+  MAGLEV_BROKER_PUBLIC_URL
+  MAGLEV_BROKER_TOKEN
+
+${chalk.bold('Example:')}
+  maglev broker
+  maglev broker hubs
+  maglev broker --port 3010
+  maglev broker --public-url https://vnc-broker.internal
+`)
+                process.exit(0)
+            }
+
+            if (unexpectedArgs.length > 0) {
+                throw new Error(`Unexpected arguments for broker: ${unexpectedArgs.join(' ')}. Use \`maglev broker --help\`.`)
+            }
+
+            if (host) {
+                process.env.MAGLEV_BROKER_LISTEN_HOST = host
+            }
+            if (port) {
+                process.env.MAGLEV_BROKER_LISTEN_PORT = port
+            }
+            if (publicUrl) {
+                process.env.MAGLEV_BROKER_PUBLIC_URL = publicUrl
+            }
+            if (token) {
+                process.env.MAGLEV_BROKER_TOKEN = token
+            }
+
+            const { startBroker } = await import('../../../hub/src/broker')
+            await startBroker()
+        } catch (error) {
+            console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
+            if (context.commandArgs[0] === 'service') {
+                console.error(chalk.gray('Expected workflow: `maglev broker service <install|start|stop|restart|status|logs|uninstall>`'))
+            }
+            if (process.env.DEBUG) {
+                console.error(error)
+            }
+            process.exit(1)
+        }
+    }
+}

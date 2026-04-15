@@ -1,0 +1,260 @@
+import type {
+    Session,
+    SessionSummary,
+    SyncEvent as ProtocolSyncEvent,
+    WorktreeMetadata
+} from '@maglev/protocol/types'
+
+export type {
+    AgentState,
+    AttachmentMetadata,
+    PermissionMode,
+    Session,
+    SessionSummary,
+    SessionSummaryMetadata,
+    WorktreeMetadata
+} from '@maglev/protocol/types'
+
+export type SessionMetadataSummary = {
+    path: string
+    host: string
+    version?: string
+    name?: string
+    os?: string
+    summary?: { text: string; updatedAt: number }
+    machineId?: string
+    tools?: string[]
+    flavor?: string | null
+    worktree?: WorktreeMetadata
+    notesPath?: string
+    pinned?: boolean
+    autoRespawn?: boolean
+    startupCommand?: string
+}
+
+export type AgentType = 'shell'
+
+export type RunnerState = {
+    status?: string
+    pid?: number
+    httpPort?: number
+    startedAt?: number
+    shutdownRequestedAt?: number
+    shutdownSource?: string
+    lastSpawnError?: {
+        message: string
+        pid?: number
+        exitCode?: number | null
+        signal?: string | null
+        at: number
+    } | null
+}
+
+export type Machine = {
+    id: string
+    active: boolean
+    metadata: {
+        host: string
+        platform: string
+        maglevCliVersion: string
+        displayName?: string
+    } | null
+    runnerState?: RunnerState | null
+}
+
+export type AuthResponse = {
+    token: string
+    user: {
+        id: number
+        username?: string
+        firstName?: string
+        lastName?: string
+    }
+}
+
+export type AuthMethodsResponse = {
+    methods: Array<'telegram' | 'accessToken' | 'githubDevice' | 'brokerSession'>
+}
+
+export type GitHubDeviceStartResponse = {
+    deviceCode: string
+    userCode: string
+    verificationUri: string
+    verificationUriComplete?: string
+    expiresIn: number
+    interval: number
+}
+
+export type GitHubDevicePollResponse =
+    | { status: 'authorization_pending' | 'slow_down' | 'expired_token' | 'access_denied' }
+    | ({ status: 'authorized'; githubUser: { id: number; login: string; name?: string } } & AuthResponse)
+
+export type SessionsResponse = { sessions: SessionSummary[] }
+export type SessionResponse = { session: Session }
+export type TerminalSupervisionTargetResponse = {
+    worker: SessionSummary
+    orchestrator: SessionSummary
+    snapshot: {
+        outputBuffer: string
+        status: 'ready' | 'exited'
+        updatedAt: number
+        exitInfo: { code: number | null; signal: string | null } | null
+    } | null
+    events: Array<{
+        id: string
+        createdAt: number
+        type: 'attached' | 'detached' | 'paused' | 'resumed' | 'write_accepted' | 'write_blocked'
+        actor: 'human' | 'orchestrator' | 'system'
+        message: string
+    }>
+}
+
+export type SpawnTerminalPairResponse =
+    | {
+        type: 'success'
+        pair: import('@maglev/protocol/types').TerminalPair
+    }
+    | {
+        type: 'error'
+        message: string
+    }
+export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
+export type HubLaunchFolder = {
+    label: string
+    path: string
+    branch?: string
+    source: 'path' | 'wt'
+}
+export type HubConfigResponse = {
+    name: string | null
+    machineId: string | null
+    machine: Machine | null
+    folders: HubLaunchFolder[]
+    error?: string
+}
+
+export type SpawnResponse =
+    | { type: 'success'; sessionId: string }
+    | { type: 'error'; message: string }
+
+export type GitCommandResponse = {
+    success: boolean
+    stdout?: string
+    stderr?: string
+    exitCode?: number
+    error?: string
+}
+
+export type ReviewMode = 'branch' | 'working'
+
+export type ReviewSummaryFile = {
+    filePath: string
+    added: number | null
+    removed: number | null
+    binary?: boolean
+    oldPath?: string
+}
+
+export type ReviewSummaryResponse = {
+    success: boolean
+    mode?: ReviewMode
+    currentBranch?: string | null
+    defaultBranch?: string | null
+    mergeBase?: string | null
+    files?: ReviewSummaryFile[]
+    error?: string
+}
+
+export type FileSearchItem = {
+    fileName: string
+    filePath: string
+    fullPath: string
+    fileType: 'file' | 'folder'
+}
+
+export type FileSearchResponse = {
+    success: boolean
+    files?: FileSearchItem[]
+    error?: string
+}
+
+export type DirectoryEntry = {
+    name: string
+    type: 'file' | 'directory' | 'other'
+    size?: number
+    modified?: number
+}
+
+export type ListDirectoryResponse = {
+    success: boolean
+    entries?: DirectoryEntry[]
+    error?: string
+}
+
+export type FileReadResponse = {
+    success: boolean
+    content?: string
+    hash?: string
+    error?: string
+}
+
+export type WriteFileResponse = {
+    success: boolean
+    hash?: string
+    error?: string
+}
+
+export type UploadFileResponse = {
+    success: boolean
+    path?: string
+    error?: string
+}
+
+export type DeleteUploadResponse = {
+    success: boolean
+    error?: string
+}
+
+export type GitFileStatus = {
+    fileName: string
+    filePath: string
+    fullPath: string
+    status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflicted'
+    isStaged: boolean
+    linesAdded: number
+    linesRemoved: number
+    oldPath?: string
+}
+
+export type GitStatusFiles = {
+    stagedFiles: GitFileStatus[]
+    unstagedFiles: GitFileStatus[]
+    branch: string | null
+    totalStaged: number
+    totalUnstaged: number
+}
+
+export type PushSubscriptionKeys = {
+    p256dh: string
+    auth: string
+}
+
+export type PushSubscriptionPayload = {
+    endpoint: string
+    keys: PushSubscriptionKeys
+}
+
+export type PushUnsubscribePayload = {
+    endpoint: string
+}
+
+export type PushVapidPublicKeyResponse = {
+    publicKey: string
+}
+
+export type VisibilityPayload = {
+    subscriptionId: string
+    visibility: 'visible' | 'hidden'
+}
+
+export type SyncEvent = ProtocolSyncEvent

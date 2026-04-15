@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="mLeft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1B4F72"/>
+      <stop offset="100%" stop-color="#2E86C1"/>
+    </linearGradient>
+    <linearGradient id="mRight" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2471A3"/>
+      <stop offset="100%" stop-color="#5DADE2"/>
+    </linearGradient>
+    <linearGradient id="trainBody" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#154360"/>
+      <stop offset="40%" stop-color="#1F618D"/>
+      <stop offset="100%" stop-color="#2E86C1"/>
+    </linearGradient>
+    <linearGradient id="swoosh1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2471A3"/>
+      <stop offset="100%" stop-color="#85C1E9"/>
+    </linearGradient>
+    <linearGradient id="swoosh2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5DADE2"/>
+      <stop offset="100%" stop-color="#AED6F1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Terminal prompt >_ -->
+  <g>
+    <path d="M 198 68 L 218 80 L 198 92" fill="none" stroke="#1B4F72" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="224" y1="92" x2="244" y2="92" stroke="#1B4F72" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- M letter - left vertical -->
+  <path d="M 100 108 L 100 330 L 148 330 L 148 108 Z" fill="url(#mLeft)"/>
+
+  <!-- M letter - left diagonal going up to center peak -->
+  <path d="M 100 108 L 256 280 L 256 330 L 148 208 L 148 108 Z" fill="url(#mLeft)"/>
+
+  <!-- M letter - right diagonal -->
+  <path d="M 412 108 L 256 280 L 256 330 L 364 208 L 364 108 Z" fill="url(#mRight)"/>
+
+  <!-- M letter - right vertical -->
+  <path d="M 364 108 L 412 108 L 412 330 L 364 330 Z" fill="url(#mRight)"/>
+
+  <!-- Train - nose pointing left, body extending right -->
+  <path d="M 95 265 Q 105 250 130 242 L 200 228 L 380 205 Q 410 200 420 215 Q 425 225 415 235 L 380 242 L 200 260 L 130 268 Q 105 272 95 265 Z" fill="url(#trainBody)" opacity="0.85"/>
+
+  <!-- Train window highlight -->
+  <path d="M 180 237 L 370 213 Q 390 210 395 220 L 390 228 L 180 250 Z" fill="#85C1E9" opacity="0.5"/>
+
+  <!-- Swoosh curves around the bottom -->
+  <path d="M 70 300 Q 160 330 256 335 Q 352 330 442 300" fill="none" stroke="url(#swoosh1)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M 90 322 Q 170 355 256 360 Q 342 355 422 322" fill="none" stroke="url(#swoosh2)" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M 115 340 Q 185 368 256 373 Q 327 368 397 340" fill="none" stroke="url(#swoosh2)" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+
+  <!-- MAGLEV text -->
+  <text x="256" y="430" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="70" font-weight="900" letter-spacing="10" fill="#0A2647">MAGLEV</text>
+</svg>
