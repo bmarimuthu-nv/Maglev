@@ -222,6 +222,7 @@ export class SyncEngine {
 
     handleSessionEnd(payload: { sid: string; time: number }): void {
         this.sessionCache.handleSessionEnd(payload)
+        this.terminalStateCache.evictStale()
     }
 
     handleMachineAlive(payload: { machineId: string; time: number }): void {
@@ -517,6 +518,7 @@ export class SyncEngine {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
+        this.terminalStateCache.removeSession(sessionId)
     }
 
     async applySessionConfig(

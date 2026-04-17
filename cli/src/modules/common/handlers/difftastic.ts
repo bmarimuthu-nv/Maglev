@@ -17,6 +17,21 @@ interface DifftasticResponse {
     error?: string
 }
 
+/**
+ * Validate difftastic args to prevent path escapes beyond the working directory.
+ */
+function validateDifftasticArgs(args: string[], workingDirectory: string): string | null {
+    for (const arg of args) {
+        if (arg.startsWith('/') && !arg.startsWith('--')) {
+            const validation = validatePath(arg, workingDirectory)
+            if (!validation.valid) {
+                return `Path argument not allowed: ${arg}`
+            }
+        }
+    }
+    return null
+}
+
 export function registerDifftasticHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
     rpcHandlerManager.registerHandler<DifftasticRequest, DifftasticResponse>('difftastic', async (data) => {
         logger.debug('Difftastic request with args:', data.args, 'cwd:', data.cwd)
@@ -26,6 +41,11 @@ export function registerDifftasticHandlers(rpcHandlerManager: RpcHandlerManager,
             if (!validation.valid) {
                 return rpcError(validation.error ?? 'Invalid working directory')
             }
+        }
+
+        const argsError = validateDifftasticArgs(data.args, workingDirectory)
+        if (argsError) {
+            return rpcError(argsError)
         }
 
         try {

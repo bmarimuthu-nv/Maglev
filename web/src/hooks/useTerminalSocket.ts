@@ -273,6 +273,13 @@ function disconnectController(controller: TerminalController): void {
     controller.outputBuffer = ''
     controller.exitInfo = null
     setControllerState(controller, { status: 'idle' })
+
+    // Remove from module-level map if no listeners remain
+    if (controller.stateListeners.size === 0
+        && controller.outputListeners.size === 0
+        && controller.exitListeners.size === 0) {
+        controllers.delete(controller.key)
+    }
 }
 
 function replayControllerSnapshot(
@@ -333,6 +340,14 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
             controller.stateListeners.delete(handleState)
             controller.outputListeners.delete(handleOutput)
             controller.exitListeners.delete(handleExit)
+
+            // Evict idle controller when last listener detaches
+            if (controller.stateListeners.size === 0
+                && controller.outputListeners.size === 0
+                && controller.exitListeners.size === 0
+                && !controller.socket) {
+                controllers.delete(controller.key)
+            }
         }
     }, [controller])
 

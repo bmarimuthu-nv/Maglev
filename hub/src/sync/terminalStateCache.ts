@@ -8,6 +8,7 @@ type TerminalSnapshot = {
 type TerminalCacheEntry = TerminalSnapshot
 
 const OUTPUT_BUFFER_CHARS = 200_000
+const EXITED_TTL_MS = 5 * 60 * 1000 // Evict exited terminals after 5 minutes
 
 function getKey(sessionId: string, terminalId: string): string {
     return `${sessionId}:${terminalId}`
@@ -58,5 +59,26 @@ export class TerminalStateCache {
 
     getSnapshot(sessionId: string, terminalId: string): TerminalSnapshot | null {
         return this.entries.get(getKey(sessionId, terminalId)) ?? null
+    }
+
+    removeSession(sessionId: string): void {
+        for (const key of this.entries.keys()) {
+            if (key.startsWith(`${sessionId}:`)) {
+                this.entries.delete(key)
+            }
+        }
+    }
+
+    evictStale(): void {
+        const now = Date.now()
+        for (const [key, entry] of this.entries) {
+            if (entry.status === 'exited' && now - entry.updatedAt > EXITED_TTL_MS) {
+                this.entries.delete(key)
+            }
+        }
+    }
+
+    get size(): number {
+        return this.entries.size
     }
 }

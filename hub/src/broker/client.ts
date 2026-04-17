@@ -312,7 +312,13 @@ export class BrokerClient {
                 ? Buffer.from(raw).toString('utf8')
                 : Buffer.from(await raw.arrayBuffer()).toString('utf8')
 
-        const message = JSON.parse(text) as BrokerMessage
+        let message: BrokerMessage
+        try {
+            message = JSON.parse(text) as BrokerMessage
+        } catch {
+            console.error('[Broker] Received malformed JSON message, ignoring')
+            return
+        }
 
         if (message.type === 'ping') {
             if (this.socket?.readyState === WebSocket.OPEN) {

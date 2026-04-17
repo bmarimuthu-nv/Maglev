@@ -88,7 +88,7 @@ export async function updateSettings(
 
   const lockFile = configuration.settingsFile + '.lock';
   const tmpFile = configuration.settingsFile + '.tmp';
-  let fileHandle;
+  let fileHandle: FileHandle | undefined;
   let attempts = 0;
 
   // Acquire exclusive lock with retries
@@ -96,6 +96,9 @@ export async function updateSettings(
     try {
       // 'wx' = create exclusively, fail if exists (cross-platform compatible)
       fileHandle = await open(lockFile, 'wx');
+      // Write our PID so other processes can check if we're still alive
+      await fileHandle.write(`${process.pid}`);
+      await fileHandle.datasync();
       break;
     } catch (err: any) {
       if (err.code === 'EEXIST') {
@@ -103,10 +106,14 @@ export async function updateSettings(
         attempts++;
         await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_INTERVAL_MS));
 
-        // Check for stale lock
+        // Check for stale lock: read PID and check if the process is alive
         try {
-          const stats = await stat(lockFile);
-          if (Date.now() - stats.mtimeMs > STALE_LOCK_TIMEOUT_MS) {
+          const lockContent = await readFile(lockFile, 'utf8');
+          const lockPid = parseInt(lockContent, 10);
+          const lockStats = await stat(lockFile);
+          const isStale = Date.now() - lockStats.mtimeMs > STALE_LOCK_TIMEOUT_MS
+            || (!isNaN(lockPid) && lockPid > 0 && !isProcessAlive(lockPid));
+          if (isStale) {
             await unlink(lockFile).catch(() => { });
           }
         } catch { }

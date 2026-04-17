@@ -117,7 +117,6 @@ function findRequestByPrefix(session: Session, prefix: string): string | undefin
         }
     }
 
-    // If no prefix match, return the first request
-    const keys = Object.keys(requests)
-    return keys.length > 0 ? keys[0] : undefined
+    // No fallback — return undefined to avoid acting on the wrong request
+    return undefined
 }

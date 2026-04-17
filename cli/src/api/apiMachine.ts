@@ -220,11 +220,11 @@ export class ApiMachineClient {
     connect(): void {
         this.socket = io(`${configuration.apiUrl}/cli`, {
             transports: ['websocket'],
-            auth: {
-                token: this.token,
+            auth: (cb) => cb({
+                token: configuration.cliApiToken ?? this.token,
                 clientType: 'machine-scoped' as const,
                 machineId: this.machine.id
-            },
+            }),
             path: '/socket.io/',
             reconnection: true,
             reconnectionDelay: 1000,

@@ -83,4 +83,26 @@ describe('ripgrep RPC handler', () => {
             'src/index.ts'
         ])
     })
+
+    it('rejects absolute path arguments outside working directory', async () => {
+        const response = await rpc.handleRequest({
+            method: 'session-test:ripgrep',
+            params: JSON.stringify({ args: ['pattern', '/etc/passwd'] })
+        })
+
+        const parsed = JSON.parse(response) as { success: boolean; error?: string }
+        expect(parsed.success).toBe(false)
+        expect(parsed.error).toContain('/etc/passwd')
+    })
+
+    it('rejects --file flag with absolute path outside working directory', async () => {
+        const response = await rpc.handleRequest({
+            method: 'session-test:ripgrep',
+            params: JSON.stringify({ args: ['--file', '/etc/shadow', 'pattern'] })
+        })
+
+        const parsed = JSON.parse(response) as { success: boolean; error?: string }
+        expect(parsed.success).toBe(false)
+        expect(parsed.error).toContain('/etc/shadow')
+    })
 })
