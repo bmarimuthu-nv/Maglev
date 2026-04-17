@@ -213,6 +213,12 @@ export class ApiClient {
         return await res.json() as AuthResponse
     }
 
+    async createEventsTicket(): Promise<{ ticket: string }> {
+        return await this.request<{ ticket: string }>('/api/events/ticket', {
+            method: 'POST'
+        })
+    }
+
     async getSessions(): Promise<SessionsResponse> {
         return await this.request<SessionsResponse>('/api/sessions')
     }

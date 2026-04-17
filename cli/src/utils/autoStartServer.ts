@@ -10,6 +10,7 @@
 
 import chalk from 'chalk'
 import { createConnection } from 'node:net'
+import { hostname } from 'node:os'
 import { configuration } from '@/configuration'
 import { readSettings } from '@/persistence'
 import { spawnMaglevCli } from '@/utils/spawnMaglevCli'
@@ -125,7 +126,8 @@ async function shouldAutoStartServer(): Promise<boolean> {
  * Start hub as a child process (will exit when CLI exits)
  */
 function startServerAsChild(): void {
-    const serverProcess = spawnMaglevCli(['hub'], {
+    const hubName = hostname() || 'local'
+    const serverProcess = spawnMaglevCli(['hub', '--name', hubName, '--debug'], {
         detached: false,
         stdio: 'ignore',
         env: process.env

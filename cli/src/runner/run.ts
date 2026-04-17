@@ -688,77 +688,79 @@ export async function startRunner(): Promise<void> {
       }
       heartbeatRunning = true;
 
-      if (process.env.DEBUG) {
-        logger.debug(`[RUNNER RUN] Health check started at ${new Date().toLocaleString()}`);
-      }
-
-      // Prune stale sessions
-      for (const [pid, _] of pidToTrackedSession.entries()) {
-        if (!isProcessAlive(pid)) {
-          logger.debug(`[RUNNER RUN] Removing stale session with PID ${pid} (process no longer exists)`);
-          pidToTrackedSession.delete(pid);
-        }
-      }
-
-      // Check if runner needs update
-      const installedCliMtimeMs = getInstalledCliMtimeMs();
-      if (typeof installedCliMtimeMs === 'number' &&
-          typeof startedWithCliMtimeMs === 'number' &&
-          installedCliMtimeMs !== startedWithCliMtimeMs) {
-        logger.debug('[RUNNER RUN] Runner is outdated, triggering self-restart with latest version, clearing heartbeat interval');
-
-        clearInterval(restartOnStaleVersionAndHeartbeat);
-
-        // Spawn new runner through the CLI
-        // We do not need to clean ourselves up - we will be killed by
-        // the CLI start command.
-        // 1. It will first check if runner is running (yes in this case)
-        // 2. If the version is stale (it will read runner.state.json file and check startedWithCliVersion) & compare it to its own version
-        // 3. Next it will start a new runner with the latest version with runner-sync :D
-        // Done!
-        try {
-          spawnMaglevCli(['runner', 'start'], {
-            detached: true,
-            stdio: 'ignore'
-          });
-        } catch (error) {
-          logger.debug('[RUNNER RUN] Failed to spawn new runner, this is quite likely to happen during integration tests as we are cleaning out dist/ directory', error);
-        }
-
-        // So we can just hang forever
-        logger.debug('[RUNNER RUN] Hanging for a bit - waiting for CLI to kill us because we are running outdated version of the code');
-        await new Promise(resolve => setTimeout(resolve, 10_000));
-        process.exit(0);
-      }
-
-      // Before wrecklessly overriting the runner state file, we should check if we are the ones who own it
-      // Race condition is possible, but thats okay for the time being :D
-      const runnerState = await readRunnerState();
-      if (runnerState && runnerState.pid !== process.pid) {
-        logger.debug('[RUNNER RUN] Somehow a different runner was started without killing us. We should kill ourselves.')
-        requestShutdown('exception', 'A different runner was started without killing us. We should kill ourselves.')
-      }
-
-      // Heartbeat
       try {
-        const updatedState: RunnerLocallyPersistedState = {
-          pid: process.pid,
-          httpPort: controlPort,
-          startTime: fileState.startTime,
-          startedWithCliVersion: packageJson.version,
-          startedWithCliMtimeMs,
-          lastHeartbeat: new Date().toLocaleString(),
-          runnerLogPath: fileState.runnerLogPath
-        };
-        writeRunnerState(updatedState);
         if (process.env.DEBUG) {
-          logger.debug(`[RUNNER RUN] Health check completed at ${updatedState.lastHeartbeat}`);
+          logger.debug(`[RUNNER RUN] Health check started at ${new Date().toLocaleString()}`);
         }
-      } catch (error) {
-        logger.debug('[RUNNER RUN] Failed to write heartbeat', error);
-      }
 
-      heartbeatRunning = false;
+        // Prune stale sessions
+        for (const [pid, _] of pidToTrackedSession.entries()) {
+          if (!isProcessAlive(pid)) {
+            logger.debug(`[RUNNER RUN] Removing stale session with PID ${pid} (process no longer exists)`);
+            pidToTrackedSession.delete(pid);
+          }
+        }
+
+        // Check if runner needs update
+        const installedCliMtimeMs = getInstalledCliMtimeMs();
+        if (typeof installedCliMtimeMs === 'number' &&
+            typeof startedWithCliMtimeMs === 'number' &&
+            installedCliMtimeMs !== startedWithCliMtimeMs) {
+          logger.debug('[RUNNER RUN] Runner is outdated, triggering self-restart with latest version, clearing heartbeat interval');
+
+          clearInterval(restartOnStaleVersionAndHeartbeat);
+
+          // Spawn new runner through the CLI
+          // We do not need to clean ourselves up - we will be killed by
+          // the CLI start command.
+          // 1. It will first check if runner is running (yes in this case)
+          // 2. If the version is stale (it will read runner.state.json file and check startedWithCliVersion) & compare it to its own version
+          // 3. Next it will start a new runner with the latest version with runner-sync :D
+          // Done!
+          try {
+            spawnMaglevCli(['runner', 'start'], {
+              detached: true,
+              stdio: 'ignore'
+            });
+          } catch (error) {
+            logger.debug('[RUNNER RUN] Failed to spawn new runner, this is quite likely to happen during integration tests as we are cleaning out dist/ directory', error);
+          }
+
+          // So we can just hang forever
+          logger.debug('[RUNNER RUN] Hanging for a bit - waiting for CLI to kill us because we are running outdated version of the code');
+          await new Promise(resolve => setTimeout(resolve, 10_000));
+          process.exit(0);
+        }
+
+        // Before wrecklessly overriting the runner state file, we should check if we are the ones who own it
+        // Race condition is possible, but thats okay for the time being :D
+        const runnerState = await readRunnerState();
+        if (runnerState && runnerState.pid !== process.pid) {
+          logger.debug('[RUNNER RUN] Somehow a different runner was started without killing us. We should kill ourselves.')
+          requestShutdown('exception', 'A different runner was started without killing us. We should kill ourselves.')
+        }
+
+        // Heartbeat
+        try {
+          const updatedState: RunnerLocallyPersistedState = {
+            pid: process.pid,
+            httpPort: controlPort,
+            startTime: fileState.startTime,
+            startedWithCliVersion: packageJson.version,
+            startedWithCliMtimeMs,
+            lastHeartbeat: new Date().toLocaleString(),
+            runnerLogPath: fileState.runnerLogPath
+          };
+          writeRunnerState(updatedState);
+          if (process.env.DEBUG) {
+            logger.debug(`[RUNNER RUN] Health check completed at ${updatedState.lastHeartbeat}`);
+          }
+        } catch (error) {
+          logger.debug('[RUNNER RUN] Failed to write heartbeat', error);
+        }
+      } finally {
+        heartbeatRunning = false;
+      }
     }, heartbeatIntervalMs); // Every 60 seconds in production
 
     // Setup signal handlers
