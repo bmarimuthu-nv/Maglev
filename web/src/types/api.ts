@@ -8,7 +8,6 @@ import type {
 export type {
     AgentState,
     AttachmentMetadata,
-    PermissionMode,
     Session,
     SessionSummary,
     SessionSummaryMetadata,

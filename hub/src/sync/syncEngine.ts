@@ -9,7 +9,6 @@
 
 import type {
     Metadata,
-    PermissionMode,
     Session,
     SyncEvent,
     TerminalPair,
@@ -214,7 +213,6 @@ export class SyncEngine {
         time: number
         thinking?: boolean
         mode?: 'local' | 'remote'
-        permissionMode?: PermissionMode
         model?: string | null
     }): void {
         this.sessionCache.handleSessionAlive(payload)
@@ -449,12 +447,11 @@ export class SyncEngine {
     async approvePermission(
         sessionId: string,
         requestId: string,
-        mode?: PermissionMode,
         allowTools?: string[],
         decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort',
         answers?: Record<string, string[]> | Record<string, { answers: string[] }>
     ): Promise<void> {
-        await this.rpcGateway.approvePermission(sessionId, requestId, mode, allowTools, decision, answers)
+        await this.rpcGateway.approvePermission(sessionId, requestId, allowTools, decision, answers)
     }
 
     async denyPermission(
@@ -524,7 +521,6 @@ export class SyncEngine {
     async applySessionConfig(
         sessionId: string,
         config: {
-            permissionMode?: PermissionMode
             model?: string | null
         }
     ): Promise<void> {
@@ -534,7 +530,6 @@ export class SyncEngine {
         }
         const obj = result as {
             applied?: {
-                permissionMode?: Session['permissionMode']
                 model?: Session['model']
             }
         }

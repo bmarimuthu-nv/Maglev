@@ -248,7 +248,6 @@ export default {
   // Misc
   'misc.noMachines': 'No machines available',
   'misc.machine': 'Machine',
-  'misc.permissionMode': 'Permission Mode',
   'misc.model': 'Model',
   'misc.loading': 'Loading…',
   'misc.loadOlder': 'Load older',

@@ -1,5 +1,3 @@
-import { isPermissionModeAllowedForFlavor } from '@maglev/protocol'
-import { PermissionModeSchema } from '@maglev/protocol/schemas'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
@@ -16,7 +14,6 @@ const answersSchema = z.union([
 ])
 
 const approveBodySchema = z.object({
-    mode: PermissionModeSchema.optional(),
     allowTools: z.array(z.string()).optional(),
     decision: decisionSchema.optional(),
     answers: answersSchema.optional()
@@ -54,17 +51,10 @@ export function createPermissionsRoutes(getSyncEngine: () => SyncEngine | null):
             return c.json({ error: 'Request not found' }, 404)
         }
 
-        const mode = parsed.data.mode
-        if (mode !== undefined) {
-            const flavor = session.metadata?.flavor ?? 'shell'
-            if (!isPermissionModeAllowedForFlavor(mode, flavor)) {
-                return c.json({ error: 'Invalid permission mode for session flavor' }, 400)
-            }
-        }
         const allowTools = parsed.data.allowTools
         const decision = parsed.data.decision
         const answers = parsed.data.answers
-        await engine.approvePermission(sessionId, requestId, mode, allowTools, decision, answers)
+        await engine.approvePermission(sessionId, requestId, allowTools, decision, answers)
         return c.json({ ok: true })
     })
 

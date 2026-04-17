@@ -11,7 +11,6 @@ import type {
     GitCommandResponse,
     HubConfigResponse,
     MachinePathsExistsResponse,
-    PermissionMode,
     PushSubscriptionPayload,
     PushUnsubscribePayload,
     PushVapidPublicKeyResponse,
@@ -364,12 +363,6 @@ export class ApiClient {
         })
     }
 
-    async setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/permission-mode`, {
-            method: 'POST',
-            body: JSON.stringify({ mode })
-        })
-    }
 
     async approvePermission(
         sessionId: string,

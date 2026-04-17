@@ -1,10 +1,8 @@
 import {
     AgentStateSchema,
     AttachmentMetadataSchema,
-    MetadataSchema,
-    PermissionModeSchema
+    MetadataSchema
 } from '@maglev/protocol/schemas'
-import type { PermissionMode } from '@maglev/protocol/types'
 import { z } from 'zod'
 
 export type {
@@ -13,7 +11,6 @@ export type {
     Metadata,
     Session
 } from '@maglev/protocol/types'
-export type SessionPermissionMode = PermissionMode
 export type SessionModel = string | null
 
 export { AgentStateSchema, AttachmentMetadataSchema, MetadataSchema }
@@ -76,8 +73,7 @@ export const CreateSessionResponseSchema = z.object({
         agentStateVersion: z.number(),
         thinking: z.boolean(),
         thinkingAt: z.number(),
-        model: z.string().nullable(),
-        permissionMode: PermissionModeSchema.optional()
+        model: z.string().nullable()
     })
 })
 

@@ -28,8 +28,7 @@ function createSession(overrides?: Partial<Session>): Session {
         agentStateVersion: 1,
         thinking: false,
         thinkingAt: 1,
-        model: 'gpt-5.4',
-        permissionMode: 'default'
+        model: 'gpt-5.4'
     }
 
     return {

@@ -16,8 +16,7 @@ import type {
     AgentState,
     Metadata,
     Session,
-    SessionModel,
-    SessionPermissionMode
+    SessionModel
 } from './types'
 import { AgentStateSchema, MetadataSchema } from './types'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
@@ -187,7 +186,6 @@ export class ApiSessionClient extends EventEmitter {
         thinking: boolean,
         mode: 'local' | 'remote',
         runtime?: {
-            permissionMode?: SessionPermissionMode
             model?: SessionModel
         }
     ): void {

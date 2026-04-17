@@ -1,7 +1,6 @@
 import type { ClientToServerEvents } from '@maglev/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import type { PermissionMode } from '@maglev/protocol/types'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import type { CliSocketWithData } from '../../socketTypes'
@@ -26,7 +25,6 @@ type SessionAlivePayload = {
     time: number
     thinking?: boolean
     mode?: 'local' | 'remote'
-    permissionMode?: PermissionMode
     model?: string | null
 }
 

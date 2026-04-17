@@ -1,5 +1,5 @@
 import { AgentStateSchema, MetadataSchema } from '@maglev/protocol/schemas'
-import type { PermissionMode, Session } from '@maglev/protocol/types'
+import type { Session } from '@maglev/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
@@ -96,8 +96,7 @@ export class SessionCache {
             agentStateVersion: stored.agentStateVersion,
             thinking: existing?.thinking ?? false,
             thinkingAt: existing?.thinkingAt ?? 0,
-            model: stored.model,
-            permissionMode: existing?.permissionMode
+            model: stored.model
         }
 
         this.sessions.set(sessionId, session)
@@ -117,7 +116,6 @@ export class SessionCache {
         time: number
         thinking?: boolean
         mode?: 'local' | 'remote'
-        permissionMode?: PermissionMode
         model?: string | null
     }): void {
         const t = clampAliveTime(payload.time)
@@ -128,7 +126,6 @@ export class SessionCache {
 
         const wasActive = session.active
         const wasThinking = session.thinking
-        const previousPermissionMode = session.permissionMode
         const previousModel = session.model
 
         session.active = true
@@ -140,9 +137,6 @@ export class SessionCache {
             activeAt: session.activeAt,
             updatedAt: t
         })
-        if (payload.permissionMode !== undefined) {
-            session.permissionMode = payload.permissionMode
-        }
         if (payload.model !== undefined) {
             if (payload.model !== session.model) {
                 this.store.sessions.setSessionModel(payload.sid, payload.model, session.namespace, {
@@ -154,11 +148,10 @@ export class SessionCache {
 
         const now = Date.now()
         const lastBroadcastAt = this.lastBroadcastAtBySessionId.get(session.id) ?? 0
-        const modeChanged = previousPermissionMode !== session.permissionMode
-            || previousModel !== session.model
+        const modelChanged = previousModel !== session.model
         const shouldBroadcast = (!wasActive && session.active)
             || (wasThinking !== session.thinking)
-            || modeChanged
+            || modelChanged
             || (now - lastBroadcastAt > 10_000)
 
         if (shouldBroadcast) {
@@ -170,7 +163,6 @@ export class SessionCache {
                     active: true,
                     activeAt: session.activeAt,
                     thinking: session.thinking,
-                    permissionMode: session.permissionMode,
                     model: session.model
                 }
             })
@@ -243,7 +235,6 @@ export class SessionCache {
     applySessionConfig(
         sessionId: string,
         config: {
-            permissionMode?: PermissionMode
             model?: string | null
         }
     ): void {
@@ -252,9 +243,6 @@ export class SessionCache {
             return
         }
 
-        if (config.permissionMode !== undefined) {
-            session.permissionMode = config.permissionMode
-        }
         if (config.model !== undefined) {
             if (config.model !== session.model) {
                 const updated = this.store.sessions.setSessionModel(sessionId, config.model, session.namespace, {
