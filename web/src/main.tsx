@@ -44,9 +44,9 @@ async function bootstrap() {
 
     const updateSW = registerSW({
         onNeedRefresh() {
-            if (confirm('New version available! Reload to update?')) {
-                updateSW(true)
-            }
+            // Auto-update after a brief delay instead of using a blocking confirm()
+            console.log('New version available, updating...')
+            setTimeout(() => updateSW(true), 1000)
         },
         onOfflineReady() {
             console.log('App ready for offline use')

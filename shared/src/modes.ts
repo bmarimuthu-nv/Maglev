@@ -17,7 +17,7 @@ export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
     acceptEdits: 'Accept Edits',
     plan: 'Plan Mode',
     ask: 'Ask Mode',
-    bypassPermissions: 'Yolo',
+    bypassPermissions: 'Bypass Permissions',
     'read-only': 'Read Only',
     'safe-yolo': 'Safe Yolo',
     yolo: 'Yolo'

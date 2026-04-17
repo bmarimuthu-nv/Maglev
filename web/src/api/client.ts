@@ -120,12 +120,13 @@ export class ApiClient {
                     return await this.request<T>(path, init, attempt + 1, refreshed)
                 }
             }
-            throw new Error('Session expired. Please sign in again.')
+            throw new ApiError('Session expired. Please sign in again.', 401)
         }
 
         if (!res.ok) {
             const body = await res.text().catch(() => '')
-            throw new Error(`HTTP ${res.status} ${res.statusText}: ${body}`)
+            const code = parseErrorCode(body)
+            throw new ApiError(`HTTP ${res.status} ${res.statusText}: ${body}`, res.status, code, body || undefined)
         }
 
         return await res.json() as T
