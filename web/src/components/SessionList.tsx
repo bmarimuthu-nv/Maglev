@@ -188,7 +188,7 @@ function getTerminalSupervisionTone(session: SessionSummary): string {
     return ''
 }
 
-function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
+export function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
     const byId = new Map(groupSessions.map((session) => [session.id, session]))
     const visited = new Set<string>()
 

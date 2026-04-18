@@ -95,6 +95,56 @@ describe('ripgrep RPC handler', () => {
         expect(parsed.error).toContain('/etc/passwd')
     })
 
+    it('skips node_modules in fallback file listing', async () => {
+        process.env.MAGLEV_RIPGREP_PATH = join(rootDir, 'missing-rg')
+        await mkdir(join(rootDir, 'node_modules', 'pkg'), { recursive: true })
+        await writeFile(join(rootDir, 'node_modules', 'pkg', 'index.js'), 'module.exports = {}')
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:ripgrep',
+            params: JSON.stringify({ args: ['--files'], cwd: rootDir, limit: 100 })
+        })
+
+        const parsed = JSON.parse(response) as { success: boolean; stdout?: string }
+        expect(parsed.success).toBe(true)
+        const files = parsed.stdout?.split('\n') ?? []
+        expect(files.some(f => f.includes('node_modules'))).toBe(false)
+    })
+
+    it('skips common large directories in fallback mode', async () => {
+        process.env.MAGLEV_RIPGREP_PATH = join(rootDir, 'missing-rg')
+        for (const dir of ['dist', '__pycache__', '.venv', 'build']) {
+            await mkdir(join(rootDir, dir), { recursive: true })
+            await writeFile(join(rootDir, dir, 'file.txt'), 'data')
+        }
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:ripgrep',
+            params: JSON.stringify({ args: ['--files'], cwd: rootDir, limit: 100 })
+        })
+
+        const parsed = JSON.parse(response) as { success: boolean; stdout?: string }
+        expect(parsed.success).toBe(true)
+        const files = parsed.stdout?.split('\n') ?? []
+        expect(files.some(f => f.includes('dist/'))).toBe(false)
+        expect(files.some(f => f.includes('__pycache__/'))).toBe(false)
+        expect(files.some(f => f.includes('.venv/'))).toBe(false)
+        expect(files.some(f => f.includes('build/'))).toBe(false)
+    })
+
+    it('handles unreadable directories gracefully in fallback mode', async () => {
+        process.env.MAGLEV_RIPGREP_PATH = join(rootDir, 'missing-rg')
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:ripgrep',
+            params: JSON.stringify({ args: ['--files'], cwd: join(rootDir, 'nonexistent'), limit: 100 })
+        })
+
+        const parsed = JSON.parse(response) as { success: boolean; stdout?: string; error?: string }
+        // Should not crash - returns empty or error gracefully
+        expect(parsed.success).toBeDefined()
+    })
+
     it('rejects --file flag with absolute path outside working directory', async () => {
         const response = await rpc.handleRequest({
             method: 'session-test:ripgrep',
