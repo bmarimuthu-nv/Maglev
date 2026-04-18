@@ -27,6 +27,7 @@ type SessionRow = {
     key: string
     sessions: SessionSummary[]
     paired: boolean
+    isChild?: boolean
 }
 
 function getGroupDisplayName(directory: string): string {
@@ -190,16 +191,16 @@ function getTerminalSupervisionTone(session: SessionSummary): string {
 function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
     const byId = new Map(groupSessions.map((session) => [session.id, session]))
     const visited = new Set<string>()
-    const rows: SessionRow[] = []
 
+    // Pass 1: match terminal pairs/supervision across ALL sessions first
+    // This ensures pair grouping takes priority over parent-child indentation
+    const pairRows = new Map<string, SessionRow>()
     for (const session of groupSessions) {
-        if (visited.has(session.id)) {
-            continue
-        }
+        if (visited.has(session.id)) continue
         const pairId = session.metadata?.terminalPair?.pairId
         const peerId = pairId
-            ? groupSessions.find((candidate) =>
-                candidate.id !== session.id && candidate.metadata?.terminalPair?.pairId === pairId
+            ? groupSessions.find((c) =>
+                c.id !== session.id && c.metadata?.terminalPair?.pairId === pairId
             )?.id
             : session.metadata?.terminalSupervision?.peerSessionId
         const peer = peerId ? byId.get(peerId) : undefined
@@ -209,21 +210,70 @@ function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
                 const bRank = (b.metadata?.terminalPair?.role ?? b.metadata?.terminalSupervision?.role) === 'worker' ? 0 : 1
                 return aRank - bRank
             })
-            ordered.forEach((item) => visited.add(item.id))
-            rows.push({
-                key: ordered.map((item) => item.id).join(':'),
+            ordered.forEach((s) => visited.add(s.id))
+            const row: SessionRow = {
+                key: ordered.map((s) => s.id).join(':'),
                 sessions: ordered,
                 paired: true
-            })
+            }
+            for (const s of ordered) pairRows.set(s.id, row)
+        }
+    }
+
+    // Pass 2: classify unpaired sessions into parent-child hierarchy
+    const childIds = new Set<string>()
+    const childrenByParent = new Map<string, SessionSummary[]>()
+    for (const session of groupSessions) {
+        if (visited.has(session.id)) continue
+        const parentId = session.metadata?.parentSessionId
+        if (parentId && byId.has(parentId)) {
+            childIds.add(session.id)
+            const siblings = childrenByParent.get(parentId) ?? []
+            siblings.push(session)
+            childrenByParent.set(parentId, siblings)
+        }
+    }
+
+    // Pass 3: assemble rows in original order — parent + children, pairs inline
+    const rows: SessionRow[] = []
+    const emitted = new Set<string>()
+
+    for (const session of groupSessions) {
+        if (emitted.has(session.id)) continue
+
+        // Emit pair row (once, at position of first member encountered)
+        const pairRow = pairRows.get(session.id)
+        if (pairRow) {
+            pairRow.sessions.forEach((s) => emitted.add(s.id))
+            rows.push(pairRow)
             continue
         }
 
-        visited.add(session.id)
+        // Skip child sessions here — they're emitted after their parent
+        if (childIds.has(session.id)) continue
+
+        emitted.add(session.id)
         rows.push({
             key: session.id,
             sessions: [session],
             paired: false
         })
+
+        // Emit children right after parent
+        const children = childrenByParent.get(session.id)
+        if (children) {
+            for (const child of children) {
+                if (!emitted.has(child.id)) {
+                    emitted.add(child.id)
+                    rows.push({
+                        key: child.id,
+                        sessions: [child],
+                        paired: false,
+                        isChild: true
+                    })
+                }
+            }
+        }
     }
 
     return rows
@@ -338,7 +388,10 @@ function SessionItem(props: {
                 undefined,
                 s.metadata.pinned,
                 s.metadata.autoRespawn,
-                startupCommand ?? s.metadata.startupCommand ?? undefined
+                startupCommand ?? s.metadata.startupCommand ?? undefined,
+                undefined,
+                undefined,
+                s.id
             )
             if (result.type === 'success') {
                 await queryClient.invalidateQueries({ queryKey: ['sessions', scopeKey] })
@@ -818,7 +871,7 @@ export function SessionList(props: {
                                                 >
                                                     <GripVerticalIcon className="text-[var(--app-hint)]" />
                                                 </div>
-                                                <div className={`flex-1 min-w-0 ${row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''}`}>
+                                                <div className={`flex-1 min-w-0 ${row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''} ${row.isChild ? 'pl-5 border-l-2 border-l-[var(--app-hint)]/20' : ''}`}>
                                                     {row.sessions.map((s, index) => (
                                                         <div
                                                             key={s.id}

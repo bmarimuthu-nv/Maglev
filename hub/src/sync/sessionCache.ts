@@ -434,6 +434,14 @@ export class SessionCache {
             changed = true
         }
 
+        // Preserve relational fields from old session
+        for (const key of ['terminalPair', 'terminalSupervision', 'parentSessionId', 'notesPath'] as const) {
+            if (oldObj[key] != null && newObj[key] == null) {
+                merged[key] = oldObj[key]
+                changed = true
+            }
+        }
+
         return changed ? merged : newMetadata
     }
 }

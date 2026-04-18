@@ -416,11 +416,12 @@ export class ApiClient {
         autoRespawn?: boolean,
         startupCommand?: string,
         sessionType?: 'simple' | 'worktree',
-        worktreeName?: string
+        worktreeName?: string,
+        parentSessionId?: string
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>('/api/hub/spawn', {
             method: 'POST',
-            body: JSON.stringify({ directory, name, notesPath, createNotesFile, pinned, autoRespawn, startupCommand, sessionType, worktreeName })
+            body: JSON.stringify({ directory, name, notesPath, createNotesFile, pinned, autoRespawn, startupCommand, sessionType, worktreeName, parentSessionId })
         })
     }
 

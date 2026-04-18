@@ -1,0 +1,153 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Terminal } from '@xterm/xterm'
+import { useAppContext } from '@/lib/app-context'
+import { useSession } from '@/hooks/queries/useSession'
+import { useTerminalSocket } from '@/hooks/useTerminalSocket'
+import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
+import { TerminalView } from '@/components/Terminal/TerminalView'
+
+function CloseIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+    )
+}
+
+function ConnectionDot(props: { status: string }) {
+    const color = props.status === 'connected'
+        ? 'bg-emerald-500'
+        : props.status === 'connecting'
+        ? 'bg-amber-400 animate-pulse'
+        : 'bg-[var(--app-hint)]'
+    return <span className={`inline-block h-2 w-2 rounded-full ${color}`} />
+}
+
+export function SplitTerminalPanel(props: {
+    sessionId: string
+    onClose: () => void
+    onNavigate?: (sessionId: string) => void
+}) {
+    const { sessionId, onClose, onNavigate } = props
+    const { api, token, baseUrl } = useAppContext()
+    const { session, isLoading: sessionLoading } = useSession(api, sessionId)
+    const isShellSession = session?.metadata?.flavor === 'shell'
+
+    const terminalId = useMemo(() => {
+        if (sessionLoading) return null
+        if (session?.metadata?.shellTerminalId) return session.metadata.shellTerminalId
+        if (isShellSession) return null
+        return getOrCreateTerminalId(baseUrl, sessionId)
+    }, [baseUrl, isShellSession, sessionId, sessionLoading, session?.metadata?.shellTerminalId])
+
+    const terminalRef = useRef<Terminal | null>(null)
+    const inputDisposableRef = useRef<{ dispose: () => void } | null>(null)
+    const connectOnceRef = useRef(false)
+    const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
+
+    const {
+        state: terminalState,
+        connect,
+        reconnectView,
+        write,
+        resize,
+        onOutput,
+        onExit,
+    } = useTerminalSocket({
+        token,
+        sessionId,
+        terminalId,
+        baseUrl,
+        createIfMissing: sessionLoading ? false : !isShellSession
+    })
+
+    useEffect(() => {
+        onOutput((data) => {
+            terminalRef.current?.write(data)
+        })
+    }, [onOutput])
+
+    useEffect(() => {
+        onExit(() => {
+            terminalRef.current?.write('\r\n[process exited]')
+            connectOnceRef.current = false
+        })
+    }, [onExit])
+
+    const handleTerminalMount = useCallback(
+        (terminal: Terminal) => {
+            terminalRef.current = terminal
+            inputDisposableRef.current?.dispose()
+            inputDisposableRef.current = terminal.onData((data) => {
+                write(data)
+            })
+            if (terminalState.status === 'connected') {
+                terminal.focus()
+            }
+        },
+        [terminalState.status, write]
+    )
+
+    const handleResize = useCallback(
+        (cols: number, rows: number) => {
+            lastSizeRef.current = { cols, rows }
+            if (!session?.active || !terminalId || sessionLoading) return
+            if (!connectOnceRef.current) {
+                connectOnceRef.current = true
+                reconnectView(cols, rows)
+            } else {
+                resize(cols, rows)
+            }
+        },
+        [session?.active, reconnectView, resize, sessionLoading, terminalId]
+    )
+
+    useEffect(() => {
+        if (!session?.active || !terminalId || sessionLoading) return
+        if (connectOnceRef.current) return
+        const size = lastSizeRef.current
+        if (!size) return
+        connectOnceRef.current = true
+        connect(size.cols, size.rows)
+    }, [session?.active, connect, sessionLoading, terminalId])
+
+    useEffect(() => {
+        return () => {
+            inputDisposableRef.current?.dispose()
+        }
+    }, [])
+
+    const sessionName = session?.metadata?.name ?? session?.metadata?.summary?.text ?? sessionId.slice(0, 8)
+
+    return (
+        <div className="flex h-full w-full flex-col overflow-hidden">
+            <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-1.5">
+                <ConnectionDot status={terminalState.status} />
+                <button
+                    type="button"
+                    onClick={() => onNavigate?.(sessionId)}
+                    className="min-w-0 flex-1 truncate text-left text-xs font-medium hover:underline"
+                    title={`Navigate to ${sessionName}`}
+                >
+                    {sessionName}
+                </button>
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                    title="Close split"
+                >
+                    <CloseIcon />
+                </button>
+            </div>
+            <div className="flex-1 overflow-hidden p-2">
+                <TerminalView
+                    onMount={handleTerminalMount}
+                    onResize={handleResize}
+                    className="h-full w-full"
+                />
+            </div>
+        </div>
+    )
+}

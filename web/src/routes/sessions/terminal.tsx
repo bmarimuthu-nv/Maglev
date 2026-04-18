@@ -5,6 +5,7 @@ import type { Terminal } from '@xterm/xterm'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useSession } from '@/hooks/queries/useSession'
+import { useSessions } from '@/hooks/queries/useSessions'
 import { useTerminalSocket } from '@/hooks/useTerminalSocket'
 import { useLongPress } from '@/hooks/useLongPress'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
@@ -15,6 +16,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { FilePreviewPanel } from '@/components/FilePreviewPanel'
+import { SplitTerminalPanel } from '@/components/SplitTerminalPanel'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
@@ -27,6 +29,10 @@ import {
 } from '@/components/ui/dialog'
 
 const TERMINAL_TAKEOVER_MESSAGE = 'Terminal is attached in another browser. Reconnect here to take over.'
+const SPLIT_TERMINAL_WIDTH_KEY = 'maglev:splitTerminalWidth'
+const SPLIT_TERMINAL_DEFAULT_WIDTH = 480
+const SPLIT_TERMINAL_MIN_WIDTH = 280
+const SPLIT_TERMINAL_MAX_WIDTH = 900
 const FILE_PREVIEW_WIDTH_KEY = 'maglev:filePreviewWidth'
 const FILE_PREVIEW_DEFAULT_WIDTH = 480
 const FILE_PREVIEW_MIN_WIDTH = 280
@@ -219,6 +225,7 @@ export default function TerminalPage() {
     const navigate = useNavigate()
     const goBack = useAppGoBack()
     const { session, isLoading: sessionLoading, refetch: refetchSession } = useSession(api, sessionId)
+    const { sessions: allSessions } = useSessions(api)
     const loadedSessionId = session?.id ?? null
     const isShellSession = session?.metadata?.flavor === 'shell'
     const terminalId = useMemo(
@@ -275,6 +282,25 @@ export default function TerminalPage() {
             return saved ? Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(FILE_PREVIEW_MAX_WIDTH, Number(saved))) : FILE_PREVIEW_DEFAULT_WIDTH
         } catch { return FILE_PREVIEW_DEFAULT_WIDTH }
     })
+    const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
+    const [splitPanelWidth, setSplitPanelWidth] = useState(() => {
+        try {
+            const saved = localStorage.getItem(SPLIT_TERMINAL_WIDTH_KEY)
+            return saved ? Math.max(SPLIT_TERMINAL_MIN_WIDTH, Math.min(SPLIT_TERMINAL_MAX_WIDTH, Number(saved))) : SPLIT_TERMINAL_DEFAULT_WIDTH
+        } catch { return SPLIT_TERMINAL_DEFAULT_WIDTH }
+    })
+
+    // Auto-restore split pane: find an active child session of the current session
+    useEffect(() => {
+        if (splitSessionId || !loadedSessionId) return
+        const child = allSessions.find(
+            (s) => s.active && s.metadata?.parentSessionId === loadedSessionId
+        )
+        if (child) {
+            setSplitSessionId(child.id)
+        }
+    }, [allSessions, loadedSessionId, splitSessionId])
+
     const { copied, copy } = useCopyToClipboard()
     const notesAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const notesSaveInFlightRef = useRef(false)
@@ -793,6 +819,45 @@ export default function TerminalPage() {
         window.addEventListener('pointerup', onUp)
     }, [previewPanelWidth])
 
+    const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault()
+        const startX = event.clientX
+        const startWidth = splitPanelWidth
+
+        const onMove = (e: globalThis.PointerEvent) => {
+            const delta = startX - e.clientX
+            const next = Math.max(SPLIT_TERMINAL_MIN_WIDTH, Math.min(SPLIT_TERMINAL_MAX_WIDTH, startWidth + delta))
+            setSplitPanelWidth(next)
+            try { localStorage.setItem(SPLIT_TERMINAL_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+        }
+
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+    }, [splitPanelWidth])
+
+    const handleSplitTerminal = useCallback(async () => {
+        if (!api || !session?.metadata?.path) return
+        try {
+            const result = await api.spawnHubSession(
+                session.metadata.path,
+                `${session.metadata.name ?? 'terminal'} (split)`,
+                undefined, undefined,
+                undefined, undefined, undefined, undefined, undefined,
+                sessionId
+            )
+            if (result.type === 'success') {
+                setSplitSessionId(result.sessionId)
+            }
+        } catch {
+            // silently fail
+        }
+    }, [api, session?.metadata?.path, session?.metadata?.name, sessionId])
+
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             const target = event.target as HTMLElement | null
@@ -1063,6 +1128,23 @@ export default function TerminalPage() {
                             </button>
                             <button
                                 type="button"
+                                onClick={() => {
+                                    if (splitSessionId) {
+                                        setSplitSessionId(null)
+                                    } else {
+                                        void handleSplitTerminal()
+                                    }
+                                }}
+                                className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                    splitSessionId
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
+                                        : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                                }`}
+                            >
+                                {splitSessionId ? 'Close split' : 'Split'}
+                            </button>
+                            <button
+                                type="button"
                                 onClick={handleTmuxCopyModeToggle}
                                 className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                                     tmuxCopyModeActive
@@ -1163,7 +1245,30 @@ export default function TerminalPage() {
                     </div>
                 </div>
 
-                {previewFilePath && loadedSessionId ? (
+                {splitSessionId ? (
+                    <div className="relative flex shrink-0 border-l border-[var(--app-border)]" style={{ width: `${splitPanelWidth}px` }}>
+                        <div
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label="Resize split terminal"
+                            onPointerDown={handleSplitResizeStart}
+                            className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
+                        >
+                            <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
+                        </div>
+                        <SplitTerminalPanel
+                            sessionId={splitSessionId}
+                            onClose={() => setSplitSessionId(null)}
+                            onNavigate={(id) => {
+                                setSplitSessionId(null)
+                                void navigate({
+                                    to: '/sessions/$sessionId/terminal',
+                                    params: { sessionId: id },
+                                })
+                            }}
+                        />
+                    </div>
+                ) : previewFilePath && loadedSessionId ? (
                     <div className="relative flex shrink-0 border-l border-[var(--app-border)]" style={{ width: `${previewPanelWidth}px` }}>
                         <div
                             role="separator"

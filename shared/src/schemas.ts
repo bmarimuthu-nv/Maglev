@@ -105,6 +105,7 @@ export const MetadataSchema = z.object({
     flavor: z.string().nullish(),
     worktree: WorktreeMetadataSchema.optional(),
     notesPath: z.string().optional(),
+    parentSessionId: z.string().optional(),
     pinned: z.boolean().optional(),
     autoRespawn: z.boolean().optional(),
     startupCommand: z.string().optional(),

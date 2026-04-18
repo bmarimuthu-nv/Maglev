@@ -26,6 +26,7 @@ export type SessionMetadataSummary = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     notesPath?: string
+    parentSessionId?: string
     pinned?: boolean
     autoRespawn?: boolean
     startupCommand?: string

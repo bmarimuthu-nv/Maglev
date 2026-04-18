@@ -10,6 +10,7 @@ const spawnBodySchema = z.object({
     name: z.string().min(1).max(255).optional(),
     notesPath: z.string().min(1).max(1024).optional(),
     createNotesFile: z.boolean().optional(),
+    parentSessionId: z.string().optional(),
     pinned: z.boolean().optional(),
     autoRespawn: z.boolean().optional(),
     startupCommand: z.string().max(4000).optional(),
@@ -94,6 +95,9 @@ export function createHubRoutes(
                         null
                     )
                 }
+            }
+            if (parsed.data.parentSessionId) {
+                await engine.setParentSessionId(result.sessionId, parsed.data.parentSessionId)
             }
             if (parsed.data.pinned !== undefined || parsed.data.autoRespawn !== undefined || parsed.data.startupCommand !== undefined) {
                 await engine.setShellSessionOptions(result.sessionId, {

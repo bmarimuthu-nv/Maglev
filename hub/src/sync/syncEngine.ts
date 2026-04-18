@@ -486,6 +486,13 @@ export class SyncEngine {
         }))
     }
 
+    async setParentSessionId(sessionId: string, parentSessionId: string): Promise<void> {
+        await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
+            ...metadata,
+            parentSessionId
+        }))
+    }
+
     async setShellSessionOptions(sessionId: string, options: { pinned?: boolean; autoRespawn?: boolean; startupCommand?: string | null }): Promise<void> {
         await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
             ...metadata,
@@ -629,6 +636,49 @@ export class SyncEngine {
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Failed to merge respawned shell session'
                 return { type: 'error', message, code: 'resume_failed' }
+            }
+
+            // Re-link supervision peers to the new session ID
+            if (metadata.terminalSupervision?.peerSessionId) {
+                const peerSessionId = metadata.terminalSupervision.peerSessionId
+                try {
+                    await this.sessionCache.updateSessionMetadataFields(peerSessionId, (peerMeta) => {
+                        if (!peerMeta.terminalSupervision || peerMeta.terminalSupervision.peerSessionId !== access.sessionId) {
+                            return peerMeta
+                        }
+                        return {
+                            ...peerMeta,
+                            terminalSupervision: {
+                                ...peerMeta.terminalSupervision,
+                                peerSessionId: spawnResult.sessionId
+                            }
+                        }
+                    })
+                } catch {
+                    // Best-effort: supervision link may be stale but won't crash
+                }
+            }
+
+            // Update terminal pair references to the new session ID
+            const pairLink = metadata.terminalPair as { pairId?: string; role?: string } | undefined
+            if (pairLink?.pairId) {
+                try {
+                    const pair = this.getTerminalPair(pairLink.pairId, namespace)
+                    if (pair) {
+                        const field = pairLink.role === 'worker' ? 'workerSessionId' : 'supervisorSessionId'
+                        if ((pair as Record<string, unknown>)[field] === access.sessionId) {
+                            await this.persistTerminalPair({
+                                ...pair,
+                                [field]: spawnResult.sessionId
+                            })
+                            await this.syncTerminalPairSessionMetadata(
+                                { ...pair, [field]: spawnResult.sessionId }
+                            )
+                        }
+                    }
+                } catch {
+                    // Best-effort: pair link may be stale but won't crash
+                }
             }
         }
 

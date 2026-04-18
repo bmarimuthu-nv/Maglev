@@ -33,6 +33,15 @@ vi.mock('@/hooks/queries/useSession', () => ({
     })
 }))
 
+vi.mock('@/hooks/queries/useSessions', () => ({
+    useSessions: () => ({
+        sessions: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn()
+    })
+}))
+
 vi.mock('@/hooks/queries/useSessionFileSearch', () => ({
     useSessionFileSearch: () => ({
         files: [],

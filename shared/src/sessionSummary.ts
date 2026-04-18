@@ -8,6 +8,7 @@ export type SessionSummaryMetadata = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     notesPath?: string
+    parentSessionId?: string
     pinned?: boolean
     autoRespawn?: boolean
     startupCommand?: string
@@ -35,6 +36,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         flavor: session.metadata.flavor ?? null,
         worktree: session.metadata.worktree,
         notesPath: session.metadata.notesPath,
+        parentSessionId: session.metadata.parentSessionId,
         pinned: session.metadata.pinned,
         autoRespawn: session.metadata.autoRespawn,
         startupCommand: session.metadata.startupCommand,
