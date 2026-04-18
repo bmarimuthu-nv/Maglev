@@ -15,6 +15,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
 import { buildSessionExplorerUrl } from '@/utils/sessionExplorer'
+import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
@@ -238,6 +239,9 @@ export default function TerminalPage() {
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const modifierStateRef = useRef<ModifierState>({ ctrl: false, alt: false })
     const touchModeRef = useRef<{ startY: number | null; active: boolean }>({ startY: null, active: false })
+    const scrollAccumRef = useRef<{ delta: number; timer: ReturnType<typeof setTimeout> | null }>({ delta: 0, timer: null })
+    const tmuxCopyModeActiveRef = useRef(false)
+    const { autoScroll } = useAutoScroll()
     const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null)
     const [ctrlActive, setCtrlActive] = useState(false)
     const [altActive, setAltActive] = useState(false)
@@ -330,6 +334,10 @@ export default function TerminalPage() {
         modifierStateRef.current = { ctrl: ctrlActive, alt: altActive }
     }, [ctrlActive, altActive])
 
+    useEffect(() => {
+        tmuxCopyModeActiveRef.current = tmuxCopyModeActive
+    }, [tmuxCopyModeActive])
+
     const resetModifiers = useCallback(() => {
         setCtrlActive(false)
         setAltActive(false)
@@ -350,6 +358,10 @@ export default function TerminalPage() {
             terminalRef.current = terminal
             inputDisposableRef.current?.dispose()
             inputDisposableRef.current = terminal.onData((data) => {
+                // Detect 'q' keypress while in tmux copy-mode to sync UI state
+                if (data === 'q' && tmuxCopyModeActiveRef.current) {
+                    setTmuxCopyModeActive(false)
+                }
                 const modifierState = modifierStateRef.current
                 dispatchSequence(data, modifierState)
             })
@@ -909,6 +921,54 @@ export default function TerminalPage() {
         touchModeRef.current = { startY: null, active: false }
     }, [])
 
+    const handleTerminalWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+        if (quickInputDisabled) return
+
+        if (tmuxCopyModeActive) {
+            // Already in copy-mode: translate wheel into tmux scroll commands
+            event.preventDefault()
+            const absDelta = Math.abs(event.deltaY)
+            if (absDelta < 5) return
+            if (absDelta > 200) {
+                // Fast scroll → page up/down
+                write(event.deltaY < 0 ? '\u001b[5~' : '\u001b[6~')
+            } else {
+                // Fine scroll → arrow keys (1 line per ~40px, capped at 5)
+                const lines = Math.max(1, Math.min(5, Math.round(absDelta / 40)))
+                const arrow = event.deltaY < 0 ? '\u001b[A' : '\u001b[B'
+                for (let i = 0; i < lines; i++) write(arrow)
+            }
+            return
+        }
+
+        // Auto-scroll detection: accumulate wheel delta and activate copy-mode on threshold
+        if (!autoScroll) return
+
+        const accum = scrollAccumRef.current
+        accum.delta += Math.abs(event.deltaY)
+
+        if (accum.timer) clearTimeout(accum.timer)
+        accum.timer = setTimeout(() => {
+            accum.delta = 0
+            accum.timer = null
+        }, 400)
+
+        if (accum.delta > 150) {
+            // Threshold reached → enter tmux copy-mode
+            sendTmuxPrefixSequence('[')
+            setTmuxCopyModeActive(true)
+            resetModifiers()
+            accum.delta = 0
+            if (accum.timer) {
+                clearTimeout(accum.timer)
+                accum.timer = null
+            }
+            // Send initial scroll in the direction the user was scrolling
+            event.preventDefault()
+            write(event.deltaY < 0 ? '\u001b[5~' : '\u001b[6~')
+        }
+    }, [autoScroll, quickInputDisabled, tmuxCopyModeActive, sendTmuxPrefixSequence, write, resetModifiers])
+
     const handleModifierToggle = useCallback(
         (modifier: 'ctrl' | 'alt') => {
             if (quickInputDisabled) {
@@ -1082,6 +1142,7 @@ export default function TerminalPage() {
                         onTouchMove={handleTerminalTouchMove}
                         onTouchEnd={handleTerminalTouchEnd}
                         onTouchCancel={handleTerminalTouchEnd}
+                        onWheel={handleTerminalWheel}
                     >
                         <TerminalView
                             onMount={handleTerminalMount}

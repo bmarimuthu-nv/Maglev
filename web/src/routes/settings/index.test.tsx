@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { I18nContext, I18nProvider } from '@/lib/i18n-context'
 import { en } from '@/lib/locales'
 import { PROTOCOL_VERSION } from '@maglev/protocol'
@@ -104,5 +104,35 @@ describe('SettingsPage', () => {
         const calledKeys = spyT.mock.calls.map((call) => call[0])
         expect(calledKeys).toContain('settings.display.appearance')
         expect(calledKeys).toContain('settings.display.appearance.system')
+    })
+})
+
+describe('SettingsPage auto-scroll toggle', () => {
+    beforeEach(() => {
+        cleanup()
+    })
+
+    afterEach(() => {
+        localStorage.removeItem('maglev-auto-scroll')
+        cleanup()
+    })
+
+    it('renders the auto-scroll toggle', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getByText('Auto-scroll')).toBeInTheDocument()
+        expect(screen.getByRole('switch')).toBeInTheDocument()
+    })
+
+    it('toggle defaults to checked (enabled)', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'true')
+    })
+
+    it('clicking the toggle disables auto-scroll', () => {
+        renderWithProviders(<SettingsPage />)
+        const toggle = screen.getByRole('switch')
+        fireEvent.click(toggle)
+        expect(toggle).toHaveAttribute('aria-checked', 'false')
+        expect(localStorage.getItem('maglev-auto-scroll')).toBe('false')
     })
 })

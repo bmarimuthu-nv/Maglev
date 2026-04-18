@@ -5,6 +5,7 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
 import { useAppearance, getAppearanceOptions, type AppearancePreference } from '@/hooks/useTheme'
 import { eventToShortcutLabel, getOpenFileShortcut, setOpenFileShortcut } from '@/lib/open-file-shortcut'
+import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { PROTOCOL_VERSION } from '@maglev/protocol'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
@@ -81,6 +82,7 @@ export default function SettingsPage() {
     const { fontScale, setFontScale } = useFontScale()
     const { appearance, setAppearance } = useAppearance()
     const [openFileShortcut, setOpenFileShortcutState] = useState(() => getOpenFileShortcut())
+    const { autoScroll, setAutoScroll } = useAutoScroll()
 
     const fontScaleOptions = getFontScaleOptions()
     const appearanceOptions = getAppearanceOptions()
@@ -341,6 +343,27 @@ export default function SettingsPage() {
                                 className="w-44 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-right text-sm text-[var(--app-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
                                 aria-label="Open file shortcut"
                             />
+                        </div>
+                        <div className="flex w-full items-center justify-between gap-4 px-3 py-3">
+                            <div className="min-w-0">
+                                <div className="text-[var(--app-fg)]">Auto-scroll</div>
+                                <div className="text-xs text-[var(--app-hint)]">Scroll gesture activates tmux copy-mode automatically</div>
+                            </div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={autoScroll}
+                                onClick={() => setAutoScroll(!autoScroll)}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                                    autoScroll ? 'bg-[var(--app-link)]' : 'bg-[var(--app-border)]'
+                                }`}
+                            >
+                                <span
+                                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                                        autoScroll ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
                         </div>
                     </div>
 

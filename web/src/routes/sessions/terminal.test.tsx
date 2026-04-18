@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import TerminalPage from './terminal'
 
 const writeMock = vi.fn()
+const AUTO_SCROLL_KEY = 'maglev-auto-scroll'
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
@@ -121,5 +122,83 @@ describe('TerminalPage paste behavior', () => {
         fireEvent.click(screen.getAllByRole('button', { name: 'Paste' }).at(-1)!)
 
         expect(await screen.findByText('Paste input')).toBeInTheDocument()
+    })
+})
+
+describe('TerminalPage auto-scroll wheel detection', () => {
+    beforeEach(() => {
+        cleanup()
+        vi.clearAllMocks()
+        localStorage.removeItem(AUTO_SCROLL_KEY)
+        Object.defineProperty(window, 'matchMedia', {
+            configurable: true,
+            writable: true,
+            value: vi.fn().mockReturnValue({
+                matches: false,
+                media: '',
+                onchange: null,
+                addListener: vi.fn(),
+                removeListener: vi.fn(),
+                addEventListener: vi.fn(),
+                removeEventListener: vi.fn(),
+                dispatchEvent: vi.fn()
+            })
+        })
+    })
+
+    afterEach(() => {
+        localStorage.removeItem(AUTO_SCROLL_KEY)
+        cleanup()
+    })
+
+    function getTerminalContainer() {
+        const views = screen.getAllByTestId('terminal-view')
+        // The wheel handler is on the parent div wrapping TerminalView
+        return views[0].parentElement!
+    }
+
+    it('activates tmux copy-mode when wheel delta exceeds threshold', () => {
+        renderWithProviders()
+        const container = getTerminalContainer()
+
+        // Fire multiple wheel events to exceed the 150px threshold
+        fireEvent.wheel(container, { deltaY: 80 })
+        fireEvent.wheel(container, { deltaY: 80 })
+
+        // Should have sent: Ctrl+B (0x02), '[' (enter copy-mode), and a page scroll
+        expect(writeMock).toHaveBeenCalledWith('\u0002')
+        expect(writeMock).toHaveBeenCalledWith('[')
+        expect(writeMock).toHaveBeenCalledWith('\u001b[6~')
+    })
+
+    it('does not activate copy-mode below the threshold', () => {
+        renderWithProviders()
+        const container = getTerminalContainer()
+
+        fireEvent.wheel(container, { deltaY: 50 })
+
+        expect(writeMock).not.toHaveBeenCalled()
+    })
+
+    it('does not activate copy-mode when auto-scroll is disabled', () => {
+        localStorage.setItem(AUTO_SCROLL_KEY, 'false')
+        renderWithProviders()
+        const container = getTerminalContainer()
+
+        fireEvent.wheel(container, { deltaY: 200 })
+
+        expect(writeMock).not.toHaveBeenCalled()
+    })
+
+    it('scrolls up with negative deltaY', () => {
+        renderWithProviders()
+        const container = getTerminalContainer()
+
+        fireEvent.wheel(container, { deltaY: -200 })
+
+        expect(writeMock).toHaveBeenCalledWith('\u0002')
+        expect(writeMock).toHaveBeenCalledWith('[')
+        // Page Up for scroll up direction
+        expect(writeMock).toHaveBeenCalledWith('\u001b[5~')
     })
 })
