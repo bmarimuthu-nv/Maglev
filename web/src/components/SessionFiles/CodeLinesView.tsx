@@ -1,6 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLongPress } from '@/hooks/useLongPress'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { useShikiLines, resolveLanguageFromPath } from '@/lib/shiki'
 
 function LinkIcon(props: { className?: string }) {
     return (
@@ -138,6 +139,7 @@ function CodeLineRow(props: {
     lineNumber: number
     text: string
     highlighted: boolean
+    syntaxContent?: ReactNode
     onOpenMenu: (line: number, point: { x: number; y: number }) => void
 }) {
     const longPressHandlers = useLongPress({
@@ -162,8 +164,8 @@ function CodeLineRow(props: {
             } min-w-[3.75rem]`}>
                 {props.lineNumber}
             </div>
-            <div className="min-w-0 flex-1 whitespace-pre-wrap break-words px-3 py-0.5 text-[var(--app-fg)]">
-                {props.text || ' '}
+            <div className="shiki min-w-0 flex-1 whitespace-pre-wrap break-words px-3 py-0.5 text-[var(--app-fg)]">
+                {props.syntaxContent ?? (props.text || ' ')}
             </div>
         </div>
     )
@@ -179,6 +181,8 @@ export function CodeLinesView(props: {
     const [menuState, setMenuState] = useState<LineMenuState | null>(null)
     const containerRef = useRef<HTMLDivElement | null>(null)
     const rows = useMemo(() => props.content.split('\n'), [props.content])
+    const language = useMemo(() => resolveLanguageFromPath(props.filePath), [props.filePath])
+    const highlightedLines = useShikiLines(props.content, language)
 
     useEffect(() => {
         if (!props.highlightedLine || !containerRef.current) {
@@ -197,6 +201,7 @@ export function CodeLinesView(props: {
                         lineNumber={index + 1}
                         text={line}
                         highlighted={props.highlightedLine === index + 1}
+                        syntaxContent={highlightedLines?.[index]}
                         onOpenMenu={(lineNumber, point) => setMenuState({ line: lineNumber, x: point.x, y: point.y })}
                     />
                 ))}

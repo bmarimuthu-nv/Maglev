@@ -10,6 +10,7 @@ import { decodeBase64, encodeBase64 } from '@/lib/utils'
 import { queryKeys } from '@/lib/query-keys'
 import { REVIEW_FILE_PATH, createEmptyReviewFile, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
+import { useShikiLines, resolveLanguageFromPath } from '@/lib/shiki'
 
 function BackIcon() {
     return (
@@ -249,6 +250,13 @@ export default function ReviewPage() {
         }
         return parseUnifiedDiff(patchQuery.data.stdout)
     }, [patchQuery.data])
+
+    const diffLanguage = useMemo(() => resolveLanguageFromPath(selectedPath), [selectedPath])
+    const diffCodeBlock = useMemo(
+        () => parsedLines.filter((l) => l.kind !== 'hunk').map((l) => l.text).join('\n'),
+        [parsedLines]
+    )
+    const highlightedDiffLines = useShikiLines(diffCodeBlock, diffLanguage)
 
     const relevantThreads = useMemo(
         () => reviewFile?.threads.filter((thread) => thread.filePath === selectedPath && thread.diffMode === mode) ?? [],
@@ -516,18 +524,24 @@ export default function ReviewPage() {
                         <div className="overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)]">
                             <div className="border-b border-[var(--app-border)] px-4 py-2 font-medium">{selectedPath}</div>
                             <div className="divide-y divide-[var(--app-divider)]">
-                                {parsedLines.map((line, index) => {
+                                {(() => {
+                                    let codeLineIdx = 0
+                                    return parsedLines.map((line, index) => {
                                     const anchor = buildThreadAnchor(line)
                                     const anchorKey = anchor ? getAnchorKey(anchor.side, anchor.line) : null
                                     const lineThreads = anchorKey ? (threadsByAnchor.get(anchorKey) ?? []) : []
                                     const highlighted = Boolean(highlightedThreadId && lineThreads.some((thread) => thread.id === highlightedThreadId))
                                     const showComposer = composerAnchorKey === anchorKey
+                                    const syntaxNode = line.kind !== 'hunk' ? highlightedDiffLines?.[codeLineIdx++] : undefined
+                                    const hasSyntax = syntaxNode !== undefined
                                     return (
                                         <div key={`${index}-${line.kind}-${line.text}`} className={highlighted ? 'bg-[var(--app-link)]/10' : ''}>
                                             {line.kind === 'hunk' ? (
                                                 <div className="px-4 py-2 text-xs font-medium text-[var(--app-hint)]">{line.text}</div>
                                             ) : (
-                                                <div className="flex items-start gap-3 px-4 py-1 font-mono text-[12px] leading-[1.35] hover:bg-[var(--app-subtle-bg)]">
+                                                <div className={`flex items-start gap-3 px-4 py-1 font-mono text-[12px] leading-[1.35] hover:bg-[var(--app-subtle-bg)] ${
+                                                    line.kind === 'add' ? 'bg-emerald-500/10' : line.kind === 'delete' ? 'bg-red-500/10' : ''
+                                                }`}>
                                                     <button
                                                         type="button"
                                                         disabled={!anchor}
@@ -546,10 +560,12 @@ export default function ReviewPage() {
                                                     <div className="w-12 shrink-0 text-right text-[var(--app-hint)]">
                                                         {'newLine' in line ? line.newLine : ''}
                                                     </div>
-                                                    <div className={`min-w-0 flex-1 whitespace-pre-wrap break-words ${
-                                                        line.kind === 'add' ? 'text-emerald-700' : line.kind === 'delete' ? 'text-red-700' : 'text-[var(--app-fg)]'
+                                                    <div className={`shiki min-w-0 flex-1 whitespace-pre-wrap break-words ${
+                                                        hasSyntax
+                                                            ? ''
+                                                            : line.kind === 'add' ? 'text-emerald-700' : line.kind === 'delete' ? 'text-red-700' : 'text-[var(--app-fg)]'
                                                     }`}>
-                                                        {line.text || ' '}
+                                                        {syntaxNode ?? (line.text || ' ')}
                                                     </div>
                                                 </div>
                                             )}
@@ -632,7 +648,8 @@ export default function ReviewPage() {
                                             ) : null}
                                         </div>
                                     )
-                                })}
+                                })
+                                })()}
                             </div>
                         </div>
                     )}
