@@ -31,7 +31,7 @@ http://<your-computer-ip>:3006
 For remote access, use:
 
 ```bash
-maglev broker
+maglev server
 maglev auth github login
 maglev hub --remote
 ```

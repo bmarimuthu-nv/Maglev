@@ -23,7 +23,7 @@ Maglev has three pieces:
 Typical workflows:
 
 - **Local only**: `maglev hub` then `maglev shell`
-- **Remote access**: `maglev broker` then `maglev hub --remote`
+- **Remote access**: `maglev server` then `maglev hub --remote`
 - **Remote spawn**: add `maglev runner start`
 
 ## Install the CLI
@@ -47,7 +47,7 @@ MAGLEV_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ### Remote mode
 
 ```bash
-maglev broker
+maglev server
 maglev auth github login
 maglev hub --remote
 ```
@@ -136,7 +136,7 @@ maglev auth login
 Linux user services:
 
 ```bash
-maglev broker service install
+maglev server service install
 maglev hub service install
 ```
 
@@ -150,6 +150,6 @@ maglev hub logs --name devbox-a --follow
 
 ## Notes
 
-- `maglev server` remains an alias for `maglev hub`
+- `maglev server` runs the remote broker for coordinating hubs across machines
 - browser access is terminal-first; sessions are shells, not chat agents
 - files and review continue to work for shell sessions

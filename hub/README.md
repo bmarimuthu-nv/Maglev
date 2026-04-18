@@ -38,7 +38,7 @@ maglev hub
 Remote mode:
 
 ```bash
-maglev broker
+maglev server
 maglev auth github login
 maglev hub --remote
 ```

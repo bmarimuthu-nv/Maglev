@@ -25,7 +25,7 @@ cd maglev
 Set up remote access once:
 
 ```bash
-maglev broker
+maglev server
 maglev auth github login
 ```
 
@@ -44,7 +44,7 @@ maglev shell
 For Linux user services:
 
 ```bash
-maglev broker service install
+maglev server service install
 maglev hub service install
 ```
 
@@ -59,7 +59,7 @@ maglev hub list
 
 For HPC/Slurm:
 
-- run `maglev broker` on the stable login node
+- run `maglev server` on the stable login node
 - run `maglev auth github login` once as the same user
 - run `maglev hub --remote` inside the job
 - broker state and auth live under `~/.maglev/`

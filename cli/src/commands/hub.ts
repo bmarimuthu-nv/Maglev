@@ -2,6 +2,7 @@ import chalk from 'chalk'
 import { randomUUID } from 'node:crypto'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
+import { hostname } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:net'
 import { configuration } from '@/configuration'
@@ -75,7 +76,7 @@ ${chalk.bold('Options:')}
   --port <port>           Listen port
   --broker-url <url>      Broker URL for remote mode
   --broker-token <token>  Optional broker registration token
-  --name <name>           Stable hub name
+  --name <name>           Stable hub name (default: hostname)
   --config <path>         Optional hub config YAML
   --debug                 Run hub in the foreground for debugging
 
@@ -171,7 +172,7 @@ function getDaemonNameFromArgs(args: string[]): string {
     if (positionalName) {
         return sanitizeDaemonName(positionalName)
     }
-    throw new Error('Hub name is required. Use `--name <name>`.')
+    return sanitizeDaemonName(hostname() || 'local')
 }
 
 function ensureHubDaemonDir(): void {
@@ -870,10 +871,8 @@ export const hubCommand: CommandDefinition = {
 
             if (context.commandArgs[0] === 'daemon-run') {
                 const passthroughArgs = context.commandArgs.slice(1)
-                const { host, port, brokerUrl, brokerToken, name, configPath } = parseHubArgs(passthroughArgs)
-                if (!name) {
-                    throw new Error('Hub name is required for daemon-run. Use `--name <name>`.')
-                }
+                const { host, port, brokerUrl, brokerToken, name: parsedName, configPath } = parseHubArgs(passthroughArgs)
+                const name = parsedName || sanitizeDaemonName(hostname() || 'local')
                 if (host) {
                     process.env.MAGLEV_LISTEN_HOST = host
                     process.env.WEBAPP_HOST = host
@@ -914,7 +913,8 @@ export const hubCommand: CommandDefinition = {
                 return
             }
 
-            const { host, port, brokerUrl, brokerToken, name, configPath, debug } = parseHubArgs(context.commandArgs)
+            const { host, port, brokerUrl, brokerToken, name: parsedName, configPath, debug } = parseHubArgs(context.commandArgs)
+            const name = parsedName || sanitizeDaemonName(hostname() || 'local')
             const allowedPrefixes = ['--host', '--port', '--broker-url', '--broker-token', '--name', '--config', '--remote', '--debug']
             const unexpectedArgs = context.commandArgs.filter((arg) => {
                 if (!arg.startsWith('-')) {
@@ -925,11 +925,8 @@ export const hubCommand: CommandDefinition = {
             if (unexpectedArgs.length > 0) {
                 throw new Error(`Unexpected arguments for hub: ${unexpectedArgs.join(' ')}. Use \`maglev hub help\`.`)
             }
-            if (!name) {
-                throw new Error('Hub name is required. Use `maglev hub --name <name> --remote`.')
-            }
             if (!debug) {
-                throw new Error('Foreground hub runs are debug-only. Use `maglev hub start --name <name> --remote`, or add `--debug` for a direct foreground run.')
+                throw new Error('Foreground hub runs are debug-only. Use `maglev hub start`, or add `--debug` for a direct foreground run.')
             }
             const resolvedArgs = await resolveHubStartupArgs(context.commandArgs)
             const resolved = parseHubArgs(resolvedArgs)

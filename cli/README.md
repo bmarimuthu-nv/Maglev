@@ -43,9 +43,9 @@ Shell-first CLI for starting local shell sessions and exposing them through the 
 - `maglev hub`
 - `maglev hub start|stop|restart|status|logs|list`
 - `maglev hub service install|start|stop|restart|status|logs|uninstall`
-- `maglev broker`
-- `maglev broker hubs`
-- `maglev broker service install|start|stop|restart|status|logs|uninstall`
+- `maglev server`
+- `maglev server hubs`
+- `maglev server service install|start|stop|restart|status|logs|uninstall`
 
 ### Diagnostics
 

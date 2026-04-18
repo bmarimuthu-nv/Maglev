@@ -2,7 +2,7 @@ import { authCommand } from './auth'
 import { runnerCommand } from './runner'
 import { doctorCommand } from './doctor'
 import { hubCommand } from './hub'
-import { brokerCommand } from './broker'
+import { serverCommand } from './server'
 import { shellCommand } from './shell'
 import type { CommandContext, CommandDefinition } from './types'
 
@@ -10,8 +10,7 @@ const COMMANDS: CommandDefinition[] = [
     authCommand,
     shellCommand,
     hubCommand,
-    brokerCommand,
-    { ...hubCommand, name: 'server' },
+    serverCommand,
     doctorCommand,
     runnerCommand
 ]
