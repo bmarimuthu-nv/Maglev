@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -131,6 +131,30 @@ function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
     )
 }
 
+function GripVerticalIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="9" cy="5" r="1" />
+            <circle cx="9" cy="12" r="1" />
+            <circle cx="9" cy="19" r="1" />
+            <circle cx="15" cy="5" r="1" />
+            <circle cx="15" cy="12" r="1" />
+            <circle cx="15" cy="19" r="1" />
+        </svg>
+    )
+}
+
 function getSessionTitle(session: SessionSummary): string {
     if (session.metadata?.name) {
         return session.metadata.name
@@ -202,6 +226,38 @@ function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
     }
 
     return rows
+}
+
+const SESSION_ORDER_KEY = 'maglev-session-order'
+
+function loadSessionOrders(): Record<string, string[]> {
+    try {
+        const raw = localStorage.getItem(SESSION_ORDER_KEY)
+        return raw ? JSON.parse(raw) : {}
+    } catch {
+        return {}
+    }
+}
+
+function saveSessionOrders(orders: Record<string, string[]>): void {
+    try {
+        localStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(orders))
+    } catch {
+        // ignore
+    }
+}
+
+function applyCustomOrder(rows: SessionRow[], savedOrder: string[] | undefined): SessionRow[] {
+    if (!savedOrder || savedOrder.length === 0) return rows
+    const orderMap = new Map(savedOrder.map((key, idx) => [key, idx]))
+    return [...rows].sort((a, b) => {
+        const aIdx = orderMap.get(a.key)
+        const bIdx = orderMap.get(b.key)
+        if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx
+        if (aIdx !== undefined) return -1
+        if (bIdx !== undefined) return 1
+        return 0
+    })
 }
 
 function formatRelativeTime(value: number, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -510,7 +566,12 @@ function SessionItem(props: {
                 description={t('dialog.archive.description', { name: sessionName })}
                 confirmLabel={t('dialog.archive.confirm')}
                 confirmingLabel={t('dialog.archive.confirming')}
-                onConfirm={archiveSession}
+                onConfirm={async () => {
+                    if (s.metadata?.pinned) {
+                        await setPinned(false)
+                    }
+                    await archiveSession()
+                }}
                 isPending={isPending}
                 destructive
             />
@@ -522,7 +583,12 @@ function SessionItem(props: {
                 description={t('dialog.delete.description', { name: sessionName })}
                 confirmLabel={t('dialog.delete.confirm')}
                 confirmingLabel={t('dialog.delete.confirming')}
-                onConfirm={deleteSession}
+                onConfirm={async () => {
+                    if (s.metadata?.pinned) {
+                        await setPinned(false)
+                    }
+                    await deleteSession()
+                }}
                 isPending={isPending}
                 destructive
             />
@@ -579,6 +645,72 @@ export function SessionList(props: {
         })
     }, [groups])
 
+    const [sessionOrders, setSessionOrders] = useState<Record<string, string[]>>(loadSessionOrders)
+    const gripActiveRef = useRef(false)
+    const draggedRef = useRef<{ groupDir: string; rowKey: string } | null>(null)
+    const [dropIndicator, setDropIndicator] = useState<{ groupDir: string; insertIndex: number } | null>(null)
+
+    const handleDragStart = useCallback((groupDir: string, rowKey: string, e: React.DragEvent) => {
+        if (!gripActiveRef.current) {
+            e.preventDefault()
+            return
+        }
+        draggedRef.current = { groupDir, rowKey }
+        e.dataTransfer.effectAllowed = 'move'
+        const el = e.currentTarget as HTMLElement
+        requestAnimationFrame(() => {
+            el.style.opacity = '0.4'
+        })
+    }, [])
+
+    const handleDragEnd = useCallback((e: React.DragEvent) => {
+        (e.currentTarget as HTMLElement).style.opacity = ''
+        gripActiveRef.current = false
+        draggedRef.current = null
+        setDropIndicator(null)
+    }, [])
+
+    const handleDragOver = useCallback((groupDir: string, rowIndex: number, e: React.DragEvent) => {
+        const dragged = draggedRef.current
+        if (!dragged || dragged.groupDir !== groupDir) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const midY = rect.top + rect.height / 2
+        const insertIndex = e.clientY < midY ? rowIndex : rowIndex + 1
+
+        setDropIndicator(prev => {
+            if (prev?.groupDir === groupDir && prev.insertIndex === insertIndex) return prev
+            return { groupDir, insertIndex }
+        })
+    }, [])
+
+    const handleDrop = (groupDir: string, orderedRows: SessionRow[], e: React.DragEvent) => {
+        e.preventDefault()
+        const dragged = draggedRef.current
+        if (!dragged || dragged.groupDir !== groupDir || !dropIndicator) return
+
+        const currentKeys = orderedRows.map(r => r.key)
+        const draggedIdx = currentKeys.indexOf(dragged.rowKey)
+        if (draggedIdx === -1) return
+
+        const newKeys = [...currentKeys]
+        newKeys.splice(draggedIdx, 1)
+
+        let insertIdx = dropIndicator.insertIndex
+        if (draggedIdx < insertIdx) insertIdx--
+
+        newKeys.splice(insertIdx, 0, dragged.rowKey)
+
+        const updated = { ...sessionOrders, [groupDir]: newKeys }
+        setSessionOrders(updated)
+        saveSessionOrders(updated)
+
+        draggedRef.current = null
+        setDropIndicator(null)
+    }
+
     return (
         <div className="mx-auto w-full max-w-content flex flex-col">
             {renderHeader ? (
@@ -601,6 +733,7 @@ export function SessionList(props: {
                 {groups.map((group) => {
                     const isCollapsed = isGroupCollapsed(group)
                     const rows = getSessionRows(group.sessions)
+                    const orderedRows = applyCustomOrder(rows, sessionOrders[group.directory])
                     return (
                         <div key={group.directory}>
                             <button
@@ -622,29 +755,60 @@ export function SessionList(props: {
                                 </div>
                             </button>
                             {!isCollapsed ? (
-                                <div className="flex flex-col divide-y divide-[var(--app-divider)] border-b border-[var(--app-divider)]">
-                                    {rows.map((row) => (
-                                        <div
-                                            key={row.key}
-                                            className={row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''}
-                                        >
-                                            {row.sessions.map((s, index) => (
+                                <div
+                                    className="flex flex-col divide-y divide-[var(--app-divider)] border-b border-[var(--app-divider)]"
+                                    onDragLeave={(e) => {
+                                        const related = e.relatedTarget as Node | null
+                                        if (!related || !e.currentTarget.contains(related)) {
+                                            setDropIndicator(null)
+                                        }
+                                    }}
+                                >
+                                    {orderedRows.map((row, rowIndex) => {
+                                        const isDropBefore = dropIndicator?.groupDir === group.directory && dropIndicator.insertIndex === rowIndex
+                                        const isDropAfter = dropIndicator?.groupDir === group.directory && dropIndicator.insertIndex === orderedRows.length && rowIndex === orderedRows.length - 1
+                                        const dropClass = isDropBefore
+                                            ? 'shadow-[inset_0_2px_0_0_#007AFF]'
+                                            : isDropAfter
+                                            ? 'shadow-[inset_0_-2px_0_0_#007AFF]'
+                                            : ''
+                                        return (
+                                            <div
+                                                key={row.key}
+                                                draggable
+                                                onDragStart={(e) => handleDragStart(group.directory, row.key, e)}
+                                                onDragEnd={handleDragEnd}
+                                                onDragOver={(e) => handleDragOver(group.directory, rowIndex, e)}
+                                                onDrop={(e) => handleDrop(group.directory, orderedRows, e)}
+                                                className={`group/drag flex items-stretch ${dropClass}`}
+                                            >
                                                 <div
-                                                    key={s.id}
-                                                    className={`${getTerminalSupervisionTone(s)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''}`}
+                                                    className="flex items-center px-1 cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity"
+                                                    onMouseDown={() => { gripActiveRef.current = true }}
+                                                    onMouseUp={() => { gripActiveRef.current = false }}
                                                 >
-                                                    <SessionItem
-                                                        session={s}
-                                                        sessions={props.sessions}
-                                                        onSelect={props.onSelect}
-                                                        showPath={false}
-                                                        api={api}
-                                                        selected={s.id === selectedSessionId}
-                                                    />
+                                                    <GripVerticalIcon className="text-[var(--app-hint)]" />
                                                 </div>
-                                            ))}
-                                        </div>
-                                    ))}
+                                                <div className={`flex-1 min-w-0 ${row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''}`}>
+                                                    {row.sessions.map((s, index) => (
+                                                        <div
+                                                            key={s.id}
+                                                            className={`${getTerminalSupervisionTone(s)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''}`}
+                                                        >
+                                                            <SessionItem
+                                                                session={s}
+                                                                sessions={props.sessions}
+                                                                onSelect={props.onSelect}
+                                                                showPath={false}
+                                                                api={api}
+                                                                selected={s.id === selectedSessionId}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
                                 </div>
                             ) : null}
                         </div>
