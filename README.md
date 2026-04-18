@@ -1,6 +1,10 @@
-# maglev
+<p align="center">
+  <img src="docs/public/logo.svg" alt="maglev" width="200">
+</p>
 
-Run AI coding sessions locally and control them remotely from your browser or phone.
+<h1 align="center">maglev</h1>
+
+<p align="center">Run AI coding sessions locally and control them remotely from your browser or phone.</p>
 
 ## Features
 
