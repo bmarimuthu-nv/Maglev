@@ -36,7 +36,6 @@ export const OpencodeDisplay: React.FC<OpencodeDisplayProps> = ({
 }) => {
     const [messages, setMessages] = useState<BufferedMessage[]>([]);
     const [model, setModel] = useState<string | null>(null);
-    const [permissionMode, setPermissionMode] = useState<string | null>(null);
     const { confirmationMode, actionInProgress } = useSwitchControls({
         onExit,
         onSwitch: onSwitchToLocal
@@ -53,10 +52,6 @@ export const OpencodeDisplay: React.FC<OpencodeDisplayProps> = ({
             const nextModel = extractTag(newMessages, 'MODEL');
             if (nextModel) {
                 setModel(nextModel);
-            }
-            const nextMode = extractTag(newMessages, 'MODE');
-            if (nextMode) {
-                setPermissionMode(nextMode);
             }
         });
 
@@ -169,11 +164,9 @@ export const OpencodeDisplay: React.FC<OpencodeDisplayProps> = ({
                             OpenCode running {onSwitchToLocal ? '(Space to switch to local, Ctrl-C to exit)' : '(Ctrl-C to exit)'}
                         </Text>
                     )}
-                    {(model || permissionMode) && (
+                    {model && (
                         <Text color="gray" dimColor>
-                            {[model ? `Model: ${model}` : null, permissionMode ? `Permission: ${permissionMode}` : null]
-                                .filter(Boolean)
-                                .join(' | ')}
+                            Model: {model}
                         </Text>
                     )}
                     {process.env.DEBUG && logPath && (

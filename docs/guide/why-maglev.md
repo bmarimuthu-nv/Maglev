@@ -41,7 +41,7 @@ For remote access, Maglev supports two practical shapes:
 1. Direct self-hosting
    - expose the hub yourself with HTTPS, a reverse proxy, Tailscale, Cloudflare Tunnel, or similar
 2. Broker-based remote access
-   - run `maglev broker` on a stable machine you control
+   - run `maglev server` on a stable machine you control
    - run `maglev hub --remote` on the machine that hosts the sessions
    - the hub opens an outbound broker connection
    - the broker routes browser HTTP, SSE, and WebSocket traffic back to that hub

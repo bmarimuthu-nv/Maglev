@@ -1,14 +1,9 @@
-import { getPermissionModesForFlavor, isPermissionModeAllowedForFlavor, toSessionSummary } from '@maglev/protocol'
-import { PermissionModeSchema } from '@maglev/protocol/schemas'
+import { toSessionSummary } from '@maglev/protocol'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
-
-const permissionModeSchema = z.object({
-    mode: PermissionModeSchema
-})
 
 const renameSessionSchema = z.object({
     name: z.string().min(1).max(255)
@@ -455,44 +450,6 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         await engine.switchSession(sessionResult.sessionId, 'remote')
         return c.json({ ok: true })
-    })
-
-    app.post('/sessions/:id/permission-mode', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-
-        const body = await c.req.json().catch(() => null)
-        const parsed = permissionModeSchema.safeParse(body)
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid body' }, 400)
-        }
-
-        const flavor = sessionResult.session.metadata?.flavor ?? 'shell'
-        const mode = parsed.data.mode
-
-        const allowedModes = getPermissionModesForFlavor(flavor)
-        if (allowedModes.length === 0) {
-            return c.json({ error: 'Permission mode not supported for session flavor' }, 400)
-        }
-
-        if (!isPermissionModeAllowedForFlavor(mode, flavor)) {
-            return c.json({ error: 'Invalid permission mode for session flavor' }, 400)
-        }
-
-        try {
-            await engine.applySessionConfig(sessionResult.sessionId, { permissionMode: mode })
-            return c.json({ ok: true })
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to apply permission mode'
-            return c.json({ error: message }, 409)
-        }
     })
 
     app.patch('/sessions/:id', async (c) => {

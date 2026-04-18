@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { SSEManager } from '../../sse/sseManager'
 import type { SyncEngine } from '../../sync/syncEngine'
@@ -8,6 +8,25 @@ import type { VisibilityState } from '../../visibility/visibilityTracker'
 import type { VisibilityTracker } from '../../visibility/visibilityTracker'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSession } from './guards'
+
+type SSETicket = {
+    userId: number
+    namespace: string
+    expiresAt: number
+}
+
+const TICKET_TTL_MS = 30_000
+const TICKET_CLEANUP_INTERVAL_MS = 60_000
+const sseTickets = new Map<string, SSETicket>()
+
+setInterval(() => {
+    const now = Date.now()
+    for (const [key, ticket] of sseTickets) {
+        if (ticket.expiresAt <= now) {
+            sseTickets.delete(key)
+        }
+    }
+}, TICKET_CLEANUP_INTERVAL_MS)
 
 function parseOptionalId(value: string | undefined): string | null {
     if (!value) {
@@ -39,19 +58,44 @@ export function createEventsRoutes(
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
+    app.post('/events/ticket', (c) => {
+        const ticket = randomBytes(32).toString('base64url')
+        sseTickets.set(ticket, {
+            userId: c.get('userId'),
+            namespace: c.get('namespace'),
+            expiresAt: Date.now() + TICKET_TTL_MS
+        })
+        return c.json({ ticket })
+    })
+
     app.get('/events', (c) => {
+        const query = c.req.query()
+
+        // Validate auth first: accept single-use ticket or JWT-derived namespace
+        let namespace = ''
+        const ticketParam = query.ticket
+        if (ticketParam) {
+            const ticketData = sseTickets.get(ticketParam)
+            if (!ticketData || ticketData.expiresAt <= Date.now()) {
+                sseTickets.delete(ticketParam)
+                return c.json({ error: 'Invalid or expired ticket' }, 401)
+            }
+            sseTickets.delete(ticketParam)
+            namespace = ticketData.namespace
+        } else {
+            namespace = c.get('namespace')
+        }
+
         const manager = getSseManager()
         if (!manager) {
             return c.json({ error: 'Not connected' }, 503)
         }
 
-        const query = c.req.query()
         const all = parseBoolean(query.all)
         const sessionId = parseOptionalId(query.sessionId)
         const machineId = parseOptionalId(query.machineId)
         const subscriptionId = randomUUID()
         const visibility = parseVisibility(query.visibility)
-        const namespace = c.get('namespace')
         let resolvedSessionId = sessionId
 
         if (sessionId || machineId) {

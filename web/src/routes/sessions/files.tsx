@@ -11,6 +11,7 @@ import { useSessionFileSearch } from '@/hooks/queries/useSessionFileSearch'
 import { rankFiles } from '@/lib/file-search'
 import { buildSessionExplorerUrl } from '@/utils/sessionExplorer'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
+import { decodePath, getUtf8ByteLength, isBinaryContent } from '@/lib/file-utils'
 import { queryKeys } from '@/lib/query-keys'
 
 type ExplorerTab = {
@@ -153,25 +154,6 @@ function SearchResultRow(props: {
     )
 }
 
-function decodePath(value: string): string {
-    if (!value) return ''
-    const decoded = decodeBase64(value)
-    return decoded.ok ? decoded.text : value
-}
-
-function getUtf8ByteLength(value: string): number {
-    return new TextEncoder().encode(value).length
-}
-
-function isBinaryContent(content: string): boolean {
-    if (!content) return false
-    if (content.includes('\0')) return true
-    const nonPrintable = content.split('').filter((char) => {
-        const code = char.charCodeAt(0)
-        return code < 32 && code !== 9 && code !== 10 && code !== 13
-    }).length
-    return nonPrintable / content.length > 0.1
-}
 
 function getTabId(path: string): string {
     return path

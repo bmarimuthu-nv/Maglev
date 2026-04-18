@@ -559,7 +559,7 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>maglev broker · ${htmlEscape(brokerHost)}</title>
+  <title>maglev server · ${htmlEscape(brokerHost)}</title>
   <style>
     :root {
       color-scheme: dark;
@@ -767,7 +767,7 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
 <body>
   <main>
     <section class="hero">
-      <h1>maglev broker · ${htmlEscape(brokerHost)}</h1>
+      <h1>maglev server · ${htmlEscape(brokerHost)}</h1>
       <p>Self-hosted control plane for remote hubs. Active cards show the launch folders and branch layout each hub was started with.</p>
       <div class="hero-grid">
         <div class="hero-stat">
@@ -806,7 +806,7 @@ function renderBrokerLogin(config: BrokerConfig, errorMessage?: string): string 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>maglev broker login</title>
+  <title>maglev server login</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; background: #f4f7fb; color: #102038; margin: 0; }
     main { max-width: 34rem; margin: 8vh auto; background: white; border-radius: 16px; box-shadow: 0 20px 70px rgba(16,32,56,.12); padding: 2rem; }

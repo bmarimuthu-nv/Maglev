@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import type { PermissionMode } from './modes'
 
 export type SocketErrorReason = 'namespace-missing' | 'access-denied' | 'not-found'
 
@@ -125,7 +124,6 @@ export interface ClientToServerEvents {
         time: number
         thinking: boolean
         mode?: 'local' | 'remote'
-        permissionMode?: PermissionMode
         model?: string | null
     }) => void
     'session-end': (data: { sid: string; time: number }) => void

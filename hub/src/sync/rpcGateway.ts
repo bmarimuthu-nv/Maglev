@@ -1,4 +1,3 @@
-import type { PermissionMode } from '@maglev/protocol/types'
 import type { Server } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 
@@ -81,7 +80,6 @@ export class RpcGateway {
     async approvePermission(
         sessionId: string,
         requestId: string,
-        mode?: PermissionMode,
         allowTools?: string[],
         decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort',
         answers?: Record<string, string[]> | Record<string, { answers: string[] }>
@@ -89,7 +87,6 @@ export class RpcGateway {
         await this.sessionRpc(sessionId, 'permission', {
             id: requestId,
             approved: true,
-            mode,
             allowTools,
             decision,
             answers
@@ -119,7 +116,6 @@ export class RpcGateway {
     async requestSessionConfig(
         sessionId: string,
         config: {
-            permissionMode?: PermissionMode
             model?: string | null
         }
     ): Promise<unknown> {

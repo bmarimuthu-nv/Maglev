@@ -2,7 +2,7 @@
  * Design decisions:
  * - Logging should be done only through file for debugging, otherwise we might disturb the interactive shell session
  * - Use info for logs that are useful to the user - this is our UI
- * - File output location: ~/.handy/logs/<date time in local timezone>.log
+ * - File output location: ~/.maglev/logs/<date time in local timezone>.log
  */
 
 import chalk from 'chalk'
@@ -126,6 +126,7 @@ class Logger {
   ): void {
     if (!process.env.DEBUG) {
       this.debug(`In production, skipping message inspection`)
+      return
     }
 
     // Some of our messages are huge, but we still want to show them in the logs

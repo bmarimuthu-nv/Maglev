@@ -1,20 +1,22 @@
-# maglev
+<p align="center">
+  <img src="docs/public/logo.svg" alt="maglev" width="200">
+</p>
 
-Run shell sessions locally and control them remotely through the web app, PWA, or Telegram Mini App.
+<h1 align="center">maglev</h1>
 
-> **Why maglev?** maglev is a local-first alternative to Happy. See [Why Not Happy?](docs/guide/why-maglev.md) for the architectural differences.
+<p align="center">Run AI coding sessions locally and control them remotely from your browser or phone.</p>
 
 ## Features
 
-- **Terminal-first** - Every session is a shell session.
-- **Remote terminal access** - Reconnect from your browser or phone without losing the running shell.
-- **Files and review** - Browse files, inspect diffs, and review changes remotely.
-- **Runner support** - Spawn shell sessions remotely on connected machines.
-- **Self-hosted remote access** - Broker + hub flow; no hosted relay app required.
+- **Terminal-first** — Every session is a shell wrapping an AI agent (Claude Code, Codex, Gemini).
+- **Remote access** — Reconnect from your browser or phone without losing the running shell.
+- **Files and review** — Browse files, inspect diffs, and review changes remotely.
+- **Runner support** — Spawn sessions remotely on connected machines.
+- **Self-hosted** — No hosted relay required. Run everything on your own machines.
 
-## Getting Started
+## Quick Start
 
-Install:
+### Install
 
 ```bash
 git clone https://github.com/bmarimuthu-nv/Maglev.git maglev
@@ -22,55 +24,82 @@ cd maglev
 ./install.sh
 ```
 
-Set up remote access once:
+### Local use (single machine)
 
 ```bash
-maglev broker
-maglev auth github login
+maglev hub start        # start the hub (uses hostname as name, runs in background)
+maglev shell            # start an AI session connected to the hub
 ```
 
-Start the hub:
+That's it. Open the web UI at `http://localhost:3006` to monitor sessions remotely.
+
+### Remote access (across machines)
+
+For accessing hubs behind firewalls or on ephemeral nodes (e.g., HPC/Slurm jobs):
 
 ```bash
-maglev hub --remote
+# On a stable, reachable machine (login node):
+maglev server                    # run the relay server
+maglev auth github login         # authenticate once
+
+# On the compute node:
+maglev hub start --remote        # hub registers with the relay
+maglev shell                     # start a session
 ```
 
-Start a shell session:
+The relay proxies traffic so your browser/phone can reach hubs that aren't directly accessible.
+
+### Managing hubs
 
 ```bash
-maglev shell
+maglev hub status       # check if hub is running
+maglev hub logs -f      # tail hub logs
+maglev hub stop         # stop the hub
+maglev hub list         # list all hub daemons
 ```
 
-For Linux user services:
+### Linux systemd services (optional)
+
+For persistent background services that survive logouts:
 
 ```bash
-maglev broker service install
-maglev hub service install
+maglev hub service install       # hub as systemd user service
+maglev server service install    # relay as systemd user service
 ```
 
-For named hub daemons in containers or non-systemd environments:
+## Commands
 
-```bash
-maglev hub start --name devbox-a --remote
-maglev hub status --name devbox-a
-maglev hub logs --name devbox-a --follow
-maglev hub list
-```
+| Command | Purpose |
+|---------|---------|
+| `maglev shell` | Start an AI coding session (default command) |
+| `maglev hub start\|stop\|status\|logs\|list` | Manage the hub daemon |
+| `maglev server` | Run the relay server for remote access |
+| `maglev auth login\|logout\|status` | Manage API token |
+| `maglev auth github login\|logout` | GitHub OAuth for remote access |
+| `maglev runner start\|stop\|status\|list` | Manage the background runner |
+| `maglev doctor [clean]` | Diagnostics and cleanup |
 
-For HPC/Slurm:
-
-- run `maglev broker` on the stable login node
-- run `maglev auth github login` once as the same user
-- run `maglev hub --remote` inside the job
-- broker state and auth live under `~/.maglev/`
-
-Requirements:
+## Requirements
 
 - `git`
 - `bun`
-- access to the GitLab repo
 - `ripgrep` (`rg`) on `PATH`, or set `MAGLEV_RIPGREP_PATH`
 - `difftastic` (`difft`) on `PATH`, or set `MAGLEV_DIFFTASTIC_PATH`
+
+## Build from Source
+
+```bash
+bun install
+bun run build:standalone
+```
+
+Or build and install in one step:
+
+```bash
+./build_and_install.sh
+```
+
+Both install scripts default to `$HOME/.local/bin`. Override with `MAGLEV_INSTALL_DIR`.
 
 ## Docs
 
@@ -80,22 +109,3 @@ Requirements:
 - [App](docs/guide/pwa.md)
 - [Why Maglev](docs/guide/why-maglev.md)
 - [FAQ](docs/guide/faq.md)
-
-## Build from Source
-
-```bash
-bun install
-bun run build:standalone
-```
-
-Build and install in one step:
-
-```bash
-./build_and_install.sh
-```
-
-Both install scripts default to `$HOME/.local/bin`. Override with `MAGLEV_INSTALL_DIR` to install elsewhere.
-
-## Credits
-
-Maglev takes its name from "哈皮", a Chinese transliteration of [Happy](https://github.com/slopus/happy). Great credit to the original project.

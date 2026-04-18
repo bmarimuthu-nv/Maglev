@@ -1,18 +1,30 @@
 import type { ClientToServerEvents } from '@maglev/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import type { PermissionMode } from '@maglev/protocol/types'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { AccessErrorReason, AccessResult } from './types'
+
+const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024 // 2 MB
+
+function estimateJsonSize(value: unknown): number {
+    if (value === null || value === undefined) return 4
+    if (typeof value === 'string') return value.length
+    if (typeof value === 'number' || typeof value === 'boolean') return 8
+    // For objects/arrays, use a fast stringification estimate
+    try {
+        return JSON.stringify(value).length
+    } catch {
+        return MAX_PAYLOAD_BYTES + 1
+    }
+}
 
 type SessionAlivePayload = {
     sid: string
     time: number
     thinking?: boolean
     mode?: 'local' | 'remote'
-    permissionMode?: PermissionMode
     model?: string | null
 }
 
@@ -60,6 +72,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
 
         const { sid, metadata, expectedVersion } = parsed.data
+        if (estimateJsonSize(metadata) > MAX_PAYLOAD_BYTES) {
+            cb({ result: 'error' })
+            return
+        }
         const sessionAccess = resolveSessionAccess(sid)
         if (!sessionAccess.ok) {
             cb({ result: 'error', reason: sessionAccess.reason })
@@ -107,6 +123,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
 
         const { sid, agentState, expectedVersion } = parsed.data
+        if (agentState !== null && estimateJsonSize(agentState) > MAX_PAYLOAD_BYTES) {
+            cb({ result: 'error' })
+            return
+        }
         const sessionAccess = resolveSessionAccess(sid)
         if (!sessionAccess.ok) {
             cb({ result: 'error', reason: sessionAccess.reason })

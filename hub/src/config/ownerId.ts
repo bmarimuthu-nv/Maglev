@@ -12,7 +12,7 @@ function generateOwnerId(): number {
     const bytes = randomBytes(6)
     let value = 0
     for (const byte of bytes) {
-        value = (value << 8) + byte
+        value = value * 256 + byte
     }
     return value > 0 ? value : 1
 }

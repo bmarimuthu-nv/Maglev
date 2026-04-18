@@ -250,7 +250,6 @@ export default {
   // Misc
   'misc.noMachines': '无可用机器',
   'misc.machine': '机器',
-  'misc.permissionMode': '权限模式',
   'misc.model': '模型',
   'misc.loading': '加载中…',
   'misc.loadOlder': '加载更早的',

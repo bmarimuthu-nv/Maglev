@@ -70,8 +70,7 @@ export class ApiClient {
             agentStateVersion: raw.agentStateVersion,
             thinking: raw.thinking,
             thinkingAt: raw.thinkingAt,
-            model: raw.model,
-            permissionMode: raw.permissionMode
+            model: raw.model
         }
     }
 

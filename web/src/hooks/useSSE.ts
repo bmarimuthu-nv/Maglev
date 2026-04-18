@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { isObject, toSessionSummary } from '@maglev/protocol'
+import type { ApiClient } from '@/api/client'
 import type {
     Session,
     SessionResponse,
@@ -95,12 +96,16 @@ function getVisibilityState(): VisibilityState {
 
 function buildEventsUrl(
     baseUrl: string,
-    token: string,
+    auth: { ticket: string } | { token: string },
     subscription: SSESubscription,
     visibility: VisibilityState
 ): string {
     const params = new URLSearchParams()
-    params.set('token', token)
+    if ('ticket' in auth) {
+        params.set('ticket', auth.ticket)
+    } else {
+        params.set('token', auth.token)
+    }
     params.set('visibility', visibility)
     if (subscription.all) {
         params.set('all', 'true')
@@ -127,6 +132,7 @@ export function useSSE(options: {
     enabled: boolean
     token: string
     baseUrl: string
+    api?: ApiClient | null
     subscription?: SSESubscription
     onEvent: (event: SyncEvent) => void
     onConnect?: () => void
@@ -141,6 +147,7 @@ export function useSSE(options: {
     const onDisconnectRef = useRef(options.onDisconnect)
     const onErrorRef = useRef(options.onError)
     const onToastRef = useRef(options.onToast)
+    const apiRef = useRef(options.api)
     const eventSourceRef = useRef<EventSource | null>(null)
     const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const pendingInvalidationsRef = useRef<{
@@ -173,6 +180,10 @@ export function useSSE(options: {
         onToastRef.current = options.onToast
     }, [options.onToast])
 
+    useEffect(() => {
+        apiRef.current = options.api
+    }, [options.api])
+
     const subscription = options.subscription ?? {}
 
     const subscriptionKey = useMemo(() => {
@@ -199,15 +210,37 @@ export function useSSE(options: {
         }
 
         setSubscriptionId(null)
-        const url = buildEventsUrl(options.baseUrl, options.token, {
-            ...subscription,
-            sessionId: subscription.sessionId ?? undefined
-        }, getVisibilityState())
-        const eventSource = new EventSource(url)
+        let cancelled = false
+        let activeEventSource: EventSource | null = null
+        let activeWatchdog: ReturnType<typeof setInterval> | null = null
+
+        const connectWithAuth = (auth: { ticket: string } | { token: string }) => {
+            if (cancelled) return
+            const url = buildEventsUrl(options.baseUrl, auth, {
+                ...subscription,
+                sessionId: subscription.sessionId ?? undefined
+            }, getVisibilityState())
+            const eventSource = new EventSource(url)
+            activeEventSource = eventSource
+            eventSourceRef.current = eventSource
+            lastActivityAtRef.current = Date.now()
+            setupEventSource(eventSource)
+        }
+
+        // Fetch a short-lived ticket, falling back to raw token
+        const api = apiRef.current
+        if (api) {
+            api.createEventsTicket()
+                .then((res) => connectWithAuth({ ticket: res.ticket }))
+                .catch(() => connectWithAuth({ token: options.token }))
+        } else {
+            connectWithAuth({ token: options.token })
+        }
+
+        const setupEventSource = (eventSource: EventSource) => {
+
         let disconnectNotified = false
         let reconnectRequested = false
-        eventSourceRef.current = eventSource
-        lastActivityAtRef.current = Date.now()
 
         const scheduleReconnect = () => {
             const attempt = reconnectAttemptRef.current
@@ -483,9 +516,15 @@ export function useSSE(options: {
             }
             requestReconnect('heartbeat-timeout')
         }, HEARTBEAT_WATCHDOG_INTERVAL_MS)
+        activeWatchdog = watchdogTimer
+
+        } // end setupEventSource
 
         return () => {
-            clearInterval(watchdogTimer)
+            cancelled = true
+            if (activeWatchdog) {
+                clearInterval(activeWatchdog)
+            }
             if (invalidationTimerRef.current) {
                 clearTimeout(invalidationTimerRef.current)
                 invalidationTimerRef.current = null
@@ -496,8 +535,10 @@ export function useSSE(options: {
                 clearTimeout(reconnectTimerRef.current)
                 reconnectTimerRef.current = null
             }
-            eventSource.close()
-            if (eventSourceRef.current === eventSource) {
+            if (activeEventSource) {
+                activeEventSource.close()
+            }
+            if (eventSourceRef.current === activeEventSource) {
                 eventSourceRef.current = null
             }
             setSubscriptionId(null)

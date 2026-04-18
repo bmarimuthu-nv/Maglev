@@ -1,8 +1,19 @@
 import chalk from 'chalk'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
-import { maybeAutoStartServer } from '@/utils/autoStartServer'
+import { configuration } from '@/configuration'
 import type { CommandDefinition } from './types'
+
+async function checkHubReachable(apiUrl: string): Promise<boolean> {
+    try {
+        const response = await fetch(`${apiUrl}/health`, {
+            signal: AbortSignal.timeout(3000)
+        })
+        return response.ok
+    } catch {
+        return false
+    }
+}
 
 export const shellCommand: CommandDefinition = {
     name: 'shell',
@@ -35,7 +46,15 @@ ${chalk.bold('Usage:')}
             }
 
             await initializeToken()
-            await maybeAutoStartServer()
+
+            const hubReachable = await checkHubReachable(configuration.apiUrl)
+            if (!hubReachable) {
+                console.error(chalk.red('No running hub found.'))
+                console.error(chalk.gray(`Could not reach hub at ${configuration.apiUrl}`))
+                console.error(chalk.gray('Start one with: maglev hub start'))
+                process.exit(1)
+            }
+
             await authAndSetupMachineIfNeeded()
 
             const { runShell } = await import('@/shell/runShell')

@@ -1,4 +1,3 @@
-import type { PermissionMode } from '@maglev/protocol/types'
 import type { Store, StoredMachine, StoredSession } from '../../../store'
 import { configuration } from '../../../configuration'
 import type { RpcRegistry } from '../../rpcRegistry'
@@ -17,7 +16,6 @@ type SessionAlivePayload = {
     time: number
     thinking?: boolean
     mode?: 'local' | 'remote'
-    permissionMode?: PermissionMode
     model?: string | null
 }
 

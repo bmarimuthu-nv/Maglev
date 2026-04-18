@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
@@ -151,6 +151,8 @@ export default function ReviewPage() {
     const highlightedThreadId = typeof search.threadId === 'string' ? search.threadId : null
     const [reviewFile, setReviewFile] = useState<ReviewFile | null>(null)
     const [reviewHash, setReviewHash] = useState<string | null>(null)
+    const reviewHashRef = useRef<string | null>(null)
+    const mutationQueueRef = useRef<Promise<unknown>>(Promise.resolve())
     const [reviewError, setReviewError] = useState<string | null>(null)
     const [saveError, setSaveError] = useState<string | null>(null)
     const [isSaving, setIsSaving] = useState(false)
@@ -199,6 +201,7 @@ export default function ReviewPage() {
                     if (errorMessage.toLowerCase().includes('enoent') || errorMessage.toLowerCase().includes('no such file')) {
                         setReviewFile(createEmptyReviewFile(workspacePath))
                         setReviewHash(null)
+                        reviewHashRef.current = null
                         setReviewError(null)
                         return
                     }
@@ -217,6 +220,7 @@ export default function ReviewPage() {
                 }
                 setReviewFile(parsed.value)
                 setReviewHash(result.hash ?? null)
+                reviewHashRef.current = result.hash ?? null
                 setReviewError(null)
             })
             .catch((error) => {
@@ -299,23 +303,28 @@ export default function ReviewPage() {
             updatedAt: Date.now()
         }
         const encoded = encodeBase64(`${JSON.stringify(payload, null, 2)}\n`)
-        const result = await api.writeSessionFile(sessionId, REVIEW_FILE_PATH, encoded, reviewHash)
+        const result = await api.writeSessionFile(sessionId, REVIEW_FILE_PATH, encoded, reviewHashRef.current)
         setIsSaving(false)
         if (!result.success) {
             setSaveError(result.error ?? 'Failed to save review file')
             return false
         }
         setReviewFile(payload)
-        setReviewHash(result.hash ?? null)
+        const nextHash = result.hash ?? null
+        setReviewHash(nextHash)
+        reviewHashRef.current = nextHash
         return true
-    }, [api, reviewHash, sessionId, summary?.currentBranch, summary?.defaultBranch, summary?.mergeBase])
+    }, [api, sessionId, summary?.currentBranch, summary?.defaultBranch, summary?.mergeBase])
 
     const mutateReview = useCallback(async (mutator: (current: ReviewFile) => ReviewFile) => {
         if (!reviewFile) {
             return
         }
         const next = mutator(reviewFile)
-        await persistReviewFile(next)
+        // Serialize mutations so each one uses the latest reviewHash
+        const queued = mutationQueueRef.current.then(() => persistReviewFile(next)).catch(() => {})
+        mutationQueueRef.current = queued
+        await queued
     }, [persistReviewFile, reviewFile])
 
     const handleCreateThread = useCallback(async (line: ParsedDiffLine) => {

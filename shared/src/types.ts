@@ -20,9 +20,4 @@ export type {
 
 export type { SessionSummary, SessionSummaryMetadata } from './sessionSummary'
 
-export type {
-    AgentFlavor,
-    PermissionMode,
-    PermissionModeOption,
-    PermissionModeTone
-} from './modes'
+export type AgentFlavor = 'shell'

@@ -11,7 +11,6 @@ import type {
     GitCommandResponse,
     HubConfigResponse,
     MachinePathsExistsResponse,
-    PermissionMode,
     PushSubscriptionPayload,
     PushUnsubscribePayload,
     PushVapidPublicKeyResponse,
@@ -120,12 +119,13 @@ export class ApiClient {
                     return await this.request<T>(path, init, attempt + 1, refreshed)
                 }
             }
-            throw new Error('Session expired. Please sign in again.')
+            throw new ApiError('Session expired. Please sign in again.', 401)
         }
 
         if (!res.ok) {
             const body = await res.text().catch(() => '')
-            throw new Error(`HTTP ${res.status} ${res.statusText}: ${body}`)
+            const code = parseErrorCode(body)
+            throw new ApiError(`HTTP ${res.status} ${res.statusText}: ${body}`, res.status, code, body || undefined)
         }
 
         return await res.json() as T
@@ -211,6 +211,12 @@ export class ApiClient {
         }
 
         return await res.json() as AuthResponse
+    }
+
+    async createEventsTicket(): Promise<{ ticket: string }> {
+        return await this.request<{ ticket: string }>('/api/events/ticket', {
+            method: 'POST'
+        })
     }
 
     async getSessions(): Promise<SessionsResponse> {
@@ -357,12 +363,6 @@ export class ApiClient {
         })
     }
 
-    async setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/permission-mode`, {
-            method: 'POST',
-            body: JSON.stringify({ mode })
-        })
-    }
 
     async approvePermission(
         sessionId: string,

@@ -1,23 +1,18 @@
 import { authCommand } from './auth'
-import { connectCommand } from './connect'
 import { runnerCommand } from './runner'
 import { doctorCommand } from './doctor'
-import { notifyCommand } from './notify'
 import { hubCommand } from './hub'
-import { brokerCommand } from './broker'
+import { serverCommand } from './server'
 import { shellCommand } from './shell'
 import type { CommandContext, CommandDefinition } from './types'
 
 const COMMANDS: CommandDefinition[] = [
     authCommand,
-    connectCommand,
     shellCommand,
     hubCommand,
-    brokerCommand,
-    { ...hubCommand, name: 'server' },
+    serverCommand,
     doctorCommand,
-    runnerCommand,
-    notifyCommand
+    runnerCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()

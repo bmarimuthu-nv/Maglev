@@ -168,6 +168,10 @@ export class Store {
         }
     }
 
+    close(): void {
+        this.closeDatabaseQuietly()
+    }
+
     private closeDatabaseQuietly(): void {
         try {
             this.db.close()

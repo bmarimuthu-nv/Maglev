@@ -177,7 +177,7 @@ async function main() {
             throw new Error('Remote mode requires MAGLEV_GITHUB_OAUTH_CLIENT_ID')
         }
         if (!effectiveBrokerUrl) {
-            throw new Error('Remote mode requires a broker URL. Start `maglev broker` first so it can write ~/.maglev/broker-url, or pass `--broker-url`.')
+            throw new Error('Remote mode requires a broker URL. Start `maglev server` first so it can write ~/.maglev/broker-url, or pass `--broker-url`.')
         }
         if (!config.githubOwner && config.githubAllowedUsers.length === 0 && !config.githubAuth) {
             throw new Error('Remote mode requires MAGLEV_GITHUB_OWNER, MAGLEV_GITHUB_ALLOWED_USERS, or a bootstrapped owner from `maglev auth github login`')

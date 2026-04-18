@@ -29,6 +29,12 @@ export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<W
             return
         }
 
+        // Allow ticket-based SSE access to bypass JWT auth (ticket is validated in the route handler)
+        if (path === '/api/events' && c.req.query().ticket) {
+            await next()
+            return
+        }
+
         const authorization = c.req.header('authorization')
         const tokenFromHeader = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined
         const tokenFromQuery = path === '/api/events' ? c.req.query().token : undefined

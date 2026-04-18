@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { serveStatic } from 'hono/bun'
 import { configuration } from '../configuration'
@@ -62,6 +62,12 @@ function resolveStaticAssetPath(distDir: string, requestPath: string): string | 
         return null
     }
     const assetPath = join(distDir, normalizedPath)
+    // Prevent path traversal: resolved path must stay under distDir
+    const resolvedDistDir = resolve(distDir)
+    const resolvedAssetPath = resolve(assetPath)
+    if (!resolvedAssetPath.startsWith(resolvedDistDir + '/') && resolvedAssetPath !== resolvedDistDir) {
+        return null
+    }
     if (!existsSync(assetPath)) {
         return null
     }

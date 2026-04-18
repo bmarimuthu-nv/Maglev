@@ -114,6 +114,41 @@ async function runFileListFallback(
     }
 }
 
+/**
+ * Validate ripgrep args to prevent path escapes beyond the working directory.
+ * Rejects absolute path arguments that could read files outside the workspace.
+ */
+function validateRipgrepArgs(args: string[], workingDirectory: string): string | null {
+    // Flags that accept a path as the next argument
+    const pathFlags = new Set([
+        '--file', '-f', '--ignore-file', '--pre', '--type-add',
+        '--type-list', '--sort-files'
+    ])
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i]
+        // Reject absolute paths used as positional arguments (search paths)
+        // These could escape the working directory
+        if (arg.startsWith('/') && !arg.startsWith('--')) {
+            const validation = validatePath(arg, workingDirectory)
+            if (!validation.valid) {
+                return `Path argument not allowed: ${arg}`
+            }
+        }
+        // If a flag takes a path value, validate it
+        if (pathFlags.has(arg) && i + 1 < args.length) {
+            const value = args[i + 1]
+            if (value.startsWith('/')) {
+                const validation = validatePath(value, workingDirectory)
+                if (!validation.valid) {
+                    return `Path in ${arg} not allowed: ${value}`
+                }
+            }
+            i++ // skip the value
+        }
+    }
+    return null
+}
+
 export function registerRipgrepHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
     rpcHandlerManager.registerHandler<RipgrepRequest, RipgrepResponse>('ripgrep', async (data) => {
         logger.debug('Ripgrep request with args:', data.args, 'cwd:', data.cwd)
@@ -123,6 +158,11 @@ export function registerRipgrepHandlers(rpcHandlerManager: RpcHandlerManager, wo
             if (!validation.valid) {
                 return rpcError(validation.error ?? 'Invalid working directory')
             }
+        }
+
+        const argsError = validateRipgrepArgs(data.args, workingDirectory)
+        if (argsError) {
+            return rpcError(argsError)
         }
 
         if (typeof data.limit === 'number' && Number.isFinite(data.limit) && data.limit > 0) {

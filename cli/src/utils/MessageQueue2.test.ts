@@ -178,9 +178,9 @@ describe('MessageQueue2', () => {
     });
 
     it('should batch messages with enhanced mode hashing', async () => {
-        
+
         interface EnhancedMode {
-            permissionMode: string;
+            context: string;
             model?: string;
             fallbackModel?: string;
             customSystemPrompt?: string;
@@ -188,139 +188,139 @@ describe('MessageQueue2', () => {
             allowedTools?: string[];
             disallowedTools?: string[];
         }
-        
+
         const queue = new MessageQueue2<EnhancedMode>(mode => hashObject(mode));
-        
+
         // Push messages with different enhanced mode combinations
-        queue.push('message1', { permissionMode: 'default', model: 'sonnet' });
-        queue.push('message2', { permissionMode: 'default', model: 'sonnet' }); // Same as message1
-        queue.push('message3', { permissionMode: 'default', model: 'haiku' }); // Different model
-        queue.push('message4', { permissionMode: 'default', fallbackModel: 'opus' }); // Different fallback model
-        queue.push('message5', { permissionMode: 'default', customSystemPrompt: 'You are a helpful assistant' }); // Different system prompt
-        queue.push('message6', { permissionMode: 'default', appendSystemPrompt: 'Be concise' }); // Different append prompt
-        queue.push('message7', { permissionMode: 'default', allowedTools: ['Read', 'Write'] }); // Different allowed tools
-        queue.push('message8', { permissionMode: 'default', disallowedTools: ['Bash'] }); // Different disallowed tools
-        
-        // First batch - same permission mode and model
+        queue.push('message1', { context: 'default', model: 'sonnet' });
+        queue.push('message2', { context: 'default', model: 'sonnet' }); // Same as message1
+        queue.push('message3', { context: 'default', model: 'haiku' }); // Different model
+        queue.push('message4', { context: 'default', fallbackModel: 'opus' }); // Different fallback model
+        queue.push('message5', { context: 'default', customSystemPrompt: 'You are a helpful assistant' }); // Different system prompt
+        queue.push('message6', { context: 'default', appendSystemPrompt: 'Be concise' }); // Different append prompt
+        queue.push('message7', { context: 'default', allowedTools: ['Read', 'Write'] }); // Different allowed tools
+        queue.push('message8', { context: 'default', disallowedTools: ['Bash'] }); // Different disallowed tools
+
+        // First batch - same context and model
         const result1 = await queue.waitForMessagesAndGetAsString();
         expect(result1).not.toBeNull();
         expect(result1?.message).toBe('message1\nmessage2');
-        expect(result1?.mode).toEqual({ permissionMode: 'default', model: 'sonnet' });
+        expect(result1?.mode).toEqual({ context: 'default', model: 'sonnet' });
         expect(queue.size()).toBe(6); // remaining messages in queue
-        
-        // Second batch - same permission mode, different model
+
+        // Second batch - same context, different model
         const result2 = await queue.waitForMessagesAndGetAsString();
         expect(result2).not.toBeNull();
         expect(result2?.message).toBe('message3');
-        expect(result2?.mode).toEqual({ permissionMode: 'default', model: 'haiku' });
+        expect(result2?.mode).toEqual({ context: 'default', model: 'haiku' });
         expect(queue.size()).toBe(5); // remaining messages
-        
-        // Third batch - same permission mode, fallback model
+
+        // Third batch - same context, fallback model
         const result3 = await queue.waitForMessagesAndGetAsString();
         expect(result3).not.toBeNull();
         expect(result3?.message).toBe('message4');
-        expect(result3?.mode).toEqual({ permissionMode: 'default', fallbackModel: 'opus' });
+        expect(result3?.mode).toEqual({ context: 'default', fallbackModel: 'opus' });
         expect(queue.size()).toBe(4); // remaining messages
-        
-        // Fourth batch - same permission mode, custom system prompt
+
+        // Fourth batch - same context, custom system prompt
         const result4 = await queue.waitForMessagesAndGetAsString();
         expect(result4).not.toBeNull();
         expect(result4?.message).toBe('message5');
-        expect(result4?.mode).toEqual({ permissionMode: 'default', customSystemPrompt: 'You are a helpful assistant' });
+        expect(result4?.mode).toEqual({ context: 'default', customSystemPrompt: 'You are a helpful assistant' });
         expect(queue.size()).toBe(3); // remaining messages
-        
-        // Fifth batch - same permission mode, append system prompt
+
+        // Fifth batch - same context, append system prompt
         const result5 = await queue.waitForMessagesAndGetAsString();
         expect(result5).not.toBeNull();
         expect(result5?.message).toBe('message6');
-        expect(result5?.mode).toEqual({ permissionMode: 'default', appendSystemPrompt: 'Be concise' });
+        expect(result5?.mode).toEqual({ context: 'default', appendSystemPrompt: 'Be concise' });
         expect(queue.size()).toBe(2); // remaining messages
-        
-        // Sixth batch - same permission mode, allowed tools
+
+        // Sixth batch - same context, allowed tools
         const result6 = await queue.waitForMessagesAndGetAsString();
         expect(result6).not.toBeNull();
         expect(result6?.message).toBe('message7');
-        expect(result6?.mode).toEqual({ permissionMode: 'default', allowedTools: ['Read', 'Write'] });
+        expect(result6?.mode).toEqual({ context: 'default', allowedTools: ['Read', 'Write'] });
         expect(queue.size()).toBe(1); // one message left
-        
-        // Seventh batch - same permission mode, disallowed tools
+
+        // Seventh batch - same context, disallowed tools
         const result7 = await queue.waitForMessagesAndGetAsString();
         expect(result7).not.toBeNull();
         expect(result7?.message).toBe('message8');
-        expect(result7?.mode).toEqual({ permissionMode: 'default', disallowedTools: ['Bash'] });
+        expect(result7?.mode).toEqual({ context: 'default', disallowedTools: ['Bash'] });
         expect(queue.size()).toBe(0);
     });
 
     it('should handle null reset values properly', async () => {
-        
+
         interface EnhancedMode {
-            permissionMode: string;
+            context: string;
             model?: string;
             customSystemPrompt?: string;
             allowedTools?: string[];
             disallowedTools?: string[];
         }
-        
+
         const queue = new MessageQueue2<EnhancedMode>(mode => hashObject(mode));
-        
+
         // Push messages with null reset behavior
-        queue.push('message1', { permissionMode: 'default', model: 'sonnet' });
-        queue.push('message2', { permissionMode: 'default', model: undefined }); // Reset
-        queue.push('message3', { permissionMode: 'default', customSystemPrompt: 'You are helpful' });
-        queue.push('message4', { permissionMode: 'default', customSystemPrompt: undefined }); // Reset
-        queue.push('message5', { permissionMode: 'default', allowedTools: ['Read', 'Write'] });
-        queue.push('message6', { permissionMode: 'default', allowedTools: undefined }); // Reset
-        queue.push('message7', { permissionMode: 'default', disallowedTools: ['Bash'] });
-        queue.push('message8', { permissionMode: 'default', disallowedTools: undefined }); // Reset
-        
+        queue.push('message1', { context: 'default', model: 'sonnet' });
+        queue.push('message2', { context: 'default', model: undefined }); // Reset
+        queue.push('message3', { context: 'default', customSystemPrompt: 'You are helpful' });
+        queue.push('message4', { context: 'default', customSystemPrompt: undefined }); // Reset
+        queue.push('message5', { context: 'default', allowedTools: ['Read', 'Write'] });
+        queue.push('message6', { context: 'default', allowedTools: undefined }); // Reset
+        queue.push('message7', { context: 'default', disallowedTools: ['Bash'] });
+        queue.push('message8', { context: 'default', disallowedTools: undefined }); // Reset
+
         // First batch - model set
         const result1 = await queue.waitForMessagesAndGetAsString();
         expect(result1).not.toBeNull();
         expect(result1?.message).toBe('message1');
-        expect(result1?.mode).toEqual({ permissionMode: 'default', model: 'sonnet' });
-        
+        expect(result1?.mode).toEqual({ context: 'default', model: 'sonnet' });
+
         // Second batch - model reset (undefined)
         const result2 = await queue.waitForMessagesAndGetAsString();
         expect(result2).not.toBeNull();
         expect(result2?.message).toBe('message2');
-        expect(result2?.mode).toEqual({ permissionMode: 'default' }); // No model field
-        
+        expect(result2?.mode).toEqual({ context: 'default' }); // No model field
+
         // Third batch - custom system prompt set
         const result3 = await queue.waitForMessagesAndGetAsString();
         expect(result3).not.toBeNull();
         expect(result3?.message).toBe('message3');
-        expect(result3?.mode).toEqual({ permissionMode: 'default', customSystemPrompt: 'You are helpful' });
-        
+        expect(result3?.mode).toEqual({ context: 'default', customSystemPrompt: 'You are helpful' });
+
         // Fourth batch - custom system prompt reset (undefined)
         const result4 = await queue.waitForMessagesAndGetAsString();
         expect(result4).not.toBeNull();
         expect(result4?.message).toBe('message4');
-        expect(result4?.mode).toEqual({ permissionMode: 'default' }); // No customSystemPrompt field
-        
+        expect(result4?.mode).toEqual({ context: 'default' }); // No customSystemPrompt field
+
         // Fifth batch - allowed tools set
         const result5 = await queue.waitForMessagesAndGetAsString();
         expect(result5).not.toBeNull();
         expect(result5?.message).toBe('message5');
-        expect(result5?.mode).toEqual({ permissionMode: 'default', allowedTools: ['Read', 'Write'] });
-        
+        expect(result5?.mode).toEqual({ context: 'default', allowedTools: ['Read', 'Write'] });
+
         // Sixth batch - allowed tools reset (undefined)
         const result6 = await queue.waitForMessagesAndGetAsString();
         expect(result6).not.toBeNull();
         expect(result6?.message).toBe('message6');
-        expect(result6?.mode).toEqual({ permissionMode: 'default' }); // No allowedTools field
-        
+        expect(result6?.mode).toEqual({ context: 'default' }); // No allowedTools field
+
         // Seventh batch - disallowed tools set
         const result7 = await queue.waitForMessagesAndGetAsString();
         expect(result7).not.toBeNull();
         expect(result7?.message).toBe('message7');
-        expect(result7?.mode).toEqual({ permissionMode: 'default', disallowedTools: ['Bash'] });
-        
+        expect(result7?.mode).toEqual({ context: 'default', disallowedTools: ['Bash'] });
+
         // Eighth batch - disallowed tools reset (undefined)
         const result8 = await queue.waitForMessagesAndGetAsString();
         expect(result8).not.toBeNull();
         expect(result8?.message).toBe('message8');
-        expect(result8?.mode).toEqual({ permissionMode: 'default' }); // No disallowedTools field
-        
+        expect(result8?.mode).toEqual({ context: 'default' }); // No disallowedTools field
+
         expect(queue.size()).toBe(0);
     });
 

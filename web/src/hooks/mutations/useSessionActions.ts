@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { PermissionMode } from '@/types/api'
 import { useAppContext } from '@/lib/app-context'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -12,7 +11,6 @@ export function useSessionActions(
     abortSession: () => Promise<void>
     archiveSession: () => Promise<void>
     switchSession: () => Promise<void>
-    setPermissionMode: (mode: PermissionMode) => Promise<void>
     renameSession: (name: string) => Promise<void>
     setPinned: (pinned: boolean) => Promise<void>
     setShellOptions: (options: { startupCommand?: string | null; autoRespawn?: boolean; pinned?: boolean }) => Promise<void>
@@ -61,16 +59,6 @@ export function useSessionActions(
                 throw new Error('Session unavailable')
             }
             await api.switchSession(sessionId)
-        },
-        onSuccess: () => void invalidateSession(),
-    })
-
-    const permissionMutation = useMutation({
-        mutationFn: async (mode: PermissionMode) => {
-            if (!api || !sessionId) {
-                throw new Error('Session unavailable')
-            }
-            await api.setPermissionMode(sessionId, mode)
         },
         onSuccess: () => void invalidateSession(),
     })
@@ -199,7 +187,6 @@ export function useSessionActions(
         abortSession: abortMutation.mutateAsync,
         archiveSession: archiveMutation.mutateAsync,
         switchSession: switchMutation.mutateAsync,
-        setPermissionMode: permissionMutation.mutateAsync,
         renameSession: renameMutation.mutateAsync,
         setPinned: pinMutation.mutateAsync,
         setShellOptions: shellOptionsMutation.mutateAsync,
@@ -214,7 +201,6 @@ export function useSessionActions(
         isPending: abortMutation.isPending
             || archiveMutation.isPending
             || switchMutation.isPending
-            || permissionMutation.isPending
             || renameMutation.isPending
             || pinMutation.isPending
             || shellOptionsMutation.isPending

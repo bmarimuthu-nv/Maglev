@@ -10,14 +10,10 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { queryKeys } from '@/lib/query-keys'
 import { langAlias, useShikiHighlighter } from '@/lib/shiki'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
+import { decodePath, getUtf8ByteLength, isBinaryContent } from '@/lib/file-utils'
 
 const MAX_COPYABLE_FILE_BYTES = 1_000_000
 
-function decodePath(value: string): string {
-    if (!value) return ''
-    const decoded = decodeBase64(value)
-    return decoded.ok ? decoded.text : value
-}
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -96,19 +92,6 @@ function resolveLanguage(path: string): string | undefined {
     return langAlias[ext] ?? ext
 }
 
-function getUtf8ByteLength(value: string): number {
-    return new TextEncoder().encode(value).length
-}
-
-function isBinaryContent(content: string): boolean {
-    if (!content) return false
-    if (content.includes('\0')) return true
-    const nonPrintable = content.split('').filter((char) => {
-        const code = char.charCodeAt(0)
-        return code < 32 && code !== 9 && code !== 10 && code !== 13
-    }).length
-    return nonPrintable / content.length > 0.1
-}
 
 function extractCommandError(result: GitCommandResponse | undefined): string | null {
     if (!result) return null

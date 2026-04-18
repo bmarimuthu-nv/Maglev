@@ -53,12 +53,18 @@ export class InvalidateSync {
 
 
     private _doSync = async () => {
-        await backoff(async () => {
-            if (this._stopped) {
-                return;
-            }
-            await this._command();
-        });
+        try {
+            await backoff(async () => {
+                if (this._stopped) {
+                    return;
+                }
+                await this._command();
+            });
+        } catch {
+            this._invalidated = false;
+            this._notifyPendings();
+            return;
+        }
         if (this._stopped) {
             this._notifyPendings();
             return;

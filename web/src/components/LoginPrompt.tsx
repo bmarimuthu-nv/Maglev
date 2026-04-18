@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiClient } from '@/api/client'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { Spinner } from '@/components/Spinner'
@@ -85,6 +85,8 @@ export function LoginPrompt(props: LoginPromptProps) {
         }
     }, [accessToken, props, t, isBindMode, supportsAccessToken])
 
+    const githubAbortRef = useRef<AbortController | null>(null)
+
     const handleGitHubLogin = useCallback(async () => {
         if (props.requireServerUrl && !props.serverUrl) {
             setServerError(t('login.server.required'))
@@ -95,6 +97,11 @@ export function LoginPrompt(props: LoginPromptProps) {
             setError('GitHub login is unavailable.')
             return
         }
+
+        // Abort any previous polling loop
+        githubAbortRef.current?.abort()
+        const abortController = new AbortController()
+        githubAbortRef.current = abortController
 
         setIsLoading(true)
         setError(null)
@@ -113,7 +120,9 @@ export function LoginPrompt(props: LoginPromptProps) {
             let intervalMs = Math.max(started.interval, 1) * 1000
 
             while (Date.now() < deadline) {
+                if (abortController.signal.aborted) return
                 await new Promise(resolve => setTimeout(resolve, intervalMs))
+                if (abortController.signal.aborted) return
                 const polled = await client.pollGitHubDeviceAuth(started.deviceCode)
                 if (polled.status === 'authorization_pending') {
                     continue
@@ -137,11 +146,22 @@ export function LoginPrompt(props: LoginPromptProps) {
 
             throw new Error('GitHub sign-in timed out. Start again.')
         } catch (e) {
-            setError(e instanceof Error ? e.message : 'GitHub sign-in failed')
+            if (!abortController.signal.aborted) {
+                setError(e instanceof Error ? e.message : 'GitHub sign-in failed')
+            }
         } finally {
-            setIsLoading(false)
+            if (!abortController.signal.aborted) {
+                setIsLoading(false)
+            }
         }
     }, [props, t])
+
+    // Cleanup polling on unmount
+    useEffect(() => {
+        return () => {
+            githubAbortRef.current?.abort()
+        }
+    }, [])
 
     useEffect(() => {
         let cancelled = false
