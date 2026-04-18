@@ -33,6 +33,7 @@ export function useSessionFileSearch(
             return { files: response.files ?? [], error: null }
         },
         enabled,
+        retry: false,
     })
 
     const queryError = result.error instanceof Error

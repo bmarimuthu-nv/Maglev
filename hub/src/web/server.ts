@@ -92,6 +92,11 @@ function createWebApp(options: {
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
+    app.onError((err, c) => {
+        console.error('[Web] Unhandled route error:', err.message)
+        return c.json({ error: 'Internal server error' }, 500)
+    })
+
     app.use('*', logger())
 
     if (options.remoteMode) {
