@@ -215,7 +215,7 @@ export default function TerminalPage() {
     const { api, token, baseUrl } = useAppContext()
     const navigate = useNavigate()
     const goBack = useAppGoBack()
-    const { session, isLoading: sessionLoading } = useSession(api, sessionId)
+    const { session, isLoading: sessionLoading, refetch: refetchSession } = useSession(api, sessionId)
     const loadedSessionId = session?.id ?? null
     const isShellSession = session?.metadata?.flavor === 'shell'
     const terminalId = useMemo(
@@ -252,9 +252,10 @@ export default function TerminalPage() {
     const [textDialogOpen, setTextDialogOpen] = useState(false)
     const [terminalTextSnapshot, setTerminalTextSnapshot] = useState('')
     const [notesDialogOpen, setNotesDialogOpen] = useState(false)
+    const [notesSetupOpen, setNotesSetupOpen] = useState(false)
+    const [notesSetupSaving, setNotesSetupSaving] = useState(false)
     const [notesContent, setNotesContent] = useState('')
     const [notesSavedContent, setNotesSavedContent] = useState('')
-    const [notesHash, setNotesHash] = useState<string | null>(null)
     const [notesLoading, setNotesLoading] = useState(false)
     const [notesSaving, setNotesSaving] = useState(false)
     const [notesError, setNotesError] = useState<string | null>(null)
@@ -557,7 +558,7 @@ export default function TerminalPage() {
     }, [api, errorMessage, isRespawningPinnedShell, navigate, pinnedShell, session])
 
     const saveNotes = useCallback(async (content: string) => {
-        if (!api || !notesPath) {
+        if (!api) {
             return false
         }
         if (notesSaveInFlightRef.current) {
@@ -568,17 +569,11 @@ export default function TerminalPage() {
         setNotesSaving(true)
         setNotesError(null)
         try {
-            const result = await api.writeSessionFile(
-                sessionId,
-                notesPath,
-                encodeBase64(content),
-                notesHash
-            )
-            if (!result.success) {
-                throw new Error(result.error ?? 'Failed to save notes')
+            const result = await api.writeSessionNotes(sessionId, content)
+            if (result.error) {
+                throw new Error(result.error)
             }
             setNotesSavedContent(content)
-            setNotesHash(result.hash ?? null)
             return true
         } catch (error) {
             setNotesError(error instanceof Error ? error.message : 'Failed to save notes')
@@ -587,29 +582,25 @@ export default function TerminalPage() {
             notesSaveInFlightRef.current = false
             setNotesSaving(false)
         }
-    }, [api, notesHash, notesPath, sessionId])
+    }, [api, sessionId])
 
-    const createNotesFile = useCallback(async () => {
-        if (!api || !notesPath) {
-            return
-        }
-        setNotesSaving(true)
-        setNotesError(null)
+    const handleNotesSetup = useCallback(async () => {
+        if (!api) return
+        setNotesSetupSaving(true)
         try {
-            const result = await api.writeSessionFile(sessionId, notesPath, '', null)
-            if (!result.success) {
-                throw new Error(result.error ?? 'Failed to create notes file')
-            }
+            await api.writeSessionNotes(sessionId, '')
+            await refetchSession()
+            setNotesSetupOpen(false)
             setNotesContent('')
             setNotesSavedContent('')
-            setNotesHash(result.hash ?? null)
             setNotesLoaded(true)
+            setNotesDialogOpen(true)
         } catch (error) {
-            setNotesError(error instanceof Error ? error.message : 'Failed to create notes file')
+            setNotesError(error instanceof Error ? error.message : 'Failed to create notes')
         } finally {
-            setNotesSaving(false)
+            setNotesSetupSaving(false)
         }
-    }, [api, notesPath, sessionId])
+    }, [api, refetchSession, sessionId])
 
     const runNotesEditorCommand = useCallback((command: 'undo' | 'redo') => {
         const textarea = notesTextareaRef.current
@@ -689,39 +680,27 @@ export default function TerminalPage() {
         let cancelled = false
         setNotesLoading(true)
         setNotesError(null)
-        void api.readSessionFile(sessionId, notesPath)
+        void api.readSessionNotes(sessionId)
             .then((result) => {
-                if (cancelled) {
-                    return
-                }
+                if (cancelled) return
                 if (!result.success) {
                     setNotesError(result.error ?? 'Failed to load notes')
                     setNotesLoaded(false)
                     return
                 }
-                const decoded = result.content ? decodeBase64(result.content) : { ok: true, text: '' }
-                if (!decoded.ok) {
-                    setNotesError('Failed to decode notes file')
-                    setNotesLoaded(false)
-                    return
-                }
-                setNotesContent(decoded.text)
-                setNotesSavedContent(decoded.text)
-                setNotesHash(result.hash ?? null)
+                const text = result.content ?? ''
+                setNotesContent(text)
+                setNotesSavedContent(text)
                 setNotesLoaded(true)
-                updateNotesSearchMatchCount(decoded.text, notesSearchQuery)
+                updateNotesSearchMatchCount(text, notesSearchQuery)
             })
             .catch((error) => {
-                if (cancelled) {
-                    return
-                }
+                if (cancelled) return
                 setNotesError(error instanceof Error ? error.message : 'Failed to load notes')
                 setNotesLoaded(false)
             })
             .finally(() => {
-                if (!cancelled) {
-                    setNotesLoading(false)
-                }
+                if (!cancelled) setNotesLoading(false)
             })
         return () => {
             cancelled = true
@@ -1042,17 +1021,19 @@ export default function TerminalPage() {
                             >
                                 Text
                             </button>
-                            {notesPath ? (
-                                <button
-                                    type="button"
-                                    onClick={() => {
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (notesPath) {
                                         setNotesDialogOpen(true)
-                                    }}
-                                    className="shrink-0 rounded-full border border-[var(--app-border)] px-3 py-1 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
-                                >
-                                    Notes
-                                </button>
-                            ) : null}
+                                    } else {
+                                        setNotesSetupOpen(true)
+                                    }
+                                }}
+                                className="shrink-0 rounded-full border border-[var(--app-border)] px-3 py-1 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            >
+                                Notes
+                            </button>
                             <button
                                 type="button"
                                 onClick={handleTmuxCopyModeToggle}
@@ -1311,6 +1292,30 @@ export default function TerminalPage() {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={notesSetupOpen} onOpenChange={setNotesSetupOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Create Notes</DialogTitle>
+                        <DialogDescription>
+                            Attach a notes file to this session. Notes are stored in ~/.maglev/notes/ and won't affect your git tree.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="mt-4 flex flex-col gap-3">
+                        {notesError ? (
+                            <div className="text-xs text-red-500">{notesError}</div>
+                        ) : null}
+                        <button
+                            type="button"
+                            className="inline-flex items-center justify-center rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={notesSetupSaving}
+                            onClick={() => void handleNotesSetup()}
+                        >
+                            {notesSetupSaving ? 'Creating…' : 'Create notes'}
+                        </button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             <Dialog
                 open={notesDialogOpen}
                 onOpenChange={(open) => {
@@ -1340,19 +1345,22 @@ export default function TerminalPage() {
                             <div className="rounded-md border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-sm text-[var(--app-badge-error-text)]">
                                 {notesError}
                             </div>
-                            {notesPath ? (
-                                <div className="flex justify-end">
-                                    <Button
-                                        type="button"
-                                        onClick={() => {
-                                            void createNotesFile()
-                                        }}
-                                        disabled={notesSaving}
-                                    >
-                                        Create notes file here
-                                    </Button>
-                                </div>
-                            ) : null}
+                            <div className="flex justify-end">
+                                <Button
+                                    type="button"
+                                    onClick={() => {
+                                        void saveNotes('').then((ok) => {
+                                            if (ok) {
+                                                setNotesLoaded(true)
+                                                setNotesError(null)
+                                            }
+                                        })
+                                    }}
+                                    disabled={notesSaving}
+                                >
+                                    Create notes file
+                                </Button>
+                            </div>
                         </div>
                     ) : (
                         <>

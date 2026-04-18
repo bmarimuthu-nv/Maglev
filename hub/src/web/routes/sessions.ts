@@ -1,9 +1,12 @@
 import { toSessionSummary } from '@maglev/protocol'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { configuration } from '../../configuration'
 
 const renameSessionSchema = z.object({
     name: z.string().min(1).max(255)
@@ -18,6 +21,18 @@ const shellSessionOptionsSchema = z.object({
     autoRespawn: z.boolean().optional(),
     pinned: z.boolean().optional()
 })
+
+const notesContentSchema = z.object({
+    content: z.string()
+})
+
+function getNotesDir(): string {
+    return join(configuration.dataDir, 'notes')
+}
+
+function getNotesFilePath(sessionId: string): string {
+    return join(getNotesDir(), `${sessionId}.txt`)
+}
 
 const attachTerminalSupervisionSchema = z.object({
     workerSessionId: z.string().min(1)
@@ -550,6 +565,67 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ ok: true })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to update shell session options'
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.get('/sessions/:id/notes', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const filePath = getNotesFilePath(sessionResult.sessionId)
+        if (!existsSync(filePath)) {
+            return c.json({ success: true, content: null })
+        }
+
+        try {
+            const content = readFileSync(filePath, 'utf-8')
+            return c.json({ success: true, content })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to read notes'
+            return c.json({ success: false, error: message })
+        }
+    })
+
+    app.post('/sessions/:id/notes', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = notesContentSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: content is required' }, 400)
+        }
+
+        try {
+            const notesDir = getNotesDir()
+            if (!existsSync(notesDir)) {
+                mkdirSync(notesDir, { recursive: true })
+            }
+            writeFileSync(getNotesFilePath(sessionResult.sessionId), parsed.data.content, 'utf-8')
+
+            // Ensure session metadata has notesPath set so the UI knows notes exist
+            if (!sessionResult.session.metadata?.notesPath) {
+                await engine.setSessionNotesPath(sessionResult.sessionId, `~/.maglev/notes/${sessionResult.sessionId}.txt`)
+            }
+
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to save notes'
             return c.json({ error: message }, 500)
         }
     })

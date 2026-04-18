@@ -454,6 +454,19 @@ export class ApiClient {
         })
     }
 
+    async readSessionNotes(sessionId: string): Promise<{ success: boolean; content: string | null; error?: string }> {
+        return await this.request<{ success: boolean; content: string | null; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/notes`
+        )
+    }
+
+    async writeSessionNotes(sessionId: string, content: string): Promise<{ ok?: boolean; error?: string }> {
+        return await this.request<{ ok?: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/notes`,
+            { method: 'POST', body: JSON.stringify({ content }) }
+        )
+    }
+
     async setShellSessionOptions(sessionId: string, options: {
         pinned?: boolean
         autoRespawn?: boolean
