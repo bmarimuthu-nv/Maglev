@@ -38,6 +38,10 @@ type SessionActionMenuProps = {
     canPauseTerminalPair?: boolean
     terminalPairPaused?: boolean
     onToggleTerminalPairPaused?: () => void
+    canClone?: boolean
+    onClone?: () => void
+    onCloneWithClaude?: () => void
+    onCloneWithCodex?: () => void
     onRename: () => void
     onArchive: () => void
     onDelete: () => void
@@ -180,6 +184,26 @@ function PinIcon(props: { className?: string }) {
     )
 }
 
+function CopyIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <rect width="14" height="14" x="8" y="8" rx="2" />
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </svg>
+    )
+}
+
 function TerminalIcon(props: { className?: string }) {
     return (
         <svg
@@ -231,6 +255,10 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         canPauseTerminalPair = false,
         terminalPairPaused = false,
         onToggleTerminalPairPaused,
+        canClone = false,
+        onClone,
+        onCloneWithClaude,
+        onCloneWithCodex,
         onRename,
         onArchive,
         onDelete,
@@ -311,6 +339,21 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleAddTerminalPairSupervisor = () => {
         onClose()
         onAddTerminalPairSupervisor?.()
+    }
+
+    const handleClone = () => {
+        onClose()
+        onClone?.()
+    }
+
+    const handleCloneWithClaude = () => {
+        onClose()
+        onCloneWithClaude?.()
+    }
+
+    const handleCloneWithCodex = () => {
+        onClose()
+        onCloneWithCodex?.()
     }
 
     const updatePosition = useCallback(() => {
@@ -547,6 +590,38 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                         <TerminalIcon className="text-[var(--app-hint)]" />
                         <span>Edit startup command</span>
                     </button>
+                ) : null}
+
+                {canClone ? (
+                    <>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={handleClone}
+                        >
+                            <CopyIcon className="text-[var(--app-hint)]" />
+                            Clone
+                        </button>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={handleCloneWithClaude}
+                        >
+                            <CopyIcon className="text-[var(--app-hint)]" />
+                            Clone with Claude
+                        </button>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={handleCloneWithCodex}
+                        >
+                            <CopyIcon className="text-[var(--app-hint)]" />
+                            Clone with Codex
+                        </button>
+                    </>
                 ) : null}
 
                 <button

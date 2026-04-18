@@ -346,6 +346,13 @@ function SessionsPage() {
                     sessions={sessions}
                     selectedSessionId={selectedSessionId}
                     onSelect={handleSelectSession}
+                    onClone={(newSessionId) => {
+                        setMobileSidebarOpen(false)
+                        navigate({
+                            to: '/sessions/$sessionId/terminal',
+                            params: { sessionId: newSessionId },
+                        })
+                    }}
                     onNewSession={() => {
                         setMobileSidebarOpen(false)
                         navigate({ to: '/sessions/new' })

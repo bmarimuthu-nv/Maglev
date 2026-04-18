@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -278,13 +279,15 @@ function SessionItem(props: {
     session: SessionSummary
     sessions: SessionSummary[]
     onSelect: (sessionId: string) => void
+    onClone?: (newSessionId: string) => void
     showPath?: boolean
     api: ApiClient | null
     selected?: boolean
 }) {
     const { t } = useTranslation()
-    const { baseUrl } = useAppContext()
-    const { session: s, sessions, onSelect, showPath = true, api, selected = false } = props
+    const { baseUrl, scopeKey } = useAppContext()
+    const queryClient = useQueryClient()
+    const { session: s, sessions, onSelect, onClone, showPath = true, api, selected = false } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -324,6 +327,27 @@ function SessionItem(props: {
         && !candidate.metadata?.terminalSupervision
         && !candidate.metadata?.terminalPair
     )
+
+    const handleClone = useCallback(async (startupCommand?: string) => {
+        if (!api || !s.metadata?.path) return
+        try {
+            const result = await api.spawnHubSession(
+                s.metadata.path,
+                `${getSessionTitle(s)} (clone)`,
+                undefined,
+                undefined,
+                s.metadata.pinned,
+                s.metadata.autoRespawn,
+                startupCommand ?? s.metadata.startupCommand ?? undefined
+            )
+            if (result.type === 'success') {
+                await queryClient.invalidateQueries({ queryKey: ['sessions', scopeKey] })
+                onClone?.(result.sessionId)
+            }
+        } catch {
+            // silently fail - session list will refresh naturally
+        }
+    }, [api, onClone, queryClient, s, scopeKey])
 
     const longPressHandlers = useLongPress({
         onLongPress: (point) => {
@@ -459,6 +483,10 @@ function SessionItem(props: {
                     if (!pairLink) return
                     void setTerminalPairPaused(pairLink.state !== 'paused')
                 }}
+                canClone={Boolean(s.metadata?.path)}
+                onClone={() => void handleClone()}
+                onCloneWithClaude={() => void handleClone('claude')}
+                onCloneWithCodex={() => void handleClone('codex')}
                 onRename={() => setRenameOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onDelete={() => setDeleteOpen(true)}
@@ -599,6 +627,7 @@ function SessionItem(props: {
 export function SessionList(props: {
     sessions: SessionSummary[]
     onSelect: (sessionId: string) => void
+    onClone?: (newSessionId: string) => void
     onNewSession: () => void
     onRefresh: () => void
     isLoading: boolean
@@ -799,6 +828,7 @@ export function SessionList(props: {
                                                                 session={s}
                                                                 sessions={props.sessions}
                                                                 onSelect={props.onSelect}
+                                                                onClone={props.onClone}
                                                                 showPath={false}
                                                                 api={api}
                                                                 selected={s.id === selectedSessionId}
