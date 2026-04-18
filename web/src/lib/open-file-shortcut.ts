@@ -122,21 +122,27 @@ export function matchShortcutEvent(event: KeyboardEvent, value: string): boolean
     }
     const isApple = isApplePlatform()
     const eventKey = event.key.length === 1 ? event.key.toLowerCase() : event.key
-    const metaMatched = parsed.meta ? (isApple ? event.metaKey : event.ctrlKey) : false
-    const ctrlMatched = parsed.ctrl ? event.ctrlKey : false
 
-    return eventKey === parsed.key
-        && event.altKey === parsed.alt
-        && event.shiftKey === parsed.shift
-        && event.metaKey === (parsed.meta && isApple)
-        && event.ctrlKey === (parsed.ctrl || (parsed.meta && !isApple))
-        && (parsed.meta ? metaMatched : true)
-        && (parsed.ctrl ? ctrlMatched : true)
+    if (eventKey !== parsed.key) return false
+    if (event.altKey !== parsed.alt) return false
+    if (event.shiftKey !== parsed.shift) return false
+
+    // On Apple: "Cmd" maps to metaKey. On others: "Cmd" maps to ctrlKey.
+    const expectMeta = parsed.meta && isApple
+    const expectCtrl = parsed.ctrl || (parsed.meta && !isApple)
+    if (event.metaKey !== expectMeta) return false
+    if (event.ctrlKey !== expectCtrl) return false
+
+    return true
 }
 
 export function eventToShortcutLabel(event: KeyboardEvent): string | null {
     const key = event.key.length === 1 ? event.key.toUpperCase() : event.key
     if (!key || ['Shift', 'Meta', 'Control', 'Alt'].includes(key)) {
+        return null
+    }
+    // Require at least one modifier (Ctrl/Cmd/Alt) to avoid bare-key shortcuts
+    if (!event.metaKey && !event.ctrlKey && !event.altKey) {
         return null
     }
     const parts: string[] = []

@@ -860,14 +860,19 @@ export default function TerminalPage() {
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
+            // Allow the shortcut from the terminal (xterm textarea) since it always has modifiers.
+            // Only skip from real user inputs like search fields and dialogs.
             const target = event.target as HTMLElement | null
             const tagName = target?.tagName?.toLowerCase()
-            const isEditable = target?.isContentEditable
+            const isXtermTextarea = tagName === 'textarea' && target?.closest('.xterm')
+            const isUserInput = !isXtermTextarea && (
+                target?.isContentEditable
                 || tagName === 'input'
                 || tagName === 'textarea'
                 || tagName === 'select'
+            )
 
-            if (!openFileDialogOpen && !isEditable && matchShortcutEvent(event, openFileShortcut)) {
+            if (!openFileDialogOpen && !isUserInput && matchShortcutEvent(event, openFileShortcut)) {
                 event.preventDefault()
                 handleOpenFileDialog()
                 return
