@@ -13,9 +13,8 @@ import { rankFiles } from '@/lib/file-search'
 import { getOpenFileShortcut, matchShortcutEvent } from '@/lib/open-file-shortcut'
 import { useTranslation } from '@/lib/use-translation'
 import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
-import { decodeBase64, encodeBase64 } from '@/lib/utils'
-import { buildSessionExplorerUrl } from '@/utils/sessionExplorer'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
+import { FilePreviewPanel } from '@/components/FilePreviewPanel'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
@@ -28,6 +27,10 @@ import {
 } from '@/components/ui/dialog'
 
 const TERMINAL_TAKEOVER_MESSAGE = 'Terminal is attached in another browser. Reconnect here to take over.'
+const FILE_PREVIEW_WIDTH_KEY = 'maglev:filePreviewWidth'
+const FILE_PREVIEW_DEFAULT_WIDTH = 480
+const FILE_PREVIEW_MIN_WIDTH = 280
+const FILE_PREVIEW_MAX_WIDTH = 800
 function BackIcon() {
     return (
         <svg
@@ -265,6 +268,13 @@ export default function TerminalPage() {
     const [openFileDialogOpen, setOpenFileDialogOpen] = useState(false)
     const [openFileQuery, setOpenFileQuery] = useState('')
     const [openFileActiveIndex, setOpenFileActiveIndex] = useState(0)
+    const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
+    const [previewPanelWidth, setPreviewPanelWidth] = useState(() => {
+        try {
+            const saved = localStorage.getItem(FILE_PREVIEW_WIDTH_KEY)
+            return saved ? Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(FILE_PREVIEW_MAX_WIDTH, Number(saved))) : FILE_PREVIEW_DEFAULT_WIDTH
+        } catch { return FILE_PREVIEW_DEFAULT_WIDTH }
+    })
     const { copied, copy } = useCopyToClipboard()
     const notesAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const notesSaveInFlightRef = useRef(false)
@@ -756,15 +766,32 @@ export default function TerminalPage() {
         if (!loadedSessionId) {
             return
         }
-        const url = buildSessionExplorerUrl(baseUrl, loadedSessionId, {
-            tab: 'directories',
-            path
-        })
-        window.open(url, '_blank', 'noopener,noreferrer')
+        setPreviewFilePath(path)
         setOpenFileDialogOpen(false)
         setOpenFileQuery('')
         setOpenFileActiveIndex(0)
-    }, [baseUrl, loadedSessionId])
+    }, [loadedSessionId])
+
+    const handlePreviewResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault()
+        const startX = event.clientX
+        const startWidth = previewPanelWidth
+
+        const onMove = (e: globalThis.PointerEvent) => {
+            const delta = startX - e.clientX
+            const next = Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(FILE_PREVIEW_MAX_WIDTH, startWidth + delta))
+            setPreviewPanelWidth(next)
+            try { localStorage.setItem(FILE_PREVIEW_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+        }
+
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+    }, [previewPanelWidth])
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -1115,24 +1142,46 @@ export default function TerminalPage() {
                 </div>
             ) : null}
 
-            <div className="flex-1 overflow-hidden bg-[var(--app-bg)]">
-                <div className="h-full w-full p-3">
-                    <div
-                        className="h-full w-full"
-                        onTouchStart={handleTerminalTouchStart}
-                        onTouchMove={handleTerminalTouchMove}
-                        onTouchEnd={handleTerminalTouchEnd}
-                        onTouchCancel={handleTerminalTouchEnd}
-                        onWheel={handleTerminalWheel}
-                    >
-                        <TerminalView
-                            onMount={handleTerminalMount}
-                            onResize={handleResize}
+            <div className="flex flex-1 min-h-0 overflow-hidden bg-[var(--app-bg)]">
+                <div className="flex-1 min-w-0 overflow-hidden">
+                    <div className="h-full w-full p-3">
+                        <div
                             className="h-full w-full"
-                            suppressFocus={keyboardVisible}
-                        />
+                            onTouchStart={handleTerminalTouchStart}
+                            onTouchMove={handleTerminalTouchMove}
+                            onTouchEnd={handleTerminalTouchEnd}
+                            onTouchCancel={handleTerminalTouchEnd}
+                            onWheel={handleTerminalWheel}
+                        >
+                            <TerminalView
+                                onMount={handleTerminalMount}
+                                onResize={handleResize}
+                                className="h-full w-full"
+                                suppressFocus={keyboardVisible}
+                            />
+                        </div>
                     </div>
                 </div>
+
+                {previewFilePath && loadedSessionId ? (
+                    <div className="relative flex shrink-0 border-l border-[var(--app-border)]" style={{ width: `${previewPanelWidth}px` }}>
+                        <div
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label="Resize file preview"
+                            onPointerDown={handlePreviewResizeStart}
+                            className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
+                        >
+                            <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
+                        </div>
+                        <FilePreviewPanel
+                            sessionId={loadedSessionId}
+                            filePath={previewFilePath}
+                            api={api}
+                            onClose={() => setPreviewFilePath(null)}
+                        />
+                    </div>
+                ) : null}
             </div>
 
             {keyboardVisible ? (
