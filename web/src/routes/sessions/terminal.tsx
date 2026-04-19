@@ -490,7 +490,12 @@ export default function TerminalPage() {
         if (terminalState.status !== 'connected') {
             return
         }
-        focusTerminalIfAllowed()
+        // Delay focus slightly to ensure the terminal textarea is ready
+        // and any navigation-triggered focus changes have settled
+        const timer = requestAnimationFrame(() => {
+            focusTerminalIfAllowed()
+        })
+        return () => cancelAnimationFrame(timer)
     }, [focusTerminalIfAllowed, terminalState.status])
 
     useEffect(() => {
