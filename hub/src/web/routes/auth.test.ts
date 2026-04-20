@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createConfiguration } from '../../configuration'
 import type { Store } from '../../store'
-import type { WebAppEnv } from '../middleware/auth'
+import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
 import { createAuthRoutes } from './auth'
 import { signBrokerSessionToken, BROKER_SESSION_HEADER } from '../brokerSession'
 
@@ -28,12 +28,16 @@ afterEach(() => {
 
 function createApp(options?: {
     remoteMode?: boolean
+    useMiddleware?: boolean
     gitHubDeviceAuth?: {
         start: () => Promise<unknown>
         poll: (deviceCode: string) => Promise<unknown>
     } | null
 }) {
     const app = new Hono<WebAppEnv>()
+    if (options?.useMiddleware) {
+        app.use('/api/*', createAuthMiddleware(JWT_SECRET))
+    }
     app.route('/api', createAuthRoutes(JWT_SECRET, {} as Store, {
         remoteMode: options?.remoteMode,
         gitHubDeviceAuth: options?.gitHubDeviceAuth as never
@@ -127,6 +131,35 @@ describe('auth routes', () => {
         process.env.MAGLEV_NAMESPACE = 'hub-devbox-a'
         const app = createApp({
             remoteMode: true,
+            gitHubDeviceAuth: {
+                start: async () => ({}),
+                poll: async () => ({ status: 'authorization_pending' })
+            }
+        })
+
+        const brokerToken = await signBrokerSessionToken({
+            uid: 123,
+            login: 'octocat'
+        })
+
+        const response = await app.request('/api/auth/broker', {
+            method: 'POST',
+            headers: {
+                [BROKER_SESSION_HEADER]: brokerToken
+            }
+        })
+
+        const body = await response.json() as Record<string, unknown>
+        expect(response.status).toBe(200)
+        expect(typeof body.token).toBe('string')
+        expect(decodeJwt(String(body.token)).ns).toBe('hub-devbox-a')
+    })
+
+    it('allows broker auth bootstrap through jwt middleware', async () => {
+        process.env.MAGLEV_NAMESPACE = 'hub-devbox-a'
+        const app = createApp({
+            remoteMode: true,
+            useMiddleware: true,
             gitHubDeviceAuth: {
                 start: async () => ({}),
                 poll: async () => ({ status: 'authorization_pending' })

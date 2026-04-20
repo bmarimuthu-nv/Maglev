@@ -20,6 +20,7 @@ export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<W
         const path = c.req.path
         if (
             path === '/api/auth'
+            || path === '/api/auth/broker'
             || path === '/api/auth/methods'
             || path === '/api/bind'
             || path === '/api/github/device/start'

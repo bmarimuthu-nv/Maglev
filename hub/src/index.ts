@@ -299,6 +299,7 @@ async function main() {
             brokerUrl: effectiveBrokerUrl!,
             brokerToken: configuredBrokerToken ?? brokerKey?.key ?? null,
             owner: brokerOwner,
+            localHost: config.listenHost,
             localPort: config.listenPort,
             hubName: process.env.MAGLEV_HUB_NAME?.trim() || null,
             launchFolders: hubLaunchConfig.folders,

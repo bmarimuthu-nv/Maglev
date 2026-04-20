@@ -80,6 +80,7 @@ export type BrokerClientConfig = {
     brokerUrl: string
     brokerToken?: string | null
     owner: string
+    localHost?: string | null
     localPort: number
     hubName?: string | null
     launchFolders?: HubLaunchFolder[]
@@ -110,6 +111,38 @@ function toBase64(bytes: Uint8Array): string {
     return Buffer.from(bytes).toString('base64')
 }
 
+function formatUrlHost(host: string): string {
+    return host.includes(':') ? `[${host}]` : host
+}
+
+function resolveProxyLocalHost(host?: string | null): string {
+    const trimmed = host?.trim()
+    if (!trimmed || trimmed === '0.0.0.0') {
+        return '127.0.0.1'
+    }
+    if (trimmed === '::') {
+        return '::1'
+    }
+    return trimmed
+}
+
+export function buildBrokerLocalUrl(localPort: number, localHost?: string | null): string {
+    return `http://${formatUrlHost(resolveProxyLocalHost(localHost))}:${localPort}`
+}
+
+export function createProxyErrorResponse(requestId: string, error: unknown): ProxyResponseMessage {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+        type: 'proxy-response',
+        requestId,
+        status: 502,
+        headers: {
+            'content-type': 'text/plain; charset=utf-8'
+        },
+        bodyBase64: Buffer.from(`Failed to forward request to local hub: ${message}`, 'utf8').toString('base64')
+    }
+}
+
 export class BrokerClient {
     private static readonly RECONNECT_DELAY_MS = 5_000
 
@@ -134,7 +167,7 @@ export class BrokerClient {
         const slurmJobId = process.env.SLURM_JOB_ID?.trim()
         const configuredHubName = config.hubName ? sanitizeHubName(config.hubName) : ''
         this.hubId = configuredHubName || (slurmJobId ? `slurm-${slurmJobId}` : randomUUID())
-        this.localUrl = `http://localhost:${config.localPort}`
+        this.localUrl = buildBrokerLocalUrl(config.localPort, config.localHost)
         this.wsUrl = toBrokerWsUrl(config.brokerUrl, config.brokerToken)
     }
 
@@ -328,7 +361,13 @@ export class BrokerClient {
         }
 
         if (message.type === 'proxy-request') {
-            const response = await this.forwardProxyRequest(message)
+            let response: ProxyResponseMessage
+            try {
+                response = await this.forwardProxyRequest(message)
+            } catch (error) {
+                console.error(`[Broker] Failed to proxy ${message.method} ${message.path}:`, error)
+                response = createProxyErrorResponse(message.requestId, error)
+            }
             if (this.socket?.readyState === WebSocket.OPEN) {
                 this.socket.send(JSON.stringify(response))
             }
