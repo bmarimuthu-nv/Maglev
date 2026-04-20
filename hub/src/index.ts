@@ -268,14 +268,6 @@ async function main() {
         await maglevBot.start()
     }
 
-    // Self-register bound machine as active — no runner needed for liveness
-    if (config.boundMachineId) {
-        syncEngine.handleMachineAlive({ machineId: config.boundMachineId, time: Date.now() })
-        setInterval(() => {
-            syncEngine?.handleMachineAlive({ machineId: config.boundMachineId!, time: Date.now() })
-        }, 20_000)
-    }
-
     console.log('')
     console.log('[Web] Hub listening on :' + config.listenPort)
     console.log('[Web] Local:  http://localhost:' + config.listenPort)
@@ -364,8 +356,8 @@ async function main() {
     console.log('Maglev Hub is ready!')
 
     // Handle shutdown
-    const shutdown = (signal: string) => async () => {
-        console.log(`\nShutting down... (received ${signal} at ${new Date().toISOString()})`)
+    const shutdown = async () => {
+        console.log('\nShutting down...')
         await brokerClient?.stop()
         await maglevBot?.stop()
         notificationHub?.stop()
@@ -375,17 +367,8 @@ async function main() {
         process.exit(0)
     }
 
-    process.on('SIGINT', shutdown('SIGINT'))
-    process.on('SIGTERM', shutdown('SIGTERM'))
-
-    process.on('uncaughtException', (error) => {
-        console.error(`[Hub] Uncaught exception: ${error.message}`)
-        console.error(error.stack)
-    })
-
-    process.on('unhandledRejection', (reason) => {
-        console.error(`[Hub] Unhandled rejection: ${reason}`)
-    })
+    process.on('SIGINT', shutdown)
+    process.on('SIGTERM', shutdown)
 
     // Keep process running
     await new Promise(() => {})
