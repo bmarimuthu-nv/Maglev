@@ -364,8 +364,8 @@ async function main() {
     console.log('Maglev Hub is ready!')
 
     // Handle shutdown
-    const shutdown = async () => {
-        console.log('\nShutting down...')
+    const shutdown = (signal: string) => async () => {
+        console.log(`\nShutting down... (received ${signal} at ${new Date().toISOString()})`)
         await brokerClient?.stop()
         await maglevBot?.stop()
         notificationHub?.stop()
@@ -375,8 +375,17 @@ async function main() {
         process.exit(0)
     }
 
-    process.on('SIGINT', shutdown)
-    process.on('SIGTERM', shutdown)
+    process.on('SIGINT', shutdown('SIGINT'))
+    process.on('SIGTERM', shutdown('SIGTERM'))
+
+    process.on('uncaughtException', (error) => {
+        console.error(`[Hub] Uncaught exception: ${error.message}`)
+        console.error(error.stack)
+    })
+
+    process.on('unhandledRejection', (reason) => {
+        console.error(`[Hub] Unhandled rejection: ${reason}`)
+    })
 
     // Keep process running
     await new Promise(() => {})
