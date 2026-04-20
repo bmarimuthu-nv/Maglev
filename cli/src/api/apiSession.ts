@@ -58,7 +58,7 @@ export class ApiSessionClient extends EventEmitter {
 
         this.socket = io(`${configuration.apiUrl}/cli`, {
             auth: (cb) => cb({
-                token: configuration.cliApiToken ?? this.token,
+                token: this.token,
                 clientType: 'session-scoped' as const,
                 sessionId: this.sessionId
             }),

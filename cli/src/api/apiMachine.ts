@@ -221,7 +221,7 @@ export class ApiMachineClient {
         this.socket = io(`${configuration.apiUrl}/cli`, {
             transports: ['websocket'],
             auth: (cb) => cb({
-                token: configuration.cliApiToken ?? this.token,
+                token: this.token,
                 clientType: 'machine-scoped' as const,
                 machineId: this.machine.id
             }),
@@ -301,13 +301,18 @@ export class ApiMachineClient {
         })
     }
 
+    private emitKeepAlive(): void {
+        this.socket.emit('machine-alive', {
+            machineId: this.machine.id,
+            time: Date.now()
+        })
+    }
+
     private startKeepAlive(): void {
         this.stopKeepAlive()
+        this.emitKeepAlive()
         this.keepAliveInterval = setInterval(() => {
-            this.socket.emit('machine-alive', {
-                machineId: this.machine.id,
-                time: Date.now()
-            })
+            this.emitKeepAlive()
         }, 20_000)
     }
 
