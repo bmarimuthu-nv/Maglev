@@ -967,6 +967,7 @@ export async function startBroker(): Promise<void> {
     const server = Bun.serve<HubSocketData>({
         hostname: config.host,
         port: config.port,
+        idleTimeout: 255, // seconds; max value — keeps SSE streams alive
         async fetch(req, serverRef) {
             const url = new URL(req.url)
             const brokerSession = await getBrokerSession(req)
