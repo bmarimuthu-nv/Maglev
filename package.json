@@ -5,7 +5,7 @@
     "scripts": {
         "build:site": "bun run --cwd website build && bun run --cwd docs docs:build && cp -r docs/.vitepress/dist website/dist/public/docs",
         "dev": "concurrently \"bun run dev:hub\" \"bun run dev:web\" --kill-others-on-exit",
-        "build": "bun run build:cli && bun run build:hub && bun run build:web",
+        "build": "bun run build:web && bun run build:hub && bun run build:cli",
         "build:cli": "cd cli && bun run build:binary",
         "build:standalone": "bun run build:web && (cd hub && bun run generate:embedded-web-assets) && (cd cli && bun run build:binary:standalone)",
         "build:standalone:all": "bun run build:web && (cd hub && bun run generate:embedded-web-assets) && (cd cli && bun run build:binary:standalone:all)",
