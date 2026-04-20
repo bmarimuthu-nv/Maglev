@@ -429,6 +429,11 @@ export function useSSE(options: {
                 return
             }
 
+            if (event.type === 'machine-updated') {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.hubConfig(scopeKey) })
+                return
+            }
+
             if (event.type === 'session-added' || event.type === 'session-updated' || event.type === 'session-removed') {
                 if (event.type === 'session-removed') {
                     removeSessionSummary(event.sessionId)
