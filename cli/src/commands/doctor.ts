@@ -4,6 +4,7 @@ import type { CommandDefinition } from './types'
 
 export const doctorCommand: CommandDefinition = {
     name: 'doctor',
+    description: 'Diagnose and fix common issues',
     requiresRuntimeAssets: true,
     run: async ({ commandArgs }) => {
         if (commandArgs[0] === 'clean') {

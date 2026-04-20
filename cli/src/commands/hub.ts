@@ -861,6 +861,7 @@ ${chalk.bold('Usage:')}
 
 export const hubCommand: CommandDefinition = {
     name: 'hub',
+    description: 'Manage hub instances (start, stop, status, logs)',
     requiresRuntimeAssets: true,
     run: async (context: CommandContext) => {
         try {

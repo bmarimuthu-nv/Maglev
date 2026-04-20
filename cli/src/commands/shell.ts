@@ -17,6 +17,7 @@ async function checkHubReachable(apiUrl: string): Promise<boolean> {
 
 export const shellCommand: CommandDefinition = {
     name: 'shell',
+    description: 'Start a shell session (default command)',
     requiresRuntimeAssets: true,
     run: async ({ commandArgs }) => {
         try {
