@@ -268,6 +268,14 @@ async function main() {
         await maglevBot.start()
     }
 
+    // Self-register bound machine as active — no runner needed for liveness
+    if (config.boundMachineId) {
+        syncEngine.handleMachineAlive({ machineId: config.boundMachineId, time: Date.now() })
+        setInterval(() => {
+            syncEngine?.handleMachineAlive({ machineId: config.boundMachineId!, time: Date.now() })
+        }, 20_000)
+    }
+
     console.log('')
     console.log('[Web] Hub listening on :' + config.listenPort)
     console.log('[Web] Local:  http://localhost:' + config.listenPort)
