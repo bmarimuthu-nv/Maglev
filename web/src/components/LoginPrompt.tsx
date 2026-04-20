@@ -233,22 +233,35 @@ export function LoginPrompt(props: LoginPromptProps) {
     const displayError = error || props.error
     const serverSummary = props.serverUrl ?? `${props.baseUrl} ${t('login.server.default')}`
     const title = isBindMode ? t('login.bind.title') : t('login.title')
-    const subtitle = t('login.subtitle')
     const submitLabel = isBindMode ? t('login.bind.submit') : t('login.submit')
 
+    // Extract host and port from base URL for display
+    let serverHost = ''
+    let serverPort = ''
+    try {
+        const url = new URL(props.serverUrl || props.baseUrl)
+        serverHost = url.hostname
+        serverPort = url.port || (url.protocol === 'https:' ? '443' : '80')
+    } catch {
+        serverHost = props.serverUrl || props.baseUrl
+    }
+
     return (
-        <div className="relative h-full flex items-center justify-center p-4">
+        <div className="relative h-full flex items-center justify-center bg-[var(--app-bg)] p-4">
             {/* Language switcher */}
-            <div className="absolute top-4 right-4">
+            <div className="absolute top-4 right-4 z-10">
                 <LanguageSwitcher />
             </div>
 
-            <div className="w-full max-w-sm space-y-6">
+            <div className="w-full max-w-sm space-y-6 rounded-xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-6 shadow-sm">
                 {/* Header */}
-                <div className="text-center space-y-2">
-                    <div className="text-2xl font-semibold">{title}</div>
-                    <div className="text-sm text-[var(--app-hint)]">
-                        {subtitle}
+                <div className="text-center space-y-3">
+                    <div className="text-2xl font-bold tracking-tight text-[var(--app-fg)]">{title} Hub</div>
+                    <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-4 py-2.5 text-sm">
+                        <div className="text-[var(--app-hint)]">Host</div>
+                        <div className="font-mono font-medium text-[var(--app-fg)]">{serverHost}</div>
+                        <div className="mt-1 text-[var(--app-hint)]">Port</div>
+                        <div className="font-mono font-medium text-[var(--app-fg)]">{serverPort}</div>
                     </div>
                 </div>
 
@@ -311,8 +324,9 @@ export function LoginPrompt(props: LoginPromptProps) {
                     )}
 
                     {displayError && (
-                        <div className="text-sm text-red-500 text-center">
-                            {displayError}
+                        <div className="rounded-lg border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-sm text-[var(--app-badge-error-text)]">
+                            <div className="font-medium">Sign in failed</div>
+                            <div className="mt-1 text-xs">{displayError}</div>
                         </div>
                     )}
 
@@ -337,7 +351,7 @@ export function LoginPrompt(props: LoginPromptProps) {
 
                 {/* Help links */}
                 {!isBindMode && (
-                    <div className="flex items-center justify-between text-xs text-[var(--app-hint)]">
+                    <div className="flex items-center justify-between text-xs text-[var(--app-hint)] pt-2 border-t border-[var(--app-divider)]">
                         <a href="https://maglev.run/docs" target="_blank" rel="noopener noreferrer" className="underline hover:text-[var(--app-fg)]">
                             {t('login.help')}
                         </a>
@@ -376,7 +390,7 @@ export function LoginPrompt(props: LoginPromptProps) {
                                     </div>
 
                                     {serverError && (
-                                        <div className="text-sm text-red-500">
+                                        <div className="text-sm text-[var(--app-badge-error-text)]">
                                             {serverError}
                                         </div>
                                     )}
@@ -400,7 +414,7 @@ export function LoginPrompt(props: LoginPromptProps) {
 
             {/* Footer */}
             <div className="absolute bottom-4 left-0 right-0 text-center text-xs text-[var(--app-hint)] space-y-1">
-                <div>{t('login.footer')} <span className="text-red-500">♥</span> {t('login.footer.for')}</div>
+                <div>{t('login.footer')} <span className="text-[var(--app-badge-error-text)]">♥</span> {t('login.footer.for')}</div>
                 <div>{t('login.footer.copyright')} {new Date().getFullYear()} maglev</div>
             </div>
         </div>

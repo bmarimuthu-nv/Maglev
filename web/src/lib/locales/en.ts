@@ -26,7 +26,7 @@ export default {
   'login.server.default': '(Default)',
   'login.server.custom': '(Custom)',
   'login.server.title': 'Hub URL',
-  'login.server.description': 'Set maglev hub origin for API and live updates.',
+  'login.server.description': 'Set Maglev hub origin for API and live updates.',
   'login.server.current': 'Current:',
   'login.server.origin': 'Hub origin',
   'login.server.placeholder': 'https://maglev.example.com',
