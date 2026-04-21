@@ -22,16 +22,16 @@ function resolveThemeColors(isDark: boolean) {
             cursor,
             selectionBackground,
             black: '#1f2428',
-            red: '#c4435b',
-            green: '#3f8f5b',
+            red: '#b34a5f',
+            green: '#417e52',
             yellow: '#b98412',
             blue: '#4f8cc9',
             magenta: '#9b72cf',
             cyan: '#2f8f9d',
             white: '#d0d7de',
             brightBlack: '#6e7681',
-            brightRed: '#e05d6f',
-            brightGreen: '#57ab5a',
+            brightRed: '#cf5f74',
+            brightGreen: '#559766',
             brightYellow: '#c69026',
             brightBlue: '#6cb6ff',
             brightMagenta: '#b083f0',
@@ -46,16 +46,16 @@ function resolveThemeColors(isDark: boolean) {
         cursor,
         selectionBackground,
         black: '#24292f',
-        red: '#c93c37',
-        green: '#2f7d4a',
+        red: '#c0564f',
+        green: '#4d7c57',
         yellow: '#9a6700',
         blue: '#0969da',
         magenta: '#8250df',
         cyan: '#1b7c83',
         white: '#f6f8fa',
         brightBlack: '#57606a',
-        brightRed: '#e5534b',
-        brightGreen: '#46954a',
+        brightRed: '#d96a60',
+        brightGreen: '#5c8f67',
         brightYellow: '#b97a00',
         brightBlue: '#218bff',
         brightMagenta: '#a475f9',
@@ -139,6 +139,7 @@ export function TerminalView(props: {
             fontSize: 13,
             scrollback: 0,
             theme,
+            minimumContrastRatio: isDark ? 5.5 : 5,
             rightClickSelectsWord: true,
             macOptionClickForcesSelection: true,
             // This is a real tmux/PTTY byte stream, not a plain log viewer.
@@ -275,6 +276,7 @@ export function TerminalView(props: {
             return
         }
         terminal.options.theme = resolveThemeColors(isDark)
+        terminal.options.minimumContrastRatio = isDark ? 5.5 : 5
         if (terminal.rows > 0) {
             terminal.refresh(0, terminal.rows - 1)
         }

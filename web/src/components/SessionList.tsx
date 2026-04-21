@@ -1396,13 +1396,17 @@ export function SessionList(props: {
         return itemLayouts.filter((layout) => layout.end >= visibleStart && layout.start <= visibleEnd)
     }, [itemLayouts, viewport])
 
-    const renderDragHandle = () => (
+    const renderDragHandle = (variant: 'header' | 'row' = 'row') => (
         <div
-            className="flex items-center px-0.5 cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity"
+            className={
+                variant === 'header'
+                    ? 'flex w-1.5 items-center justify-center cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity'
+                    : 'flex w-2 items-center justify-center cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity'
+            }
             onMouseDown={() => { gripActiveRef.current = true }}
             onMouseUp={() => { gripActiveRef.current = false }}
         >
-            <GripVerticalIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />
+            <GripVerticalIcon className={variant === 'header' ? 'h-2.5 w-2.5 text-[var(--app-hint)]' : 'h-3 w-3 text-[var(--app-hint)]'} />
         </div>
     )
 
@@ -1429,7 +1433,7 @@ export function SessionList(props: {
                     onDrop={(e) => handleGroupDrop(groupRenderStates.map((groupState) => groupState.group), e)}
                     className={`group/drag flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-3 py-2 ${dropClass}`}
                 >
-                    {renderDragHandle()}
+                    {renderDragHandle('header')}
                     <button
                         type="button"
                         onClick={() => toggleGroup(group.directory, isCollapsed)}
@@ -1486,7 +1490,7 @@ export function SessionList(props: {
                     onDrop={(e) => handleSubgroupDrop(item.groupState.group.directory, item.groupState.subgroups, e)}
                     className={`group/drag flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)]/55 px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--app-hint)] ${dropClass}`}
                 >
-                    {renderDragHandle()}
+                    {renderDragHandle('header')}
                     <span className="font-medium">{item.subgroup.label}</span>
                     {item.subgroup.hint ? (
                         <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 normal-case tracking-normal text-[10px] text-[var(--app-fg)]">
@@ -1523,7 +1527,7 @@ export function SessionList(props: {
                 onDrop={(e) => handleRowDrop(groupState.group.directory, item.subgroup.key, item.subgroup.rows, e)}
                 className={`group/drag flex items-stretch border-b border-[var(--app-divider)] ${dropClass}`}
             >
-                {renderDragHandle()}
+                {renderDragHandle('row')}
                 <div className={`flex-1 min-w-0 ${row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''} ${row.isChild ? 'pl-5 border-l-2 border-l-[var(--app-hint)]/20' : ''}`}>
                     {row.sessions.map((session, index) => (
                         <div
