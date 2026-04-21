@@ -49,10 +49,18 @@ function findWebappDistDir(): { distDir: string; indexHtmlPath: string } {
 }
 
 function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
+    const headers: Record<string, string> = {
+        'Content-Type': asset.mimeType
+    }
+
+    if (asset.path.endsWith('.html')) {
+        headers['Cache-Control'] = 'no-cache'
+    } else if (asset.path.startsWith('/assets/')) {
+        headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    }
+
     return new Response(Bun.file(asset.sourcePath), {
-        headers: {
-            'Content-Type': asset.mimeType
-        }
+        headers
     })
 }
 
@@ -220,6 +228,7 @@ function createWebApp(options: {
             return
         }
 
+        c.header('Cache-Control', 'no-cache')
         return await serveStatic({ root: distDir, path: 'index.html' })(c, next)
     })
 

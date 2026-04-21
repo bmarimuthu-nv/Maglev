@@ -93,7 +93,10 @@ export default defineConfig({
                 ]
             },
             injectManifest: {
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+                // Keep hashed assets offline-capable, but always fetch the HTML shell fresh.
+                // Otherwise an older cached index.html can reference asset hashes that no
+                // longer exist after rebuilds, which surfaces as preload failures.
+                globPatterns: ['**/*.{js,css,ico,png,svg,woff,woff2}']
             },
             devOptions: {
                 enabled: true,
