@@ -14,6 +14,7 @@ import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
 import { applyVersionedAck } from './versionedUpdate'
+import { listGitWorktreesForPaths, type DetectedWorktree } from '@/utils/gitWorktrees'
 
 interface ServerToRunnerEvents {
     update: (data: Update) => void
@@ -63,6 +64,14 @@ interface PathExistsResponse {
     exists: Record<string, boolean>
 }
 
+interface ListWorktreesRequest {
+    paths: string[]
+}
+
+interface ListWorktreesResponse {
+    worktrees: DetectedWorktree[]
+}
+
 export class ApiMachineClient {
     private socket!: Socket<ServerToRunnerEvents, RunnerToServerEvents>
     private keepAliveInterval: NodeJS.Timeout | null = null
@@ -96,6 +105,13 @@ export class ApiMachineClient {
             }))
 
             return { exists }
+        })
+
+        this.rpcHandlerManager.registerHandler<ListWorktreesRequest, ListWorktreesResponse>('list-worktrees', async (params) => {
+            const rawPaths = Array.isArray(params?.paths) ? params.paths : []
+            const uniquePaths = Array.from(new Set(rawPaths.filter((path): path is string => typeof path === 'string')))
+            const worktrees = await listGitWorktreesForPaths(uniquePaths)
+            return { worktrees }
         })
     }
 

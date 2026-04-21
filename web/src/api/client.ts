@@ -488,6 +488,13 @@ export class ApiClient {
         })
     }
 
+    async listHubWorktrees(paths: string[]): Promise<import('@/types/api').HubWorktreesResponse> {
+        return await this.request<import('@/types/api').HubWorktreesResponse>('/api/hub/worktrees', {
+            method: 'POST',
+            body: JSON.stringify({ paths })
+        })
+    }
+
     async spawnHubSession(
         directory: string,
         name?: string,

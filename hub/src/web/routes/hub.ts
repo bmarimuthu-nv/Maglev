@@ -27,6 +27,10 @@ const pathsExistsSchema = z.object({
     paths: z.array(z.string().min(1)).max(1000)
 })
 
+const worktreesSchema = z.object({
+    paths: z.array(z.string().min(1)).max(1000)
+})
+
 export function createHubRoutes(
     getSyncEngine: () => SyncEngine | null,
     getLaunchFolders: () => Promise<HubLaunchFolder[]>
@@ -151,6 +155,31 @@ export function createHubRoutes(
             return c.json({ exists })
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to check paths' }, 500)
+        }
+    })
+
+    app.post('/hub/worktrees', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not connected' }, 503)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = worktreesSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        const uniquePaths = Array.from(new Set(parsed.data.paths.map((path) => path.trim()).filter(Boolean)))
+        if (uniquePaths.length === 0) {
+            return c.json({ worktrees: [] })
+        }
+
+        try {
+            const worktrees = await engine.listWorktreesForBoundMachine(c.get('namespace'), uniquePaths)
+            return c.json({ worktrees })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to list worktrees' }, 500)
         }
     })
 

@@ -119,11 +119,21 @@ export type SpawnTerminalPairResponse =
         message: string
     }
 export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
+export type DetectedWorktree = {
+    repoRoot: string
+    path: string
+    branch?: string
+    isCurrent: boolean
+}
 export type HubLaunchFolder = {
     label: string
     path: string
     branch?: string
     source: 'path' | 'wt'
+}
+export type HubWorktreesResponse = {
+    worktrees: DetectedWorktree[]
+    error?: string
 }
 export type HubConfigResponse = {
     name: string | null

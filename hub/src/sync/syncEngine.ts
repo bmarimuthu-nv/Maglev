@@ -28,8 +28,10 @@ import { MachineCache, type Machine } from './machineCache'
 import {
     RpcGateway,
     type RpcCommandResponse,
+    type RpcDetectedWorktree,
     type RpcDeleteUploadResponse,
     type RpcListDirectoryResponse,
+    type RpcListWorktreesResponse,
     type RpcPathExistsResponse,
     type RpcReadFileResponse,
     type RpcReviewBaseMode,
@@ -46,8 +48,10 @@ export type { Machine } from './machineCache'
 export type { SyncEventListener } from './eventPublisher'
 export type {
     RpcCommandResponse,
+    RpcDetectedWorktree,
     RpcDeleteUploadResponse,
     RpcListDirectoryResponse,
+    RpcListWorktreesResponse,
     RpcPathExistsResponse,
     RpcReadFileResponse,
     RpcReviewMode,
@@ -1318,6 +1322,14 @@ export class SyncEngine {
             throw new Error('No machine online')
         }
         return await this.rpcGateway.checkPathsExist(machine.id, paths)
+    }
+
+    async listWorktreesForBoundMachine(namespace: string, paths: string[]): Promise<RpcDetectedWorktree[]> {
+        const machine = this.getBoundMachine(namespace)
+        if (!machine?.active) {
+            throw new Error('No machine online')
+        }
+        return await this.rpcGateway.listWorktrees(machine.id, paths)
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {

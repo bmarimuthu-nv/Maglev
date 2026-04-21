@@ -50,6 +50,17 @@ export type RpcPathExistsResponse = {
     exists: Record<string, boolean>
 }
 
+export type RpcDetectedWorktree = {
+    repoRoot: string
+    path: string
+    branch?: string
+    isCurrent: boolean
+}
+
+export type RpcListWorktreesResponse = {
+    worktrees: RpcDetectedWorktree[]
+}
+
 export type RpcReviewMode = 'branch' | 'working'
 export type RpcReviewBaseMode = 'origin' | 'upstream' | 'fork-point'
 
@@ -191,6 +202,27 @@ export class RpcGateway {
             exists[key] = value === true
         }
         return exists
+    }
+
+    async listWorktrees(machineId: string, paths: string[]): Promise<RpcDetectedWorktree[]> {
+        const result = await this.machineRpc(machineId, 'list-worktrees', { paths }) as RpcListWorktreesResponse | unknown
+        if (!result || typeof result !== 'object') {
+            throw new Error('Unexpected list-worktrees result')
+        }
+
+        const worktreesValue = (result as RpcListWorktreesResponse).worktrees
+        if (!Array.isArray(worktreesValue)) {
+            throw new Error('Unexpected list-worktrees result')
+        }
+
+        return worktreesValue.filter((item): item is RpcDetectedWorktree => Boolean(
+            item
+            && typeof item === 'object'
+            && typeof item.repoRoot === 'string'
+            && typeof item.path === 'string'
+            && typeof item.isCurrent === 'boolean'
+            && (item.branch === undefined || typeof item.branch === 'string')
+        ))
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
