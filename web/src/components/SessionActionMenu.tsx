@@ -7,6 +7,7 @@ import {
     useState,
     type CSSProperties
 } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
@@ -447,7 +448,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const baseItemClassName =
         'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
 
-    return (
+    const menu = (
         <div
             ref={menuRef}
             className={`fixed z-50 min-w-[200px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg ${
@@ -651,4 +652,10 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
             </div>
         </div>
     )
+
+    if (typeof document === 'undefined') {
+        return menu
+    }
+
+    return createPortal(menu, document.body)
 }
