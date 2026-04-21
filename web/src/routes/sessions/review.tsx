@@ -7,6 +7,7 @@ import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBa
 import { LoadingState } from '@/components/LoadingState'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { ReviewThreadCard } from '@/components/review/ReviewThreadCard'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
 import { REVIEW_FILE_PATH, createEmptyReviewFile, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
@@ -459,93 +460,6 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                         </div>
                     ) : null}
                 </div>
-            )}
-        </div>
-    )
-}
-
-type ReviewThreadCardProps = {
-    thread: ReviewThread
-    collapsed: boolean
-    onToggleResolved: () => void
-    onResolve: () => void
-    onDelete: () => void
-    onReply: (body: string) => void
-}
-
-function ReviewThreadCard(props: ReviewThreadCardProps) {
-    const [reply, setReply] = useState('')
-
-    return (
-        <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
-            <div className="flex items-center justify-between gap-3">
-                <div className="text-xs font-medium uppercase tracking-wide text-[var(--app-hint)]">
-                    {props.thread.status === 'resolved' ? 'Resolved thread' : 'Open thread'}
-                </div>
-                <div className="flex items-center gap-2">
-                    {props.thread.status === 'resolved' ? (
-                        <button
-                            type="button"
-                            onClick={props.onToggleResolved}
-                            className="rounded border border-[var(--app-border)] px-2 py-1 text-xs hover:bg-[var(--app-subtle-bg)]"
-                        >
-                            {props.collapsed ? 'Expand' : 'Collapse'}
-                        </button>
-                    ) : null}
-                    <button
-                        type="button"
-                        onClick={props.onResolve}
-                        className="rounded border border-[var(--app-border)] px-2 py-1 text-xs hover:bg-[var(--app-subtle-bg)]"
-                    >
-                        {props.thread.status === 'resolved' ? 'Reopen' : 'Resolve'}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={props.onDelete}
-                        className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                    >
-                        Delete
-                    </button>
-                </div>
-            </div>
-
-            {props.collapsed ? null : (
-                <>
-                    <div className="mt-3 space-y-3">
-                        {props.thread.comments.map((comment) => (
-                            <div key={comment.id} className="rounded-md bg-[var(--app-subtle-bg)] px-3 py-2">
-                                <div className="flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
-                                    <span>{comment.author}</span>
-                                    <span>{new Date(comment.createdAt).toLocaleString()}</span>
-                                </div>
-                                <div className="mt-1 whitespace-pre-wrap text-sm text-[var(--app-fg)]">{comment.body}</div>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="mt-3">
-                        <textarea
-                            value={reply}
-                            onChange={(event) => setReply(event.target.value)}
-                            placeholder="Reply to thread"
-                            className="min-h-20 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                        />
-                        <div className="mt-2 flex justify-end">
-                            <button
-                                type="button"
-                                disabled={!reply.trim()}
-                                onClick={() => {
-                                    const next = reply.trim()
-                                    if (!next) return
-                                    props.onReply(next)
-                                    setReply('')
-                                }}
-                                className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                Reply
-                            </button>
-                        </div>
-                    </div>
-                </>
             )}
         </div>
     )

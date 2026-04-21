@@ -8,12 +8,35 @@ import { isBinaryContent } from '@/lib/file-utils'
 import type { FileReviewThread } from '@/types/api'
 import { useShikiHighlighter, useShikiLines, resolveLanguageFromPath } from '@/lib/shiki'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { SourceReviewFileCard } from '@/components/review/SourceReviewFileCard'
 
 function CloseIcon() {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+    )
+}
+
+function ReloadIcon(props: { spinning?: boolean }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.spinning ? 'animate-spin' : undefined}
+        >
+            <path d="M21 2v6h-6" />
+            <path d="M3 12a9 9 0 0 1 15.5-6.36L21 8" />
+            <path d="M3 22v-6h6" />
+            <path d="M21 12a9 9 0 0 1-15.5 6.36L3 16" />
         </svg>
     )
 }
@@ -26,97 +49,6 @@ function normalizeSourceLines(content: string): string[] {
     const normalized = content.replace(/\r\n/g, '\n')
     const lines = normalized.split('\n')
     return lines.length > 0 ? lines : ['']
-}
-
-function ReviewThreadCard(props: {
-    thread: FileReviewThread
-    collapsed: boolean
-    onToggleResolved: () => void
-    onResolve: () => void
-    onDelete: () => void
-    onReply: (body: string) => void
-    disabled?: boolean
-}) {
-    const [reply, setReply] = useState('')
-
-    return (
-        <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
-            <div className="flex items-center justify-between gap-3">
-                <div className="text-xs font-medium uppercase tracking-wide text-[var(--app-hint)]">
-                    {props.thread.status === 'resolved' ? 'Resolved thread' : 'Open thread'}
-                    {props.thread.orphaned ? ' • orphaned' : props.thread.resolvedLine ? ` • line ${props.thread.resolvedLine}` : ''}
-                </div>
-                <div className="flex items-center gap-2">
-                    {props.thread.status === 'resolved' ? (
-                        <button
-                            type="button"
-                            onClick={props.onToggleResolved}
-                            className="rounded border border-[var(--app-border)] px-2 py-1 text-xs hover:bg-[var(--app-subtle-bg)]"
-                        >
-                            {props.collapsed ? 'Expand' : 'Collapse'}
-                        </button>
-                    ) : null}
-                    <button
-                        type="button"
-                        disabled={props.disabled}
-                        onClick={props.onResolve}
-                        className="rounded border border-[var(--app-border)] px-2 py-1 text-xs hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        {props.thread.status === 'resolved' ? 'Reopen' : 'Resolve'}
-                    </button>
-                    <button
-                        type="button"
-                        disabled={props.disabled}
-                        onClick={props.onDelete}
-                        className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        Delete
-                    </button>
-                </div>
-            </div>
-
-            {props.collapsed ? null : (
-                <>
-                    <div className="mt-3 space-y-3">
-                        {props.thread.comments.map((comment) => (
-                            <div key={comment.id} className="rounded-md bg-[var(--app-subtle-bg)] px-3 py-2">
-                                <div className="flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
-                                    <span>{comment.author}</span>
-                                    <span>{new Date(comment.createdAt).toLocaleString()}</span>
-                                </div>
-                                <div className="mt-1 whitespace-pre-wrap text-sm text-[var(--app-fg)]">{comment.body}</div>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="mt-3">
-                        <textarea
-                            value={reply}
-                            onChange={(event) => setReply(event.target.value)}
-                            placeholder="Reply to thread"
-                            className="min-h-20 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                        />
-                        <div className="mt-2 flex justify-end">
-                            <button
-                                type="button"
-                                disabled={props.disabled || !reply.trim()}
-                                onClick={() => {
-                                    const next = reply.trim()
-                                    if (!next) {
-                                        return
-                                    }
-                                    props.onReply(next)
-                                    setReply('')
-                                }}
-                                className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                Reply
-                            </button>
-                        </div>
-                    </div>
-                </>
-            )}
-        </div>
-    )
 }
 
 export function FilePreviewPanel(props: {
@@ -250,7 +182,20 @@ export function FilePreviewPanel(props: {
         }
     }, [invalidateReviewThreads])
 
+    const handleRefresh = useCallback(async () => {
+        if (!api || isEditing || isSaving || reviewSaving) {
+            return
+        }
+        setSaveError(null)
+        setReviewError(null)
+        await Promise.all([
+            fileQuery.refetch(),
+            reviewThreadsQuery.refetch(),
+        ])
+    }, [api, fileQuery, isEditing, isSaving, reviewSaving, reviewThreadsQuery])
+
     const isDirty = isEditing && draft !== content
+    const isRefreshing = (fileQuery.isFetching && !fileQuery.isLoading) || (reviewThreadsQuery.isFetching && !reviewThreadsQuery.isLoading)
     const reviewThreads = reviewThreadsQuery.data?.success ? (reviewThreadsQuery.data.threads ?? []) : []
     const reviewStoreScope = reviewThreadsQuery.data?.success ? reviewThreadsQuery.data.storageScope : undefined
     const lineThreads = useMemo(() => {
@@ -285,40 +230,35 @@ export function FilePreviewPanel(props: {
         setComposerText('')
     }, [api, composerText, filePath, runReviewMutation, sessionId])
 
-    const renderThreadCard = useCallback((thread: FileReviewThread) => (
-        <ReviewThreadCard
-            key={thread.id}
-            thread={thread}
-            collapsed={thread.status === 'resolved' && collapsedResolvedThreadIds[thread.id] !== false}
-            disabled={reviewSaving}
-            onToggleResolved={() => {
-                setCollapsedResolvedThreadIds((current) => ({
-                    ...current,
-                    [thread.id]: current[thread.id] === false ? true : false
-                }))
-            }}
-            onResolve={() => {
-                void runReviewMutation(() => api?.setSessionFileReviewThreadStatus(
-                    sessionId,
-                    thread.id,
-                    thread.status === 'resolved' ? 'open' : 'resolved'
-                ) ?? Promise.resolve({ success: false, error: 'API unavailable' }))
-            }}
-            onDelete={() => {
-                if (!window.confirm('Delete this review thread permanently?')) {
-                    return
-                }
-                void runReviewMutation(() => api?.deleteSessionFileReviewThread(sessionId, thread.id)
-                    ?? Promise.resolve({ success: false, error: 'API unavailable' }))
-            }}
-            onReply={(body) => {
-                void runReviewMutation(() => api?.replyToSessionFileReviewThread(sessionId, thread.id, {
-                    body,
-                    author: 'user'
-                }) ?? Promise.resolve({ success: false, error: 'API unavailable' }))
-            }}
-        />
-    ), [api, collapsedResolvedThreadIds, reviewSaving, runReviewMutation, sessionId])
+    const toggleCollapsedThread = useCallback((threadId: string) => {
+        setCollapsedResolvedThreadIds((current) => ({
+            ...current,
+            [threadId]: current[threadId] === false ? true : false
+        }))
+    }, [])
+
+    const handleResolveThread = useCallback((thread: FileReviewThread) => {
+        void runReviewMutation(() => api?.setSessionFileReviewThreadStatus(
+            sessionId,
+            thread.id,
+            thread.status === 'resolved' ? 'open' : 'resolved'
+        ) ?? Promise.resolve({ success: false, error: 'API unavailable' }))
+    }, [api, runReviewMutation, sessionId])
+
+    const handleDeleteThread = useCallback((thread: FileReviewThread) => {
+        if (!window.confirm('Delete this review thread permanently?')) {
+            return
+        }
+        void runReviewMutation(() => api?.deleteSessionFileReviewThread(sessionId, thread.id)
+            ?? Promise.resolve({ success: false, error: 'API unavailable' }))
+    }, [api, runReviewMutation, sessionId])
+
+    const handleReplyToThread = useCallback((thread: FileReviewThread, body: string) => {
+        void runReviewMutation(() => api?.replyToSessionFileReviewThread(sessionId, thread.id, {
+            body,
+            author: 'user'
+        }) ?? Promise.resolve({ success: false, error: 'API unavailable' }))
+    }, [api, runReviewMutation, sessionId])
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden">
@@ -372,6 +312,15 @@ export function FilePreviewPanel(props: {
                         Edit
                     </button>
                 ) : null}
+                <button
+                    type="button"
+                    onClick={() => void handleRefresh()}
+                    disabled={!api || isEditing || isSaving || reviewSaving || fileQuery.isLoading}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                    title={isRefreshing ? 'Reloading file and review threads' : 'Reload file and review threads'}
+                >
+                    <ReloadIcon spinning={isRefreshing} />
+                </button>
                 <button
                     type="button"
                     onClick={onClose}
@@ -439,83 +388,27 @@ export function FilePreviewPanel(props: {
                         spellCheck={false}
                     />
                 ) : panelMode === 'review' ? (
-                    <div className="overflow-hidden rounded-none bg-[var(--app-code-bg)]">
-                        {sourceLines.map((line, index) => {
-                            const lineNumber = index + 1
-                            const threads = lineThreads.get(lineNumber) ?? []
-                            const showComposer = composerLine === lineNumber
-                            const syntaxLine = highlightedSourceLines?.[index]
-                            return (
-                                <div key={`${lineNumber}-${line}`} className="border-b border-[var(--app-divider)] last:border-b-0">
-                                    <div className={`flex items-start gap-3 px-4 py-1.5 font-mono text-[12px] leading-[1.45] ${showComposer ? 'bg-[var(--app-link)]/5' : 'hover:bg-[var(--app-subtle-bg)]'}`}>
-                                        <button
-                                            type="button"
-                                            disabled={reviewSaving}
-                                            onClick={() => {
-                                                setComposerLine(lineNumber)
-                                                setComposerText('')
-                                            }}
-                                            className="mt-0.5 h-5 w-5 shrink-0 rounded border border-[var(--app-border)] text-[10px] text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-40"
-                                            title={`Add comment on line ${lineNumber}`}
-                                        >
-                                            +
-                                        </button>
-                                        <div className="w-12 shrink-0 text-right text-[var(--app-hint)]">
-                                            {lineNumber}
-                                        </div>
-                                        <div className="shiki min-w-0 flex-1 whitespace-pre-wrap break-words text-[var(--app-fg)]">
-                                            {syntaxLine ?? (line || ' ')}
-                                        </div>
-                                    </div>
-                                    {showComposer ? (
-                                        <div className="border-t border-[var(--app-divider)] bg-[var(--app-bg)] px-4 py-3">
-                                            <textarea
-                                                value={composerText}
-                                                onChange={(event) => setComposerText(event.target.value)}
-                                                placeholder={`Add comment for line ${lineNumber}`}
-                                                className="min-h-24 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                                            />
-                                            <div className="mt-2 flex justify-end gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setComposerLine(null)
-                                                        setComposerText('')
-                                                    }}
-                                                    className="rounded-md border border-[var(--app-border)] px-3 py-2 text-sm"
-                                                >
-                                                    Cancel
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    disabled={reviewSaving || !composerText.trim()}
-                                                    onClick={() => {
-                                                        void handleCreateThread(lineNumber)
-                                                    }}
-                                                    className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                                                >
-                                                    Save comment
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ) : null}
-                                    {threads.length > 0 ? (
-                                        <div className="space-y-2 border-t border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-4 py-3">
-                                            {threads.map((thread) => renderThreadCard(thread))}
-                                        </div>
-                                    ) : null}
-                                </div>
-                            )
-                        })}
-                        {orphanedThreads.length > 0 ? (
-                            <div className="border-t border-[var(--app-border)] bg-[var(--app-bg)] px-4 py-4">
-                                <div className="mb-2 text-sm font-medium">Orphaned threads</div>
-                                <div className="space-y-2">
-                                    {orphanedThreads.map((thread) => renderThreadCard(thread))}
-                                </div>
-                            </div>
-                        ) : null}
-                    </div>
+                    <SourceReviewFileCard
+                        filePath={filePath}
+                        sourceLines={sourceLines}
+                        highlightedSourceLines={highlightedSourceLines}
+                        reviewSaving={reviewSaving}
+                        reviewThreads={reviewThreads}
+                        lineThreads={lineThreads}
+                        orphanedThreads={orphanedThreads}
+                        composerLine={composerLine}
+                        composerText={composerText}
+                        collapsedResolvedThreadIds={collapsedResolvedThreadIds}
+                        onComposerLineChange={setComposerLine}
+                        onComposerTextChange={setComposerText}
+                        onCreateThread={(lineNumber) => {
+                            void handleCreateThread(lineNumber)
+                        }}
+                        onToggleResolvedCollapse={toggleCollapsedThread}
+                        onResolveThread={handleResolveThread}
+                        onDeleteThread={handleDeleteThread}
+                        onReplyToThread={handleReplyToThread}
+                    />
                 ) : markdown && viewMode === 'rendered' ? (
                     <div className="p-4">
                         <MarkdownRenderer content={content} />
