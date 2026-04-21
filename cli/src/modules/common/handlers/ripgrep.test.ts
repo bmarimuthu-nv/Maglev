@@ -70,6 +70,19 @@ describe('ripgrep RPC handler', () => {
         expect(parsed.stdout).toBe('src/nested/helper.ts')
     })
 
+    it('supports question-mark wildcards in iglob fallback mode', async () => {
+        process.env.MAGLEV_RIPGREP_PATH = join(rootDir, 'missing-rg')
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:ripgrep',
+            params: JSON.stringify({ args: ['--files', '--iglob', 'src/nested/helper.?s'], cwd: rootDir })
+        })
+
+        const parsed = JSON.parse(response) as { success: boolean; stdout?: string }
+        expect(parsed.success).toBe(true)
+        expect(parsed.stdout).toBe('src/nested/helper.ts')
+    })
+
     it('bounds file-list responses before returning them over RPC', async () => {
         const response = await rpc.handleRequest({
             method: 'session-test:ripgrep',

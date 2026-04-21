@@ -5,6 +5,8 @@ import TerminalPage from './terminal'
 
 const writeMock = vi.fn()
 const AUTO_SCROLL_KEY = 'maglev-auto-scroll'
+const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
+const useSessionFileSearchMock = vi.fn()
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
@@ -43,11 +45,7 @@ vi.mock('@/hooks/queries/useSessions', () => ({
 }))
 
 vi.mock('@/hooks/queries/useSessionFileSearch', () => ({
-    useSessionFileSearch: () => ({
-        files: [],
-        isLoading: false,
-        error: null
-    })
+    useSessionFileSearch: (...args: unknown[]) => useSessionFileSearchMock(...args)
 }))
 
 vi.mock('@/hooks/useTerminalSocket', () => ({
@@ -72,6 +70,10 @@ vi.mock('@/components/Terminal/TerminalView', () => ({
     TerminalView: () => <div data-testid="terminal-view" />
 }))
 
+vi.mock('@/components/FilePreviewPanel', () => ({
+    FilePreviewPanel: () => <div data-testid="file-preview-panel" />
+}))
+
 function renderWithProviders() {
     return render(
         <I18nProvider>
@@ -80,9 +82,18 @@ function renderWithProviders() {
     )
 }
 
+function setDefaultFileSearchMock() {
+    useSessionFileSearchMock.mockImplementation(() => ({
+        files: [],
+        isLoading: false,
+        error: null
+    }))
+}
+
 describe('TerminalPage paste behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        setDefaultFileSearchMock()
         Object.defineProperty(window, 'matchMedia', {
             configurable: true,
             writable: true,
@@ -138,6 +149,7 @@ describe('TerminalPage auto-scroll wheel detection', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        setDefaultFileSearchMock()
         localStorage.removeItem(AUTO_SCROLL_KEY)
         Object.defineProperty(window, 'matchMedia', {
             configurable: true,
@@ -221,5 +233,115 @@ describe('TerminalPage auto-scroll wheel detection', () => {
         expect(writeMock).toHaveBeenCalledWith('\u0002')
         expect(writeMock).toHaveBeenCalledWith('[')
         expect(writeMock).toHaveBeenCalledWith('\u001b[6~')
+    })
+})
+
+describe('TerminalPage open file dialog', () => {
+    beforeEach(() => {
+        cleanup()
+        vi.clearAllMocks()
+        localStorage.removeItem(RECENT_OPEN_FILES_KEY)
+        setDefaultFileSearchMock()
+        Object.defineProperty(window, 'matchMedia', {
+            configurable: true,
+            writable: true,
+            value: vi.fn().mockReturnValue({
+                matches: false,
+                media: '',
+                onchange: null,
+                addListener: vi.fn(),
+                removeListener: vi.fn(),
+                addEventListener: vi.fn(),
+                removeEventListener: vi.fn(),
+                dispatchEvent: vi.fn()
+            })
+        })
+    })
+
+    afterEach(() => {
+        localStorage.removeItem(RECENT_OPEN_FILES_KEY)
+        cleanup()
+    })
+
+    it('does not trigger backend file search until the user submits search', async () => {
+        localStorage.setItem(RECENT_OPEN_FILES_KEY, JSON.stringify([
+            {
+                fileName: 'helper.ts',
+                filePath: 'src/nested',
+                fullPath: 'src/nested/helper.ts',
+                fileType: 'file'
+            },
+            {
+                fileName: 'index.ts',
+                filePath: 'src',
+                fullPath: 'src/index.ts',
+                fileType: 'file'
+            }
+        ]))
+
+        renderWithProviders()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+        const input = screen.getByPlaceholderText('Type to fuzzy search files')
+        fireEvent.change(input, { target: { value: 'helper' } })
+
+        expect(screen.getByText('Recent matches')).toBeInTheDocument()
+        expect(screen.getByText('src/nested/helper.ts')).toBeInTheDocument()
+        expect(screen.queryByText('src/index.ts')).not.toBeInTheDocument()
+
+        expect(useSessionFileSearchMock).toHaveBeenLastCalledWith(
+            null,
+            'session-1',
+            '',
+            expect.objectContaining({
+                enabled: false,
+                mode: 'fuzzy'
+            })
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+        await waitFor(() => {
+            expect(useSessionFileSearchMock).toHaveBeenLastCalledWith(
+                null,
+                'session-1',
+                'helper',
+                expect.objectContaining({
+                    enabled: true,
+                    mode: 'fuzzy'
+                })
+            )
+        })
+    })
+
+    it('shows recently opened files before running a new search', async () => {
+        useSessionFileSearchMock.mockImplementation((_api, _sessionId, query: string) => ({
+            files: query === 'helper'
+                ? [{
+                    fileName: 'helper.ts',
+                    filePath: 'src/nested',
+                    fullPath: 'src/nested/helper.ts',
+                    fileType: 'file'
+                }]
+                : [],
+            isLoading: false,
+            error: null
+        }))
+
+        renderWithProviders()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+        fireEvent.change(screen.getByPlaceholderText('Type to fuzzy search files'), {
+            target: { value: 'helper' }
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+        const resultButton = await screen.findByRole('button', { name: /helper\.ts/i })
+        fireEvent.click(resultButton)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+
+        expect(screen.getByText('Recent files')).toBeInTheDocument()
+        expect(screen.getByText('src/nested/helper.ts')).toBeInTheDocument()
     })
 })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
+import type { FileSearchItem } from '@/types/api'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useSession } from '@/hooks/queries/useSession'
@@ -38,6 +39,55 @@ const FILE_PREVIEW_WIDTH_KEY = 'maglev:filePreviewWidth'
 const FILE_PREVIEW_DEFAULT_WIDTH = 480
 const FILE_PREVIEW_MIN_WIDTH = 280
 const FILE_PREVIEW_MAX_WIDTH = 800
+const RECENT_OPEN_FILES_LIMIT = 20
+const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
+
+function loadRecentOpenFiles(): FileSearchItem[] {
+    if (typeof window === 'undefined') {
+        return []
+    }
+
+    try {
+        const raw = localStorage.getItem(RECENT_OPEN_FILES_KEY)
+        if (!raw) {
+            return []
+        }
+        const parsed = JSON.parse(raw)
+        if (!Array.isArray(parsed)) {
+            return []
+        }
+        return parsed.filter((item): item is FileSearchItem => (
+            item !== null
+            && typeof item === 'object'
+            && typeof item.fileName === 'string'
+            && typeof item.filePath === 'string'
+            && typeof item.fullPath === 'string'
+            && (item.fileType === 'file' || item.fileType === 'folder')
+        ))
+    } catch {
+        return []
+    }
+}
+
+function saveRecentOpenFiles(files: FileSearchItem[]): void {
+    if (typeof window === 'undefined') {
+        return
+    }
+
+    try {
+        localStorage.setItem(RECENT_OPEN_FILES_KEY, JSON.stringify(files.slice(0, RECENT_OPEN_FILES_LIMIT)))
+    } catch {
+        // ignore
+    }
+}
+
+function globPatternToRegExp(pattern: string): RegExp {
+    const escaped = pattern
+        .replace(/[|\\{}()[\]^$+?.]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\\\?/g, '.')
+    return new RegExp(`^${escaped}$`, 'i')
+}
 
 function normalizeWheelDelta(deltaY: number, deltaMode: number): number {
     const absDelta = Math.abs(deltaY)
@@ -122,6 +172,8 @@ type ModifierState = {
     ctrl: boolean
     alt: boolean
 }
+
+type OpenFileSearchMode = 'fuzzy' | 'glob'
 
 function applyModifierState(sequence: string, state: ModifierState): string {
     let modified = sequence
@@ -287,7 +339,10 @@ export default function TerminalPage() {
     const [notesSearchMatchCount, setNotesSearchMatchCount] = useState(0)
     const [openFileDialogOpen, setOpenFileDialogOpen] = useState(false)
     const [openFileQuery, setOpenFileQuery] = useState('')
+    const [openFileSearchMode, setOpenFileSearchMode] = useState<OpenFileSearchMode>('fuzzy')
+    const [openFileSubmittedQuery, setOpenFileSubmittedQuery] = useState('')
     const [openFileActiveIndex, setOpenFileActiveIndex] = useState(0)
+    const [recentOpenFiles, setRecentOpenFiles] = useState<FileSearchItem[]>(() => loadRecentOpenFiles())
     const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
     const [previewPanelWidth, setPreviewPanelWidth] = useState(() => {
         try {
@@ -344,15 +399,54 @@ export default function TerminalPage() {
         terminalRef.current?.blur()
     }, [])
 
-    const fileSearchInventory = useSessionFileSearch(api, loadedSessionId, '', {
-        enabled: openFileDialogOpen && Boolean(loadedSessionId && session?.active && session?.metadata?.path),
-        limit: 5000
-    })
+    const fileSearchInventory = useSessionFileSearch(
+        api,
+        loadedSessionId,
+        openFileSubmittedQuery,
+        {
+            enabled: openFileDialogOpen
+                && openFileSubmittedQuery.length > 0
+                && Boolean(loadedSessionId && session?.active && session?.metadata?.path),
+            limit: 5000,
+            mode: openFileSearchMode
+        }
+    )
+    const openFileHasSubmittedSearch = openFileSubmittedQuery.length > 0
+    const recentOpenFileMatches = useMemo(
+        () => {
+            const query = openFileQuery.trim()
+            if (!query) {
+                return recentOpenFiles
+            }
+
+            if (openFileSearchMode === 'glob') {
+                const regex = globPatternToRegExp(query)
+                return recentOpenFiles.filter((file) => regex.test(file.fileName) || regex.test(file.fullPath))
+            }
+
+            return rankFiles(recentOpenFiles, query).slice(0, RECENT_OPEN_FILES_LIMIT)
+        },
+        [openFileQuery, openFileSearchMode, recentOpenFiles]
+    )
+    const searchResultFiles = useMemo(
+        () => {
+            if (!openFileHasSubmittedSearch) {
+                return []
+            }
+            const rawResults = openFileSearchMode === 'glob'
+                ? fileSearchInventory.files.slice(0, 200)
+                : rankFiles(fileSearchInventory.files, openFileSubmittedQuery).slice(0, 200)
+            const recentPaths = new Set(recentOpenFileMatches.map((file) => file.fullPath))
+            return rawResults.filter((file) => !recentPaths.has(file.fullPath))
+        },
+        [fileSearchInventory.files, openFileHasSubmittedSearch, openFileSearchMode, openFileSubmittedQuery, recentOpenFileMatches]
+    )
     const openFileResults = useMemo(
-        () => openFileQuery.trim()
-            ? rankFiles(fileSearchInventory.files, openFileQuery).slice(0, 200)
-            : fileSearchInventory.files.slice(0, 200),
-        [fileSearchInventory.files, openFileQuery]
+        () => [
+            ...recentOpenFileMatches,
+            ...searchResultFiles
+        ],
+        [recentOpenFileMatches, searchResultFiles]
     )
 
     const {
@@ -836,7 +930,11 @@ export default function TerminalPage() {
 
     useEffect(() => {
         setOpenFileActiveIndex(0)
-    }, [openFileQuery])
+    }, [openFileQuery, openFileSearchMode, openFileSubmittedQuery])
+
+    useEffect(() => {
+        setRecentOpenFiles(loadRecentOpenFiles())
+    }, [])
 
     const handleOpenFileDialog = useCallback(() => {
         if (!loadedSessionId || !session?.active || !session?.metadata?.path) {
@@ -849,15 +947,25 @@ export default function TerminalPage() {
         }, 0)
     }, [loadedSessionId, session?.active, session?.metadata?.path])
 
-    const handleOpenExplorerFile = useCallback((path: string) => {
+    const rememberRecentOpenFile = useCallback((file: FileSearchItem) => {
+        setRecentOpenFiles((prev) => {
+            const next = [file, ...prev.filter((entry) => entry.fullPath !== file.fullPath)].slice(0, RECENT_OPEN_FILES_LIMIT)
+            saveRecentOpenFiles(next)
+            return next
+        })
+    }, [])
+
+    const handleOpenExplorerFile = useCallback((file: FileSearchItem) => {
         if (!loadedSessionId) {
             return
         }
-        setPreviewFilePath(path)
+        rememberRecentOpenFile(file)
+        setPreviewFilePath(file.fullPath)
         setOpenFileDialogOpen(false)
         setOpenFileQuery('')
+        setOpenFileSubmittedQuery('')
         setOpenFileActiveIndex(0)
-    }, [loadedSessionId])
+    }, [loadedSessionId, rememberRecentOpenFile])
 
     const handlePreviewResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         event.preventDefault()
@@ -946,6 +1054,7 @@ export default function TerminalPage() {
             if (event.key === 'Escape') {
                 setOpenFileDialogOpen(false)
                 setOpenFileQuery('')
+                setOpenFileSubmittedQuery('')
                 setOpenFileActiveIndex(0)
                 return
             }
@@ -963,17 +1072,22 @@ export default function TerminalPage() {
             }
 
             if (event.key === 'Enter') {
+                if (event.target === openFileInputRef.current) {
+                    event.preventDefault()
+                    setOpenFileSubmittedQuery(openFileQuery.trim())
+                    return
+                }
                 const match = openFileResults[openFileActiveIndex]
                 if (match?.fileType === 'file') {
                     event.preventDefault()
-                    handleOpenExplorerFile(match.fullPath)
+                    handleOpenExplorerFile(match)
                 }
             }
         }
 
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
-    }, [handleOpenExplorerFile, handleOpenFileDialog, openFileActiveIndex, openFileDialogOpen, openFileResults, openFileShortcut])
+    }, [handleOpenExplorerFile, handleOpenFileDialog, openFileActiveIndex, openFileDialogOpen, openFileQuery, openFileResults, openFileShortcut])
 
     const handleQuickInput = useCallback(
         (sequence: string) => {
@@ -1404,6 +1518,7 @@ export default function TerminalPage() {
                     setOpenFileDialogOpen(open)
                     if (!open) {
                         setOpenFileQuery('')
+                        setOpenFileSubmittedQuery('')
                         setOpenFileActiveIndex(0)
                     }
                 }}
@@ -1416,51 +1531,131 @@ export default function TerminalPage() {
                         </DialogDescription>
                     </DialogHeader>
                     <div className="mt-2">
-                        <input
-                            ref={openFileInputRef}
-                            type="text"
-                            value={openFileQuery}
-                            onChange={(event) => setOpenFileQuery(event.target.value)}
-                            placeholder="Type to fuzzy search files"
-                            className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                            autoCapitalize="none"
-                            autoCorrect="off"
-                            spellCheck={false}
-                        />
+                        <div className="mb-2 flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setOpenFileSearchMode('fuzzy')}
+                                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                    openFileSearchMode === 'fuzzy'
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
+                                        : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                                }`}
+                            >
+                                Fuzzy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setOpenFileSearchMode('glob')}
+                                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                    openFileSearchMode === 'glob'
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
+                                        : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                                }`}
+                            >
+                                Pattern
+                            </button>
+                            <div className="text-xs text-[var(--app-hint)]">
+                                {openFileSearchMode === 'glob'
+                                    ? 'Use * for many characters and ? for one character'
+                                    : 'Matches both file names and full paths'}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input
+                                ref={openFileInputRef}
+                                type="text"
+                                value={openFileQuery}
+                                onChange={(event) => {
+                                    setOpenFileQuery(event.target.value)
+                                    setOpenFileSubmittedQuery('')
+                                }}
+                                placeholder={openFileSearchMode === 'glob'
+                                    ? 'Type a wildcard pattern like src/**/*.ts or *test?.ts'
+                                    : 'Type to fuzzy search files'}
+                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                spellCheck={false}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setOpenFileSubmittedQuery(openFileQuery.trim())}
+                                disabled={openFileQuery.trim().length === 0}
+                                className="shrink-0 rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-bg)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Search
+                            </button>
+                        </div>
                     </div>
                     <div className="mt-3 max-h-[50vh] overflow-y-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)]">
-                        {fileSearchInventory.isLoading ? (
+                        {fileSearchInventory.isLoading && openFileHasSubmittedSearch ? (
                             <div className="px-3 py-4 text-sm text-[var(--app-hint)]">Loading files…</div>
-                        ) : fileSearchInventory.error ? (
+                        ) : null}
+                        {fileSearchInventory.error && openFileHasSubmittedSearch ? (
                             <div className="px-3 py-4 text-sm text-[var(--app-badge-error-text)]">{fileSearchInventory.error}</div>
-                        ) : openFileResults.length === 0 ? (
-                            <div className="px-3 py-4 text-sm text-[var(--app-hint)]">No matching files</div>
+                        ) : null}
+                        {openFileResults.length === 0 ? (
+                            <div className="px-3 py-4 text-sm text-[var(--app-hint)]">
+                                {openFileQuery.trim().length > 0
+                                    ? 'No recent matches. Press Search to look through workspace files.'
+                                    : openFileHasSubmittedSearch
+                                        ? 'No matching files'
+                                        : 'No recent files yet. Search to find a file.'}
+                            </div>
                         ) : (
                             <div className="divide-y divide-[var(--app-divider)]">
-                                {openFileResults.map((file, index) => (
-                                    <button
-                                        key={file.fullPath}
-                                        type="button"
-                                        onClick={() => {
-                                            if (file.fileType === 'file') {
-                                                handleOpenExplorerFile(file.fullPath)
-                                            }
-                                        }}
-                                        className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors ${
-                                            index === openFileActiveIndex
-                                                ? 'bg-[var(--app-subtle-bg)]'
-                                                : 'hover:bg-[var(--app-subtle-bg)]'
-                                        }`}
-                                    >
-                                        <div className="min-w-0 flex-1">
-                                            <div className="truncate text-sm font-medium text-[var(--app-fg)]">{file.fileName}</div>
-                                            <div className="truncate text-xs text-[var(--app-hint)]">{file.fullPath}</div>
-                                        </div>
-                                        <div className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--app-hint)]">
-                                            {file.fileType}
-                                        </div>
-                                    </button>
-                                ))}
+                                {(() => {
+                                    let runningIndex = 0
+                                    const sections = [
+                                        {
+                                            title: openFileQuery.trim().length > 0 ? 'Recent matches' : 'Recent files',
+                                            files: recentOpenFileMatches
+                                        },
+                                        {
+                                            title: 'Search results',
+                                            files: searchResultFiles
+                                        }
+                                    ].filter((section) => section.files.length > 0)
+
+                                    return sections.map((section) => {
+                                        const startIndex = runningIndex
+                                        runningIndex += section.files.length
+                                        return (
+                                            <div key={section.title}>
+                                                <div className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-[var(--app-hint)]">
+                                                    {section.title}
+                                                </div>
+                                                {section.files.map((file, index) => {
+                                                    const resultIndex = startIndex + index
+                                                    return (
+                                                        <button
+                                                            key={`${section.title}:${file.fullPath}`}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (file.fileType === 'file') {
+                                                                    handleOpenExplorerFile(file)
+                                                                }
+                                                            }}
+                                                            className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors ${
+                                                                resultIndex === openFileActiveIndex
+                                                                    ? 'bg-[var(--app-subtle-bg)]'
+                                                                    : 'hover:bg-[var(--app-subtle-bg)]'
+                                                            }`}
+                                                        >
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="truncate text-sm font-medium text-[var(--app-fg)]">{file.fileName}</div>
+                                                                <div className="truncate text-xs text-[var(--app-hint)]">{file.fullPath}</div>
+                                                            </div>
+                                                            <div className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--app-hint)]">
+                                                                {file.fileType}
+                                                            </div>
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        )
+                                    })
+                                })()}
                             </div>
                         )}
                     </div>

@@ -286,13 +286,21 @@ export class ApiClient {
         return await this.request<GitCommandResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/review-file?${params.toString()}`)
     }
 
-    async searchSessionFiles(sessionId: string, query: string, limit?: number): Promise<FileSearchResponse> {
+    async searchSessionFiles(
+        sessionId: string,
+        query: string,
+        limit?: number,
+        mode?: 'fuzzy' | 'glob'
+    ): Promise<FileSearchResponse> {
         const params = new URLSearchParams()
         if (query) {
             params.set('query', query)
         }
         if (limit !== undefined) {
             params.set('limit', `${limit}`)
+        }
+        if (mode) {
+            params.set('mode', mode)
         }
         const qs = params.toString()
         return await this.request<FileSearchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/files${qs ? `?${qs}` : ''}`)

@@ -8,6 +8,7 @@ const reviewModeSchema = z.enum(['branch', 'working'])
 
 const fileSearchSchema = z.object({
     query: z.string().optional(),
+    mode: z.enum(['fuzzy', 'glob']).optional(),
     limit: z.coerce.number().int().min(1).max(5000).optional()
 })
 
@@ -257,10 +258,11 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         }
 
         const query = parsed.data.query?.trim() ?? ''
+        const mode = parsed.data.mode ?? 'fuzzy'
         const limit = parsed.data.limit ?? 200
         const args = ['--files']
         if (query) {
-            args.push('--iglob', `*${query}*`)
+            args.push('--iglob', mode === 'glob' ? query : `*${query}*`)
         }
 
         const result = await runRpc(() => engine.runRipgrep(sessionResult.sessionId, args, sessionPath, limit))
