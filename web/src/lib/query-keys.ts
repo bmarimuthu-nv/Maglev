@@ -6,6 +6,7 @@ export const queryKeys = {
     sessionFiles: (scopeKey: string, sessionId: string, query: string) => ['session-files', scopeKey, sessionId, query] as const,
     sessionDirectory: (scopeKey: string, sessionId: string, path: string) => ['session-directory', scopeKey, sessionId, path] as const,
     sessionFile: (scopeKey: string, sessionId: string, path: string) => ['session-file', scopeKey, sessionId, path] as const,
+    sessionFileReviewThreads: (scopeKey: string, sessionId: string, path: string) => ['session-file-review-threads', scopeKey, sessionId, path] as const,
     gitFileDiff: (sessionId: string, path: string, staged?: boolean) => [
         'git-file-diff',
         sessionId,

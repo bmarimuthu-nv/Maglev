@@ -312,6 +312,14 @@ export class ApiClient {
         return await this.request<FileReadResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/file?${params.toString()}`)
     }
 
+    async getSessionFileReviewThreads(sessionId: string, path: string): Promise<import('@/types/api').FileReviewThreadsResponse> {
+        const params = new URLSearchParams()
+        params.set('path', path)
+        return await this.request<import('@/types/api').FileReviewThreadsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads?${params.toString()}`
+        )
+    }
+
     async writeSessionFile(
         sessionId: string,
         path: string,
@@ -322,6 +330,56 @@ export class ApiClient {
             method: 'POST',
             body: JSON.stringify({ path, content, expectedHash })
         })
+    }
+
+    async createSessionFileReviewThread(
+        sessionId: string,
+        payload: { path: string; line: number; body: string; author?: 'user' | 'agent' }
+    ): Promise<{ success: boolean; error?: string }> {
+        return await this.request<{ success: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads`,
+            {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            }
+        )
+    }
+
+    async replyToSessionFileReviewThread(
+        sessionId: string,
+        threadId: string,
+        payload: { body: string; author?: 'user' | 'agent' }
+    ): Promise<{ success: boolean; error?: string }> {
+        return await this.request<{ success: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads/${encodeURIComponent(threadId)}/replies`,
+            {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            }
+        )
+    }
+
+    async setSessionFileReviewThreadStatus(
+        sessionId: string,
+        threadId: string,
+        status: 'open' | 'resolved'
+    ): Promise<{ success: boolean; error?: string }> {
+        return await this.request<{ success: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads/${encodeURIComponent(threadId)}/status`,
+            {
+                method: 'PATCH',
+                body: JSON.stringify({ status })
+            }
+        )
+    }
+
+    async deleteSessionFileReviewThread(sessionId: string, threadId: string): Promise<{ success: boolean; error?: string }> {
+        return await this.request<{ success: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads/${encodeURIComponent(threadId)}`,
+            {
+                method: 'DELETE'
+            }
+        )
     }
 
     async listSessionDirectory(sessionId: string, path?: string): Promise<ListDirectoryResponse> {

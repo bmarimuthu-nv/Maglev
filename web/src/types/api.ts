@@ -198,6 +198,39 @@ export type FileReadResponse = {
     error?: string
 }
 
+export type FileReviewComment = {
+    id: string
+    author: 'user' | 'agent'
+    createdAt: number
+    body: string
+}
+
+export type FileReviewThread = {
+    id: string
+    filePath: string
+    absolutePath: string
+    createdAt: number
+    updatedAt: number
+    status: 'open' | 'resolved'
+    anchor: {
+        line: number
+        preview: string
+        contextBefore: string[]
+        contextAfter: string[]
+    }
+    comments: FileReviewComment[]
+    resolvedLine: number | null
+    orphaned: boolean
+}
+
+export type FileReviewThreadsResponse = {
+    success: boolean
+    storePath?: string
+    storageScope?: 'git' | 'workspace'
+    threads?: FileReviewThread[]
+    error?: string
+}
+
 export type WriteFileResponse = {
     success: boolean
     hash?: string
