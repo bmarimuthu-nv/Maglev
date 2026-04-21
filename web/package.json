@@ -30,6 +30,7 @@
         "clsx": "^2.1.1",
         "diff": "^8.0.2",
         "hast-util-to-jsx-runtime": "^2.3.6",
+        "mermaid": "^11.12.2",
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
         "react-markdown": "^10.1.0",

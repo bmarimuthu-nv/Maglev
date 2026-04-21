@@ -1,4 +1,4 @@
-import type { ComponentPropsWithoutRef, ReactNode } from 'react'
+import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import { MARKDOWN_PLUGINS } from '@/components/markdown/markdown-text'
@@ -67,14 +67,95 @@ function StandaloneCodeBlock(props: { code: string; language?: string }) {
     )
 }
 
+function MermaidBlock(props: { code: string }) {
+    const containerRef = useRef<HTMLDivElement | null>(null)
+    const diagramId = useId().replace(/:/g, '-')
+    const [svg, setSvg] = useState<string | null>(null)
+    const [error, setError] = useState<string | null>(null)
+
+    useEffect(() => {
+        let active = true
+
+        async function renderDiagram() {
+            setSvg(null)
+            setError(null)
+
+            try {
+                const mermaidModule = await import('mermaid')
+                const mermaid = mermaidModule.default
+                const theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'neutral'
+                mermaid.initialize({
+                    startOnLoad: false,
+                    securityLevel: 'strict',
+                    theme,
+                })
+                const { svg: renderedSvg, bindFunctions } = await mermaid.render(`maglev-mermaid-${diagramId}`, props.code)
+                if (!active) {
+                    return
+                }
+                setSvg(renderedSvg)
+                if (bindFunctions) {
+                    requestAnimationFrame(() => {
+                        if (containerRef.current) {
+                            bindFunctions(containerRef.current)
+                        }
+                    })
+                }
+            } catch (cause) {
+                if (!active) {
+                    return
+                }
+                setError(cause instanceof Error ? cause.message : 'Failed to render Mermaid diagram')
+            }
+        }
+
+        void renderDiagram()
+
+        return () => {
+            active = false
+        }
+    }, [diagramId, props.code])
+
+    return (
+        <div className="aui-md-mermaid min-w-0 w-full max-w-full overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
+            <div className="flex items-center justify-between border-b border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 py-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-[var(--app-hint)]">Mermaid</div>
+                <div className="text-[11px] text-[var(--app-hint)]">{svg ? 'Rendered' : error ? 'Error' : 'Rendering…'}</div>
+            </div>
+            {error ? (
+                <div className="space-y-3 p-3">
+                    <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+                        {error}
+                    </div>
+                    <StandaloneCodeBlock code={props.code} language="mermaid" />
+                </div>
+            ) : svg ? (
+                <div
+                    ref={containerRef}
+                    data-testid="mermaid-diagram"
+                    className="overflow-x-auto px-4 py-4 [&>svg]:mx-auto [&>svg]:h-auto [&>svg]:max-w-full"
+                    dangerouslySetInnerHTML={{ __html: svg }}
+                />
+            ) : (
+                <div className="px-4 py-6 text-sm text-[var(--app-hint)]">Rendering diagram…</div>
+            )}
+        </div>
+    )
+}
+
 function Code(props: ComponentPropsWithoutRef<'code'>) {
     const language = /language-([\w-]+)/.exec(props.className ?? '')?.[1]
+    const code = extractText(props.children).replace(/\n$/, '')
+
+    if (language === 'mermaid') {
+        return <MermaidBlock code={code} />
+    }
 
     if (language) {
         return (
             <StandaloneCodeBlock
                 language={language}
-                code={extractText(props.children).replace(/\n$/, '')}
+                code={code}
             />
         )
     }
@@ -255,7 +336,7 @@ export function MarkdownRenderer(props: MarkdownRendererProps) {
         : defaultComponents
 
     return (
-        <div className={cn('aui-md min-w-0 max-w-full break-words text-base')}>
+        <div className={cn('aui-md mx-auto min-w-0 max-w-4xl break-words rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-6 py-5 text-base shadow-sm')}>
             <ReactMarkdown
                 remarkPlugins={MARKDOWN_PLUGINS}
                 components={mergedComponents}

@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MarkdownRenderer } from './MarkdownRenderer'
+
+vi.mock('mermaid', () => ({
+    default: {
+        initialize: vi.fn(),
+        render: vi.fn(async (_id: string, code: string) => ({
+            svg: `<svg data-rendered="true"><text>${code}</text></svg>`,
+            bindFunctions: vi.fn()
+        }))
+    }
+}))
 
 describe('MarkdownRenderer', () => {
     beforeEach(() => {
@@ -27,5 +37,12 @@ describe('MarkdownRenderer', () => {
         expect(screen.getByText('one')).toBeInTheDocument()
         expect(screen.getByText('two')).toBeInTheDocument()
         expect(screen.getByText('const value = 1')).toBeInTheDocument()
+    })
+
+    it('renders mermaid diagrams from fenced code blocks', async () => {
+        render(<MarkdownRenderer content={`# Diagram\n\n\`\`\`mermaid\ngraph TD\nA-->B\n\`\`\``} />)
+
+        await waitFor(() => expect(screen.getByTestId('mermaid-diagram')).toBeInTheDocument())
+        expect(screen.getByText('Diagram')).toBeInTheDocument()
     })
 })

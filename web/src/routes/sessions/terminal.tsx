@@ -41,6 +41,7 @@ const FILE_PREVIEW_MIN_WIDTH = 280
 const FILE_PREVIEW_MAX_WIDTH = 800
 const RECENT_OPEN_FILES_LIMIT = 20
 const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
+const STICKY_FILE_PREVIEW_KEY = 'maglev:sticky-file-preview'
 
 function loadRecentOpenFiles(): FileSearchItem[] {
     if (typeof window === 'undefined') {
@@ -76,6 +77,40 @@ function saveRecentOpenFiles(files: FileSearchItem[]): void {
 
     try {
         localStorage.setItem(RECENT_OPEN_FILES_KEY, JSON.stringify(files.slice(0, RECENT_OPEN_FILES_LIMIT)))
+    } catch {
+        // ignore
+    }
+}
+
+function getStickyFilePreviewStorageKey(baseUrl: string, sessionId: string): string {
+    return `${STICKY_FILE_PREVIEW_KEY}:${baseUrl}:${sessionId}`
+}
+
+function loadStickyFilePreview(baseUrl: string, sessionId: string): string | null {
+    if (typeof window === 'undefined') {
+        return null
+    }
+
+    try {
+        const raw = localStorage.getItem(getStickyFilePreviewStorageKey(baseUrl, sessionId))
+        return raw && raw.trim().length > 0 ? raw : null
+    } catch {
+        return null
+    }
+}
+
+function saveStickyFilePreview(baseUrl: string, sessionId: string, filePath: string | null): void {
+    if (typeof window === 'undefined') {
+        return
+    }
+
+    try {
+        const storageKey = getStickyFilePreviewStorageKey(baseUrl, sessionId)
+        if (filePath && filePath.trim().length > 0) {
+            localStorage.setItem(storageKey, filePath)
+        } else {
+            localStorage.removeItem(storageKey)
+        }
     } catch {
         // ignore
     }
@@ -343,7 +378,7 @@ export default function TerminalPage() {
     const [openFileSubmittedQuery, setOpenFileSubmittedQuery] = useState('')
     const [openFileActiveIndex, setOpenFileActiveIndex] = useState(0)
     const [recentOpenFiles, setRecentOpenFiles] = useState<FileSearchItem[]>(() => loadRecentOpenFiles())
-    const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
+    const [previewFilePath, setPreviewFilePath] = useState<string | null>(() => loadStickyFilePreview(baseUrl, sessionId))
     const [previewPanelWidth, setPreviewPanelWidth] = useState(() => {
         try {
             const saved = localStorage.getItem(FILE_PREVIEW_WIDTH_KEY)
@@ -597,6 +632,14 @@ export default function TerminalPage() {
         connectOnceRef.current = false
         setExitInfo(null)
     }, [sessionId])
+
+    useEffect(() => {
+        setPreviewFilePath(loadStickyFilePreview(baseUrl, sessionId))
+    }, [baseUrl, sessionId])
+
+    useEffect(() => {
+        saveStickyFilePreview(baseUrl, sessionId, previewFilePath)
+    }, [baseUrl, previewFilePath, sessionId])
 
     useEffect(() => {
         pendingNewSessionFocusRef.current = hasPendingTerminalFocus(sessionId)
