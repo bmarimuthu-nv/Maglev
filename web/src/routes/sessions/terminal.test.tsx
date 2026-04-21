@@ -210,4 +210,16 @@ describe('TerminalPage auto-scroll wheel detection', () => {
         // Page Up for scroll up direction
         expect(writeMock).toHaveBeenCalledWith('\u001b[5~')
     })
+
+    it('normalizes line-mode wheel deltas before applying the activation threshold', () => {
+        renderWithProviders()
+        const container = getTerminalContainer()
+
+        fireEvent.wheel(container, { deltaY: 6, deltaMode: 1 })
+        fireEvent.wheel(container, { deltaY: 6, deltaMode: 1 })
+
+        expect(writeMock).toHaveBeenCalledWith('\u0002')
+        expect(writeMock).toHaveBeenCalledWith('[')
+        expect(writeMock).toHaveBeenCalledWith('\u001b[6~')
+    })
 })

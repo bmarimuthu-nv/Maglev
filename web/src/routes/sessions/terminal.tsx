@@ -38,6 +38,18 @@ const FILE_PREVIEW_WIDTH_KEY = 'maglev:filePreviewWidth'
 const FILE_PREVIEW_DEFAULT_WIDTH = 480
 const FILE_PREVIEW_MIN_WIDTH = 280
 const FILE_PREVIEW_MAX_WIDTH = 800
+
+function normalizeWheelDelta(deltaY: number, deltaMode: number): number {
+    const absDelta = Math.abs(deltaY)
+    if (deltaMode === 1) {
+        return absDelta * 16
+    }
+    if (deltaMode === 2) {
+        return absDelta * (typeof window !== 'undefined' ? window.innerHeight : 800)
+    }
+    return absDelta
+}
+
 function BackIcon() {
     return (
         <svg
@@ -1049,10 +1061,11 @@ export default function TerminalPage() {
     const handleTerminalWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
         if (quickInputDisabled) return
 
+        const absDelta = normalizeWheelDelta(event.deltaY, event.deltaMode)
+
         if (tmuxCopyModeActive) {
             // Already in copy-mode: translate wheel into tmux scroll commands
             event.preventDefault()
-            const absDelta = Math.abs(event.deltaY)
             if (absDelta < 5) return
             if (absDelta > 200) {
                 // Fast scroll → page up/down
@@ -1070,7 +1083,7 @@ export default function TerminalPage() {
         if (!autoScroll) return
 
         const accum = scrollAccumRef.current
-        accum.delta += Math.abs(event.deltaY)
+        accum.delta += absDelta
 
         if (accum.timer) clearTimeout(accum.timer)
         accum.timer = setTimeout(() => {
@@ -1287,7 +1300,7 @@ export default function TerminalPage() {
                             onTouchMove={handleTerminalTouchMove}
                             onTouchEnd={handleTerminalTouchEnd}
                             onTouchCancel={handleTerminalTouchEnd}
-                            onWheel={handleTerminalWheel}
+                            onWheelCapture={handleTerminalWheel}
                         >
                             <TerminalView
                                 onMount={handleTerminalMount}
