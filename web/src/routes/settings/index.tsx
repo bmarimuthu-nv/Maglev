@@ -6,6 +6,7 @@ import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFo
 import { useAppearance, getAppearanceOptions, type AppearancePreference } from '@/hooks/useTheme'
 import { eventToShortcutLabel, getOpenFileShortcut, setOpenFileShortcut } from '@/lib/open-file-shortcut'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
+import { useTerminalCopyOnSelect } from '@/hooks/useTerminalCopyOnSelect'
 import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
 import { PROTOCOL_VERSION } from '@maglev/protocol'
 
@@ -84,6 +85,7 @@ export default function SettingsPage() {
     const { appearance, setAppearance } = useAppearance()
     const [openFileShortcut, setOpenFileShortcutState] = useState(() => getOpenFileShortcut())
     const { autoScroll, setAutoScroll } = useAutoScroll()
+    const { copyOnSelect, setCopyOnSelect } = useTerminalCopyOnSelect()
     const { reviewBaseMode, setReviewBaseMode } = useReviewBaseMode()
 
     const fontScaleOptions = getFontScaleOptions()
@@ -365,6 +367,27 @@ export default function SettingsPage() {
                                 <span
                                     className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
                                         autoScroll ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
+                        </div>
+                        <div className="flex w-full items-center justify-between gap-4 px-3 py-3">
+                            <div className="min-w-0">
+                                <div className="text-[var(--app-fg)]">Copy on selection</div>
+                                <div className="text-xs text-[var(--app-hint)]">Copy highlighted terminal text automatically</div>
+                            </div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={copyOnSelect}
+                                onClick={() => setCopyOnSelect(!copyOnSelect)}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                                    copyOnSelect ? 'bg-[var(--app-link)]' : 'bg-[var(--app-border)]'
+                                }`}
+                            >
+                                <span
+                                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                                        copyOnSelect ? 'translate-x-5' : 'translate-x-0'
                                     }`}
                                 />
                             </button>

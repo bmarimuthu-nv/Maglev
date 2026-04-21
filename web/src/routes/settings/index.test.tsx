@@ -120,19 +120,44 @@ describe('SettingsPage auto-scroll toggle', () => {
     it('renders the auto-scroll toggle', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getByText('Auto-scroll')).toBeInTheDocument()
-        expect(screen.getByRole('switch')).toBeInTheDocument()
+        expect(screen.getAllByRole('switch')[0]).toBeInTheDocument()
     })
 
     it('toggle defaults to checked (enabled)', () => {
         renderWithProviders(<SettingsPage />)
-        expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'true')
+        expect(screen.getAllByRole('switch')[0]).toHaveAttribute('aria-checked', 'true')
     })
 
     it('clicking the toggle disables auto-scroll', () => {
         renderWithProviders(<SettingsPage />)
-        const toggle = screen.getByRole('switch')
+        const toggle = screen.getAllByRole('switch')[0]
         fireEvent.click(toggle)
         expect(toggle).toHaveAttribute('aria-checked', 'false')
         expect(localStorage.getItem('maglev-auto-scroll')).toBe('false')
+    })
+})
+
+describe('SettingsPage copy-on-selection toggle', () => {
+    beforeEach(() => {
+        cleanup()
+    })
+
+    afterEach(() => {
+        localStorage.removeItem('maglev-terminal-copy-on-select')
+        cleanup()
+    })
+
+    it('renders the copy-on-selection toggle', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getByText('Copy on selection')).toBeInTheDocument()
+        expect(screen.getAllByRole('switch').length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('clicking the toggle enables copy-on-selection', () => {
+        renderWithProviders(<SettingsPage />)
+        const toggle = screen.getAllByRole('switch')[1]
+        fireEvent.click(toggle)
+        expect(toggle).toHaveAttribute('aria-checked', 'true')
+        expect(localStorage.getItem('maglev-terminal-copy-on-select')).toBe('true')
     })
 })

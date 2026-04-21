@@ -5,6 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { useTheme } from '@/hooks/useTheme'
+import { useTerminalCopyOnSelect } from '@/hooks/useTerminalCopyOnSelect'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 
 function resolveThemeColors(isDark: boolean) {
@@ -88,12 +89,14 @@ export function TerminalView(props: {
     onFocusChange?: (focused: boolean) => void
 }) {
     const { isDark } = useTheme()
+    const { copyOnSelect } = useTerminalCopyOnSelect()
     const containerRef = useRef<HTMLDivElement | null>(null)
     const terminalRef = useRef<Terminal | null>(null)
     const onMountRef = useRef(props.onMount)
     const onResizeRef = useRef(props.onResize)
     const suppressFocusRef = useRef(Boolean(props.suppressFocus))
     const onFocusChangeRef = useRef(props.onFocusChange)
+    const copyOnSelectRef = useRef(copyOnSelect)
 
     useEffect(() => {
         onMountRef.current = props.onMount
@@ -106,6 +109,10 @@ export function TerminalView(props: {
     useEffect(() => {
         onFocusChangeRef.current = props.onFocusChange
     }, [props.onFocusChange])
+
+    useEffect(() => {
+        copyOnSelectRef.current = copyOnSelect
+    }, [copyOnSelect])
 
     useEffect(() => {
         suppressFocusRef.current = Boolean(props.suppressFocus)
@@ -132,12 +139,15 @@ export function TerminalView(props: {
             fontSize: 13,
             scrollback: 0,
             theme,
+            rightClickSelectsWord: true,
+            macOptionClickForcesSelection: true,
             // This is a real tmux/PTTY byte stream, not a plain log viewer.
             // Converting bare LF to CRLF breaks cursor-driven TUIs and causes stacked redraws.
             convertEol: false,
             customGlyphs: true
         })
         terminalRef.current = terminal
+        let selectionCopyTimer: ReturnType<typeof setTimeout> | null = null
 
         const fitAddon = new FitAddon()
         const webLinksAddon = new WebLinksAddon()
@@ -175,6 +185,29 @@ export function TerminalView(props: {
         })
         observer.observe(container)
 
+        const selectionDisposable = terminal.onSelectionChange(() => {
+            if (!copyOnSelectRef.current) {
+                return
+            }
+
+            if (selectionCopyTimer) {
+                clearTimeout(selectionCopyTimer)
+            }
+
+            selectionCopyTimer = setTimeout(() => {
+                if (!copyOnSelectRef.current || !terminal.hasSelection()) {
+                    return
+                }
+                const selection = terminal.getSelection()
+                if (!selection) {
+                    return
+                }
+                void navigator.clipboard?.writeText(selection).catch(() => {
+                    // ignore clipboard permission failures
+                })
+            }, 120)
+        })
+
         const refreshFont = (forceRemeasure = false) => {
             if (abortController.signal.aborted) return
             const nextFamily = fontProvider.getFontFamily()
@@ -209,6 +242,10 @@ export function TerminalView(props: {
         // Cleanup on abort
         abortController.signal.addEventListener('abort', () => {
             observer.disconnect()
+            if (selectionCopyTimer) {
+                clearTimeout(selectionCopyTimer)
+            }
+            selectionDisposable.dispose()
             fitAddon.dispose()
             webLinksAddon.dispose()
             canvasAddon.dispose()
