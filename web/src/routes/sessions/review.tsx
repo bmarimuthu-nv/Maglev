@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
 import { useSession } from '@/hooks/queries/useSession'
 import { LoadingState } from '@/components/LoadingState'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
-import { queryKeys } from '@/lib/query-keys'
 import { REVIEW_FILE_PATH, createEmptyReviewFile, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
-import { useShikiLines, resolveLanguageFromPath } from '@/lib/shiki'
+import { resolveLanguageFromPath, useShikiLines } from '@/lib/shiki'
 
 function BackIcon() {
     return (
@@ -29,8 +28,8 @@ function RefreshIcon() {
     )
 }
 
-function getAnchorKey(side: 'left' | 'right', line: number): string {
-    return `${side}:${line}`
+function getAnchorKey(filePath: string, side: 'left' | 'right', line: number): string {
+    return `${filePath}:${side}:${line}`
 }
 
 function buildThreadAnchor(line: ParsedDiffLine): ReviewThread['anchor'] | null {
@@ -51,6 +50,291 @@ function generateId(): string {
         return crypto.randomUUID()
     }
     return `review-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+type ParsedFileDiff = {
+    filePath: string
+    oldPath?: string
+    added: number | null
+    removed: number | null
+    lines: ParsedDiffLine[]
+}
+
+type ParsedDiffHunk = {
+    header: string
+    lines: ParsedDiffLine[]
+}
+
+function groupDiffHunks(lines: ParsedDiffLine[]): ParsedDiffHunk[] {
+    const hunks: ParsedDiffHunk[] = []
+    let current: ParsedDiffHunk | null = null
+
+    for (const line of lines) {
+        if (line.kind === 'hunk') {
+            current = {
+                header: line.header,
+                lines: []
+            }
+            hunks.push(current)
+            continue
+        }
+
+        if (!current) {
+            current = {
+                header: '@@',
+                lines: []
+            }
+            hunks.push(current)
+        }
+
+        current.lines.push(line)
+    }
+
+    return hunks
+}
+
+type ReviewFileCardProps = {
+    file: ParsedFileDiff
+    selected: boolean
+    queryState: {
+        isLoading: boolean
+        data?: { success: boolean; error?: string } | undefined
+    }
+    highlightedThreadId: string | null
+    composerAnchorKey: string | null
+    composerText: string
+    collapsedResolvedThreadIds: Record<string, boolean>
+    lineThreadsByAnchor: Map<string, ReviewThread[]>
+    orphanedThreads: ReviewThread[]
+    setComposerAnchorKey: (value: string | null) => void
+    setComposerText: (value: string) => void
+    setCollapsedResolvedThreadIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
+    onCreateThread: (filePath: string, line: ParsedDiffLine) => Promise<void>
+    onUpdateThread: (threadId: string, mutator: (thread: ReviewThread) => ReviewThread | null) => Promise<void>
+}
+
+function ReviewFileCard(props: ReviewFileCardProps) {
+    const hunks = useMemo(() => groupDiffHunks(props.file.lines), [props.file.lines])
+    const language = useMemo(() => resolveLanguageFromPath(props.file.filePath), [props.file.filePath])
+    const sourceCodeBlock = useMemo(
+        () => props.file.lines.filter((line) => line.kind !== 'hunk').map((line) => line.text).join('\n'),
+        [props.file.lines]
+    )
+    const highlightedLines = useShikiLines(sourceCodeBlock, language) ?? []
+    let syntaxLineIdx = 0
+
+    return (
+        <div className={`overflow-hidden rounded-lg border bg-[var(--app-code-bg)] shadow-sm ${
+            props.selected
+                ? 'border-[var(--app-link)] ring-1 ring-[var(--app-link)]/25'
+                : 'border-[var(--app-border)]'
+        }`}>
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-4 py-3">
+                <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-[var(--app-fg)]">{props.file.filePath}</div>
+                    {props.file.oldPath ? (
+                        <div className="truncate text-xs text-[var(--app-hint)]">renamed from {props.file.oldPath}</div>
+                    ) : null}
+                </div>
+                <div className="shrink-0 text-right text-xs">
+                    <div className="text-emerald-600">+{props.file.added ?? '-'}</div>
+                    <div className="text-red-600">-{props.file.removed ?? '-'}</div>
+                </div>
+            </div>
+
+            {props.queryState.isLoading ? (
+                <div className="px-4 py-6">
+                    <LoadingState label="Loading patch…" className="text-sm" />
+                </div>
+            ) : props.queryState.data && !props.queryState.data.success ? (
+                <div className="px-4 py-4 text-sm text-red-600">{props.queryState.data.error}</div>
+            ) : !props.file.lines.length ? (
+                <div className="px-4 py-4 text-sm text-[var(--app-hint)]">No diff for this file.</div>
+            ) : (
+                <div className="divide-y divide-[var(--app-divider)]">
+                    {hunks.map((hunk, hunkIndex) => (
+                        <div key={`${props.file.filePath}-${hunk.header}-${hunkIndex}`}>
+                            <div className="border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)]/70 px-4 py-2 font-mono text-xs text-[var(--app-hint)]">
+                                {hunk.header}
+                            </div>
+                            <div>
+                                {hunk.lines.map((line, lineIndex) => {
+                                    const anchor = buildThreadAnchor(line)
+                                    const anchorKey = anchor ? getAnchorKey(props.file.filePath, anchor.side, anchor.line) : null
+                                    const lineThreads = anchorKey ? (props.lineThreadsByAnchor.get(anchorKey) ?? []) : []
+                                    const highlighted = Boolean(props.highlightedThreadId && lineThreads.some((thread) => thread.id === props.highlightedThreadId))
+                                    const showComposer = props.composerAnchorKey === anchorKey
+                                    const syntaxNode = highlightedLines[syntaxLineIdx++]
+                                    const hasSyntax = syntaxNode !== undefined
+                                    const changeMark = line.kind === 'add' ? '+' : line.kind === 'delete' ? '-' : ' '
+
+                                    return (
+                                        <div key={`${props.file.filePath}-${hunkIndex}-${lineIndex}`} className={highlighted ? 'bg-[var(--app-link)]/10' : ''}>
+                                            <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12px] leading-[1.45] hover:bg-[var(--app-subtle-bg)] ${
+                                                line.kind === 'add' ? 'bg-emerald-500/10' : line.kind === 'delete' ? 'bg-red-500/10' : ''
+                                            }`}>
+                                                <button
+                                                    type="button"
+                                                    disabled={!anchor}
+                                                    onClick={() => {
+                                                        if (anchorKey) {
+                                                            props.setComposerAnchorKey(anchorKey)
+                                                        }
+                                                    }}
+                                                    className="mx-auto mt-1.5 h-5 w-5 rounded border border-transparent text-[10px] text-[var(--app-hint)] hover:border-[var(--app-border)] hover:bg-[var(--app-bg)] disabled:opacity-30"
+                                                >
+                                                    +
+                                                </button>
+                                                <div className="px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)]">
+                                                    {'oldLine' in line ? line.oldLine : ''}
+                                                </div>
+                                                <div className="px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)]">
+                                                    {'newLine' in line ? line.newLine : ''}
+                                                </div>
+                                                <div className={`px-1 py-1.5 text-center select-none ${
+                                                    line.kind === 'add'
+                                                        ? 'text-emerald-700'
+                                                        : line.kind === 'delete'
+                                                            ? 'text-red-700'
+                                                            : 'text-[var(--app-hint)]'
+                                                }`}>
+                                                    {changeMark}
+                                                </div>
+                                                <div className={`shiki min-w-0 whitespace-pre-wrap break-words px-3 py-1.5 text-[var(--app-fg)] ${
+                                                    hasSyntax
+                                                        ? ''
+                                                        : line.kind === 'add' ? 'text-emerald-700' : line.kind === 'delete' ? 'text-red-700' : 'text-[var(--app-fg)]'
+                                                }`}>
+                                                    {syntaxNode ?? (line.text || ' ')}
+                                                </div>
+                                            </div>
+                                            {showComposer && anchor ? (
+                                                <div className="border-t border-[var(--app-divider)] bg-[var(--app-bg)] px-4 py-3">
+                                                    <textarea
+                                                        value={props.composerText}
+                                                        onChange={(event) => props.setComposerText(event.target.value)}
+                                                        placeholder="Add review comment"
+                                                        className="min-h-24 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                                    />
+                                                    <div className="mt-2 flex justify-end gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                props.setComposerAnchorKey(null)
+                                                                props.setComposerText('')
+                                                            }}
+                                                            className="rounded-md border border-[var(--app-border)] px-3 py-2 text-sm"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            disabled={!props.composerText.trim()}
+                                                            onClick={() => {
+                                                                void props.onCreateThread(props.file.filePath, line)
+                                                            }}
+                                                            className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            Save comment
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {lineThreads.length > 0 ? (
+                                                <div className="space-y-2 border-t border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-4 py-3">
+                                                    {lineThreads.map((thread) => (
+                                                        <ReviewThreadCard
+                                                            key={thread.id}
+                                                            thread={thread}
+                                                            collapsed={thread.status === 'resolved' && props.collapsedResolvedThreadIds[thread.id] !== false}
+                                                            onToggleResolved={() => {
+                                                                props.setCollapsedResolvedThreadIds((current) => ({
+                                                                    ...current,
+                                                                    [thread.id]: current[thread.id] === false ? true : false
+                                                                }))
+                                                            }}
+                                                            onResolve={() => {
+                                                                void props.onUpdateThread(thread.id, (current) => ({
+                                                                    ...current,
+                                                                    status: current.status === 'resolved' ? 'open' : 'resolved'
+                                                                }))
+                                                            }}
+                                                            onDelete={() => {
+                                                                if (!window.confirm('Delete this review thread permanently?')) {
+                                                                    return
+                                                                }
+                                                                void props.onUpdateThread(thread.id, () => null)
+                                                            }}
+                                                            onReply={(body) => {
+                                                                void props.onUpdateThread(thread.id, (current) => ({
+                                                                    ...current,
+                                                                    comments: [
+                                                                        ...current.comments,
+                                                                        {
+                                                                            id: generateId(),
+                                                                            author: 'user',
+                                                                            createdAt: Date.now(),
+                                                                            body
+                                                                        } satisfies ReviewComment
+                                                                    ]
+                                                                }))
+                                                            }}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    ))}
+
+                    {props.orphanedThreads.length > 0 ? (
+                        <div className="border-t border-[var(--app-divider)] bg-[var(--app-bg)] px-4 py-4">
+                            <div className="mb-2 text-sm font-medium">Orphaned threads</div>
+                            <div className="space-y-2">
+                                {props.orphanedThreads.map((thread) => (
+                                    <ReviewThreadCard
+                                        key={thread.id}
+                                        thread={thread}
+                                        collapsed={false}
+                                        onToggleResolved={() => {}}
+                                        onResolve={() => {
+                                            void props.onUpdateThread(thread.id, (current) => ({
+                                                ...current,
+                                                status: current.status === 'resolved' ? 'open' : 'resolved'
+                                            }))
+                                        }}
+                                        onDelete={() => {
+                                            if (!window.confirm('Delete this review thread permanently?')) {
+                                                return
+                                            }
+                                            void props.onUpdateThread(thread.id, () => null)
+                                        }}
+                                        onReply={(body) => {
+                                            void props.onUpdateThread(thread.id, (current) => ({
+                                                ...current,
+                                                comments: [
+                                                    ...current.comments,
+                                                    {
+                                                        id: generateId(),
+                                                        author: 'user',
+                                                        createdAt: Date.now(),
+                                                        body
+                                                    } satisfies ReviewComment
+                                                ]
+                                            }))
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    ) : null}
+                </div>
+            )}
+        </div>
+    )
 }
 
 type ReviewThreadCardProps = {
@@ -175,16 +459,20 @@ export default function ReviewPage() {
     const summary = summaryQuery.data?.success ? summaryQuery.data : null
     const selectedPath = selectedPathFromSearch || summary?.files?.[0]?.filePath || ''
     const workspacePath = session?.metadata?.path ?? null
+    const fileCardRefs = useRef<Record<string, HTMLDivElement | null>>({})
+    const diffFiles = summary?.files ?? []
 
-    const patchQuery = useQuery({
-        queryKey: ['review-patch', scopeKey, sessionId, mode, selectedPath],
-        queryFn: async () => {
-            if (!api || !selectedPath) {
-                throw new Error('No file selected')
-            }
-            return await api.getReviewFile(sessionId, selectedPath, mode)
-        },
-        enabled: Boolean(api && session?.active && selectedPath)
+    const patchQueries = useQueries({
+        queries: diffFiles.map((file) => ({
+            queryKey: ['review-patch', scopeKey, sessionId, mode, file.filePath],
+            queryFn: async () => {
+                if (!api) {
+                    throw new Error('API unavailable')
+                }
+                return await api.getReviewFile(sessionId, file.filePath, mode)
+            },
+            enabled: Boolean(api && session?.active)
+        }))
     })
 
     useEffect(() => {
@@ -244,58 +532,82 @@ export default function ReviewPage() {
         }
     }, [mode, navigate, selectedPathFromSearch, sessionId, summary?.files])
 
-    const parsedLines = useMemo(() => {
-        if (!patchQuery.data?.success || !patchQuery.data.stdout) {
-            return []
+    const parsedFileDiffs = useMemo<ParsedFileDiff[]>(() => diffFiles.map((file, index) => {
+        const query = patchQueries[index]
+        const lines = query?.data?.success && query.data.stdout
+            ? parseUnifiedDiff(query.data.stdout)
+            : []
+        return {
+            filePath: file.filePath,
+            oldPath: file.oldPath,
+            added: file.added,
+            removed: file.removed,
+            lines
         }
-        return parseUnifiedDiff(patchQuery.data.stdout)
-    }, [patchQuery.data])
-
-    const diffLanguage = useMemo(() => resolveLanguageFromPath(selectedPath), [selectedPath])
-    const diffCodeBlock = useMemo(
-        () => parsedLines.filter((l) => l.kind !== 'hunk').map((l) => l.text).join('\n'),
-        [parsedLines]
-    )
-    const highlightedDiffLines = useShikiLines(diffCodeBlock, diffLanguage)
+    }), [diffFiles, patchQueries])
 
     const relevantThreads = useMemo(
-        () => reviewFile?.threads.filter((thread) => thread.filePath === selectedPath && thread.diffMode === mode) ?? [],
-        [mode, reviewFile?.threads, selectedPath]
+        () => reviewFile?.threads.filter((thread) => thread.diffMode === mode) ?? [],
+        [mode, reviewFile?.threads]
     )
 
-    const anchorKeys = useMemo(() => {
-        const next = new Set<string>()
-        for (const line of parsedLines) {
-            if (line.kind === 'add') {
-                next.add(getAnchorKey('right', line.newLine))
-            } else if (line.kind === 'delete') {
-                next.add(getAnchorKey('left', line.oldLine))
-            } else if (line.kind === 'context') {
-                next.add(getAnchorKey('left', line.oldLine))
-                next.add(getAnchorKey('right', line.newLine))
+    const anchorKeysByFile = useMemo(() => {
+        const map = new Map<string, Set<string>>()
+        for (const file of parsedFileDiffs) {
+            const keys = new Set<string>()
+            for (const line of file.lines) {
+                if (line.kind === 'add') {
+                    keys.add(getAnchorKey(file.filePath, 'right', line.newLine))
+                } else if (line.kind === 'delete') {
+                    keys.add(getAnchorKey(file.filePath, 'left', line.oldLine))
+                } else if (line.kind === 'context') {
+                    keys.add(getAnchorKey(file.filePath, 'left', line.oldLine))
+                    keys.add(getAnchorKey(file.filePath, 'right', line.newLine))
+                }
             }
+            map.set(file.filePath, keys)
         }
-        return next
-    }, [parsedLines])
+        return map
+    }, [parsedFileDiffs])
 
     const threadsByAnchor = useMemo(() => {
         const map = new Map<string, ReviewThread[]>()
         for (const thread of relevantThreads) {
-            const key = getAnchorKey(thread.anchor.side, thread.anchor.line)
-            if (!anchorKeys.has(key)) {
+            const anchorKey = getAnchorKey(thread.filePath, thread.anchor.side, thread.anchor.line)
+            if (!(anchorKeysByFile.get(thread.filePath)?.has(anchorKey))) {
                 continue
             }
-            const existing = map.get(key) ?? []
+            const existing = map.get(anchorKey) ?? []
             existing.push(thread)
-            map.set(key, existing)
+            map.set(anchorKey, existing)
         }
         return map
-    }, [anchorKeys, relevantThreads])
+    }, [anchorKeysByFile, relevantThreads])
 
-    const orphanedThreads = useMemo(
-        () => relevantThreads.filter((thread) => !anchorKeys.has(getAnchorKey(thread.anchor.side, thread.anchor.line))),
-        [anchorKeys, relevantThreads]
-    )
+    const orphanedThreadsByFile = useMemo(() => {
+        const map = new Map<string, ReviewThread[]>()
+        for (const thread of relevantThreads) {
+            const anchorKey = getAnchorKey(thread.filePath, thread.anchor.side, thread.anchor.line)
+            if (anchorKeysByFile.get(thread.filePath)?.has(anchorKey)) {
+                continue
+            }
+            const existing = map.get(thread.filePath) ?? []
+            existing.push(thread)
+            map.set(thread.filePath, existing)
+        }
+        return map
+    }, [anchorKeysByFile, relevantThreads])
+
+    useEffect(() => {
+        if (!selectedPath) {
+            return
+        }
+        const node = fileCardRefs.current[selectedPath]
+        if (!node) {
+            return
+        }
+        node.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, [selectedPath, parsedFileDiffs.length])
 
     const persistReviewFile = useCallback(async (next: ReviewFile) => {
         if (!api) {
@@ -335,10 +647,10 @@ export default function ReviewPage() {
         await queued
     }, [persistReviewFile, reviewFile])
 
-    const handleCreateThread = useCallback(async (line: ParsedDiffLine) => {
+    const handleCreateThread = useCallback(async (filePath: string, line: ParsedDiffLine) => {
         const anchor = buildThreadAnchor(line)
         const body = composerText.trim()
-        if (!reviewFile || !anchor || !body || !selectedPath) {
+        if (!reviewFile || !anchor || !body || !filePath) {
             return
         }
         await mutateReview((current) => ({
@@ -348,7 +660,7 @@ export default function ReviewPage() {
                 {
                     id: generateId(),
                     diffMode: mode,
-                    filePath: selectedPath,
+                    filePath,
                     anchor: {
                         ...anchor,
                         hunkHeader: undefined
@@ -365,7 +677,7 @@ export default function ReviewPage() {
         }))
         setComposerAnchorKey(null)
         setComposerText('')
-    }, [composerText, mode, mutateReview, reviewFile, selectedPath])
+    }, [composerText, mode, mutateReview, reviewFile])
 
     const updateThread = useCallback(async (threadId: string, mutator: (thread: ReviewThread) => ReviewThread | null) => {
         await mutateReview((current) => ({
@@ -405,7 +717,7 @@ export default function ReviewPage() {
                         type="button"
                         onClick={() => {
                             void summaryQuery.refetch()
-                            void patchQuery.refetch()
+                            void Promise.all(patchQueries.map((query) => query.refetch()))
                         }}
                         className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
                         title="Refresh"
@@ -512,189 +824,43 @@ export default function ReviewPage() {
                 </div>
 
                 <div className="min-w-0 flex-1 overflow-auto p-4">
-                    {!selectedPath ? (
-                        <div className="text-sm text-[var(--app-hint)]">Select a changed file.</div>
-                    ) : patchQuery.isLoading ? (
-                        <LoadingState label="Loading patch…" className="text-sm" />
-                    ) : patchQuery.data && !patchQuery.data.success ? (
-                        <div className="text-sm text-red-600">{patchQuery.data.error}</div>
-                    ) : parsedLines.length === 0 ? (
-                        <div className="text-sm text-[var(--app-hint)]">No diff for this file.</div>
+                    {!diffFiles.length ? (
+                        <div className="text-sm text-[var(--app-hint)]">No tracked file changes.</div>
                     ) : (
-                        <div className="overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)]">
-                            <div className="border-b border-[var(--app-border)] px-4 py-2 font-medium">{selectedPath}</div>
-                            <div className="divide-y divide-[var(--app-divider)]">
-                                {(() => {
-                                    let codeLineIdx = 0
-                                    return parsedLines.map((line, index) => {
-                                    const anchor = buildThreadAnchor(line)
-                                    const anchorKey = anchor ? getAnchorKey(anchor.side, anchor.line) : null
-                                    const lineThreads = anchorKey ? (threadsByAnchor.get(anchorKey) ?? []) : []
-                                    const highlighted = Boolean(highlightedThreadId && lineThreads.some((thread) => thread.id === highlightedThreadId))
-                                    const showComposer = composerAnchorKey === anchorKey
-                                    const syntaxNode = line.kind !== 'hunk' ? highlightedDiffLines?.[codeLineIdx++] : undefined
-                                    const hasSyntax = syntaxNode !== undefined
-                                    return (
-                                        <div key={`${index}-${line.kind}-${line.text}`} className={highlighted ? 'bg-[var(--app-link)]/10' : ''}>
-                                            {line.kind === 'hunk' ? (
-                                                <div className="px-4 py-2 text-xs font-medium text-[var(--app-hint)]">{line.text}</div>
-                                            ) : (
-                                                <div className={`flex items-start gap-3 px-4 py-1 font-mono text-[12px] leading-[1.35] hover:bg-[var(--app-subtle-bg)] ${
-                                                    line.kind === 'add' ? 'bg-emerald-500/10' : line.kind === 'delete' ? 'bg-red-500/10' : ''
-                                                }`}>
-                                                    <button
-                                                        type="button"
-                                                        disabled={!anchor}
-                                                        onClick={() => {
-                                                            if (anchorKey) {
-                                                                setComposerAnchorKey(anchorKey)
-                                                            }
-                                                        }}
-                                                        className="mt-0.5 h-5 w-5 shrink-0 rounded border border-[var(--app-border)] text-[10px] text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-40"
-                                                    >
-                                                        +
-                                                    </button>
-                                                    <div className="w-12 shrink-0 text-right text-[var(--app-hint)]">
-                                                        {'oldLine' in line ? line.oldLine : ''}
-                                                    </div>
-                                                    <div className="w-12 shrink-0 text-right text-[var(--app-hint)]">
-                                                        {'newLine' in line ? line.newLine : ''}
-                                                    </div>
-                                                    <div className={`shiki min-w-0 flex-1 whitespace-pre-wrap break-words ${
-                                                        hasSyntax
-                                                            ? ''
-                                                            : line.kind === 'add' ? 'text-emerald-700' : line.kind === 'delete' ? 'text-red-700' : 'text-[var(--app-fg)]'
-                                                    }`}>
-                                                        {syntaxNode ?? (line.text || ' ')}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {showComposer && anchor ? (
-                                                <div className="border-t border-[var(--app-divider)] bg-[var(--app-bg)] px-4 py-3">
-                                                    <textarea
-                                                        value={composerText}
-                                                        onChange={(event) => setComposerText(event.target.value)}
-                                                        placeholder="Add review comment"
-                                                        className="min-h-24 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                                                    />
-                                                    <div className="mt-2 flex justify-end gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setComposerAnchorKey(null)
-                                                                setComposerText('')
-                                                            }}
-                                                            className="rounded-md border border-[var(--app-border)] px-3 py-2 text-sm"
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            disabled={!composerText.trim()}
-                                                            onClick={() => {
-                                                                void handleCreateThread(line)
-                                                            }}
-                                                            className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                                                        >
-                                                            Save comment
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ) : null}
-                                            {lineThreads.length > 0 ? (
-                                                <div className="space-y-2 border-t border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-4 py-3">
-                                                    {lineThreads.map((thread) => (
-                                                        <ReviewThreadCard
-                                                            key={thread.id}
-                                                            thread={thread}
-                                                            collapsed={thread.status === 'resolved' && collapsedResolvedThreadIds[thread.id] !== false}
-                                                            onToggleResolved={() => {
-                                                                setCollapsedResolvedThreadIds((current) => ({
-                                                                    ...current,
-                                                                    [thread.id]: current[thread.id] === false
-                                                                        ? true
-                                                                        : false
-                                                                }))
-                                                            }}
-                                                            onResolve={() => {
-                                                                void updateThread(thread.id, (current) => ({
-                                                                    ...current,
-                                                                    status: current.status === 'resolved' ? 'open' : 'resolved'
-                                                                }))
-                                                            }}
-                                                            onDelete={() => {
-                                                                if (!window.confirm('Delete this review thread permanently?')) {
-                                                                    return
-                                                                }
-                                                                void updateThread(thread.id, () => null)
-                                                            }}
-                                                            onReply={(body) => {
-                                                                void updateThread(thread.id, (current) => ({
-                                                                    ...current,
-                                                                    comments: [
-                                                                        ...current.comments,
-                                                                        {
-                                                                            id: generateId(),
-                                                                            author: 'user',
-                                                                            createdAt: Date.now(),
-                                                                            body
-                                                                        } satisfies ReviewComment
-                                                                    ]
-                                                                }))
-                                                            }}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    )
-                                })
-                                })()}
-                            </div>
+                        <div className="space-y-5">
+                            {parsedFileDiffs.map((file, fileIndex) => {
+                                const patchQuery = patchQueries[fileIndex]
+                                const isSelected = selectedPath === file.filePath
+                                const orphanedThreads = orphanedThreadsByFile.get(file.filePath) ?? []
+
+                                return (
+                                    <div
+                                        key={`${file.oldPath ?? ''}:${file.filePath}`}
+                                        ref={(node) => {
+                                            fileCardRefs.current[file.filePath] = node
+                                        }}
+                                    >
+                                        <ReviewFileCard
+                                            file={file}
+                                            selected={isSelected}
+                                            queryState={patchQuery}
+                                            highlightedThreadId={highlightedThreadId}
+                                            composerAnchorKey={composerAnchorKey}
+                                            composerText={composerText}
+                                            collapsedResolvedThreadIds={collapsedResolvedThreadIds}
+                                            lineThreadsByAnchor={threadsByAnchor}
+                                            orphanedThreads={orphanedThreads}
+                                            setComposerAnchorKey={setComposerAnchorKey}
+                                            setComposerText={setComposerText}
+                                            setCollapsedResolvedThreadIds={setCollapsedResolvedThreadIds}
+                                            onCreateThread={handleCreateThread}
+                                            onUpdateThread={updateThread}
+                                        />
+                                    </div>
+                                )
+                            })}
                         </div>
                     )}
-
-                    {orphanedThreads.length > 0 ? (
-                        <div className="mt-6">
-                            <div className="mb-2 text-sm font-medium">Orphaned threads</div>
-                            <div className="space-y-2">
-                                {orphanedThreads.map((thread) => (
-                                    <ReviewThreadCard
-                                        key={thread.id}
-                                        thread={thread}
-                                        collapsed={false}
-                                        onToggleResolved={() => {}}
-                                        onResolve={() => {
-                                            void updateThread(thread.id, (current) => ({
-                                                ...current,
-                                                status: current.status === 'resolved' ? 'open' : 'resolved'
-                                            }))
-                                        }}
-                                        onDelete={() => {
-                                            if (!window.confirm('Delete this review thread permanently?')) {
-                                                return
-                                            }
-                                            void updateThread(thread.id, () => null)
-                                        }}
-                                        onReply={(body) => {
-                                            void updateThread(thread.id, (current) => ({
-                                                ...current,
-                                                comments: [
-                                                    ...current.comments,
-                                                    {
-                                                        id: generateId(),
-                                                        author: 'user',
-                                                        createdAt: Date.now(),
-                                                        body
-                                                    } satisfies ReviewComment
-                                                ]
-                                            }))
-                                        }}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    ) : null}
                 </div>
             </div>
         </div>
