@@ -49,6 +49,7 @@ describe('MarkdownRenderer', () => {
 
         await waitFor(() => expect(screen.getByTestId('mermaid-diagram')).toBeInTheDocument())
         expect(screen.getByText('Diagram')).toBeInTheDocument()
+        expect(screen.getByTestId('mermaid-diagram').innerHTML).toContain('data-maglev-mermaid-contrast="true"')
     })
 
     it('configures Mermaid with distinct node fill and text colors', async () => {

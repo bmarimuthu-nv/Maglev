@@ -76,6 +76,72 @@ function readThemeColor(name: string, fallback: string): string {
     return value || fallback
 }
 
+function injectMermaidContrastStyles(svg: string, colors: {
+    nodeTextColor: string
+    noteTextColor: string
+    edgeLabelTextColor: string
+    nodeFillColor: string
+    noteFillColor: string
+    edgeLabelFillColor: string
+}): string {
+    const styleBlock = `<style data-maglev-mermaid-contrast="true">
+.node .label text,
+.node .label tspan,
+.nodeLabel,
+.nodeLabel p,
+.nodeLabel span,
+.node foreignObject,
+.node foreignObject div,
+.node foreignObject span,
+.node foreignObject p {
+    fill: ${colors.nodeTextColor} !important;
+    color: ${colors.nodeTextColor} !important;
+}
+.node rect,
+.node circle,
+.node ellipse,
+.node polygon,
+.node path {
+    fill: ${colors.nodeFillColor} !important;
+}
+.edgeLabel text,
+.edgeLabel tspan,
+.edgeLabel p,
+.edgeLabel span {
+    fill: ${colors.edgeLabelTextColor} !important;
+    color: ${colors.edgeLabelTextColor} !important;
+}
+.edgeLabel rect,
+.labelBkg {
+    fill: ${colors.edgeLabelFillColor} !important;
+    background-color: ${colors.edgeLabelFillColor} !important;
+}
+.note text,
+.note tspan,
+.note foreignObject,
+.note foreignObject div,
+.note foreignObject span,
+.note foreignObject p {
+    fill: ${colors.noteTextColor} !important;
+    color: ${colors.noteTextColor} !important;
+}
+.note rect,
+.note polygon,
+.statediagram-note rect,
+.statediagram-note polygon {
+    fill: ${colors.noteFillColor} !important;
+}
+</style>`
+
+    if (svg.includes('</style>')) {
+        return svg.replace('</style>', `${styleBlock}</style>`)
+    }
+    if (svg.includes('>')) {
+        return svg.replace(/<svg([^>]*)>/, `<svg$1>${styleBlock}`)
+    }
+    return `${styleBlock}${svg}`
+}
+
 type RgbColor = { r: number; g: number; b: number }
 
 function clampChannel(value: number): number {
@@ -263,7 +329,15 @@ function MermaidBlock(props: { code: string }) {
                 if (!active) {
                     return
                 }
-                setSvg(renderedSvg)
+                const styledSvg = injectMermaidContrastStyles(renderedSvg, {
+                    nodeTextColor: primaryTextColor,
+                    noteTextColor,
+                    edgeLabelTextColor,
+                    nodeFillColor: surfaceColor,
+                    noteFillColor: noteSurfaceColor,
+                    edgeLabelFillColor: appBg,
+                })
+                setSvg(styledSvg)
                 if (bindFunctions) {
                     requestAnimationFrame(() => {
                         if (containerRef.current) {
