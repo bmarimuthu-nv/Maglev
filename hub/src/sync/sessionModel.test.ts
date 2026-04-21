@@ -83,31 +83,31 @@ describe('session model', () => {
                 null,
                 'default'
             )
-            const orchestrator = engine.getOrCreateSession(
-                'orchestrator-session',
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session',
                 {
                     path: '/tmp/project',
                     host: 'localhost',
                     flavor: 'shell',
-                    shellTerminalId: 'terminal:orchestrator',
+                    shellTerminalId: 'terminal:supervisor',
                     shellTerminalState: 'ready'
                 },
                 null,
                 'default'
             )
 
-            await engine.attachTerminalSupervision(orchestrator.id, worker.id, 'default')
+            await engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')
 
             const refreshedWorker = engine.getSession(worker.id)
-            const refreshedOrchestrator = engine.getSession(orchestrator.id)
+            const refreshedSupervisor = engine.getSession(supervisor.id)
 
             expect(refreshedWorker?.metadata?.terminalSupervision).toMatchObject({
                 role: 'worker',
-                peerSessionId: orchestrator.id,
+                peerSessionId: supervisor.id,
                 state: 'active'
             })
-            expect(toSessionSummary(refreshedOrchestrator!).metadata?.terminalSupervision).toMatchObject({
-                role: 'orchestrator',
+            expect(toSessionSummary(refreshedSupervisor!).metadata?.terminalSupervision).toMatchObject({
+                role: 'supervisor',
                 peerSessionId: worker.id,
                 state: 'active'
             })
@@ -116,7 +116,7 @@ describe('session model', () => {
         }
     })
 
-    it('blocks orchestrator writes during the human override window and delivers them after it expires', async () => {
+    it('blocks supervisor writes during the human override window and delivers them after it expires', async () => {
         const store = new Store(':memory:')
         const io = new FakeIo()
         const engine = new SyncEngine(
@@ -140,13 +140,13 @@ describe('session model', () => {
                 null,
                 'default'
             )
-            const orchestrator = engine.getOrCreateSession(
-                'orchestrator-session-write',
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session-write',
                 {
                     path: '/tmp/project',
                     host: 'localhost',
                     flavor: 'shell',
-                    shellTerminalId: 'terminal:orchestrator',
+                    shellTerminalId: 'terminal:supervisor',
                     shellTerminalState: 'ready'
                 },
                 null,
@@ -154,15 +154,15 @@ describe('session model', () => {
             )
             const workerCli = connectCliSession(io, worker.id, 'default')
 
-            await engine.attachTerminalSupervision(orchestrator.id, worker.id, 'default')
+            await engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')
             engine.noteHumanTerminalInput(worker.id)
 
-            const blocked = await engine.writeTerminalSupervisionInput(orchestrator.id, 'pwd\n', 'default')
+            const blocked = await engine.writeTerminalSupervisionInput(supervisor.id, 'pwd\n', 'default')
             expect(blocked).toEqual({ delivered: false, blockedReason: 'human_override' })
             expect(workerCli.emitted).toHaveLength(0)
 
             ;(engine as any).recentHumanTerminalActivityBySessionId.set(worker.id, Date.now() - 6_000)
-            const delivered = await engine.writeTerminalSupervisionInput(orchestrator.id, 'pwd\n', 'default')
+            const delivered = await engine.writeTerminalSupervisionInput(supervisor.id, 'pwd\n', 'default')
             expect(delivered).toEqual({ delivered: true })
             expect(workerCli.emitted.at(-1)).toEqual({
                 event: 'terminal:write',

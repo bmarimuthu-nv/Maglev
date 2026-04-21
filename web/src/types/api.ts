@@ -93,7 +93,7 @@ export type SessionsResponse = { sessions: SessionSummary[] }
 export type SessionResponse = { session: Session }
 export type TerminalSupervisionTargetResponse = {
     worker: SessionSummary
-    orchestrator: SessionSummary
+    supervisor: SessionSummary
     snapshot: {
         outputBuffer: string
         status: 'ready' | 'exited'
@@ -104,7 +104,7 @@ export type TerminalSupervisionTargetResponse = {
         id: string
         createdAt: number
         type: 'attached' | 'detached' | 'paused' | 'resumed' | 'write_accepted' | 'write_blocked'
-        actor: 'human' | 'orchestrator' | 'system'
+        actor: 'human' | 'supervisor' | 'system'
         message: string
     }>
 }

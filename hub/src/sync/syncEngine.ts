@@ -326,7 +326,7 @@ export class SyncEngine {
 
         const current = this.getRequiredSession(sessionId, namespace)
         const replacement = this.getRequiredSession(replacementSessionId, namespace)
-        this.assertTerminalSupervisionEligible(replacement, current.metadata?.terminalPair?.role === 'worker' ? 'worker' : 'orchestrator')
+        this.assertTerminalSupervisionEligible(replacement, current.metadata?.terminalPair?.role === 'worker' ? 'worker' : 'supervisor')
 
         if (replacement.id === current.id) {
             return pair
@@ -765,25 +765,25 @@ export class SyncEngine {
         }
     }
 
-    async attachTerminalSupervision(orchestratorSessionId: string, workerSessionId: string, namespace: string): Promise<void> {
-        if (orchestratorSessionId === workerSessionId) {
-            throw new Error('Worker and orchestrator must be different sessions')
+    async attachTerminalSupervision(supervisorSessionId: string, workerSessionId: string, namespace: string): Promise<void> {
+        if (supervisorSessionId === workerSessionId) {
+            throw new Error('Worker and supervisor must be different sessions')
         }
 
-        const orchestrator = this.getRequiredSession(orchestratorSessionId, namespace)
+        const supervisor = this.getRequiredSession(supervisorSessionId, namespace)
         const worker = this.getRequiredSession(workerSessionId, namespace)
 
-        this.assertTerminalSupervisionEligible(orchestrator, 'orchestrator')
+        this.assertTerminalSupervisionEligible(supervisor, 'supervisor')
         this.assertTerminalSupervisionEligible(worker, 'worker')
-        this.assertTerminalSupervisionAvailable(orchestrator)
+        this.assertTerminalSupervisionAvailable(supervisor)
         this.assertTerminalSupervisionAvailable(worker)
 
-        const event = this.createTerminalSupervisionEvent('attached', 'system', `Attached orchestrator ${orchestrator.id.slice(0, 8)} to worker ${worker.id.slice(0, 8)}`)
+        const event = this.createTerminalSupervisionEvent('attached', 'system', `Attached supervisor ${supervisor.id.slice(0, 8)} to worker ${worker.id.slice(0, 8)}`)
 
-        await this.sessionCache.updateSessionMetadataFields(orchestrator.id, (metadata) => ({
+        await this.sessionCache.updateSessionMetadataFields(supervisor.id, (metadata) => ({
             ...metadata,
             terminalSupervision: {
-                role: 'orchestrator',
+                role: 'supervisor',
                 peerSessionId: worker.id,
                 state: 'active',
                 events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
@@ -794,7 +794,7 @@ export class SyncEngine {
             ...metadata,
             terminalSupervision: {
                 role: 'worker',
-                peerSessionId: orchestrator.id,
+                peerSessionId: supervisor.id,
                 state: 'active',
                 events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
             }
@@ -823,7 +823,7 @@ export class SyncEngine {
             this.setTerminalSupervisionState(
                 metadata,
                 session.id,
-                metadata.terminalSupervision?.role === 'worker' ? 'worker' : 'orchestrator',
+                metadata.terminalSupervision?.role === 'worker' ? 'worker' : 'supervisor',
                 nextState,
                 event
             )
@@ -864,7 +864,7 @@ export class SyncEngine {
         session: Session
         peer: Session
         worker: Session
-        orchestrator: Session
+        supervisor: Session
         snapshot: ReturnType<TerminalStateCache['getSnapshot']>
         events: TerminalSupervisionEvent[]
     } {
@@ -876,7 +876,7 @@ export class SyncEngine {
 
         const peer = this.getRequiredSession(pairing.peerSessionId, namespace)
         const worker = pairing.role === 'worker' ? session : peer
-        const orchestrator = pairing.role === 'orchestrator' ? session : peer
+        const supervisor = pairing.role === 'supervisor' ? session : peer
         const workerTerminalId = worker.metadata?.shellTerminalId
         const snapshot = workerTerminalId ? this.terminalStateCache.getSnapshot(worker.id, workerTerminalId) : null
 
@@ -884,33 +884,33 @@ export class SyncEngine {
             session,
             peer,
             worker,
-            orchestrator,
+            supervisor,
             snapshot,
             events: worker.metadata?.terminalSupervision?.events ?? session.metadata?.terminalSupervision?.events ?? []
         }
     }
 
-    async writeTerminalSupervisionInput(orchestratorSessionId: string, data: string, namespace: string): Promise<{
+    async writeTerminalSupervisionInput(supervisorSessionId: string, data: string, namespace: string): Promise<{
         delivered: boolean
         blockedReason?: 'paused' | 'human_override'
     }> {
-        const orchestrator = this.getRequiredSession(orchestratorSessionId, namespace)
-        const pairing = orchestrator.metadata?.terminalSupervision
-        if (!pairing || pairing.role !== 'orchestrator') {
-            throw new Error('Session is not an orchestrator')
+        const supervisor = this.getRequiredSession(supervisorSessionId, namespace)
+        const pairing = supervisor.metadata?.terminalSupervision
+        if (!pairing || pairing.role !== 'supervisor') {
+            throw new Error('Session is not a supervisor')
         }
 
         const worker = this.getRequiredSession(pairing.peerSessionId, namespace)
         this.assertTerminalSupervisionEligible(worker, 'worker')
 
         if (pairing.state === 'paused' || worker.metadata?.terminalSupervision?.state === 'paused') {
-            await this.recordTerminalSupervisionEvent(orchestrator, worker, 'write_blocked', 'orchestrator', 'Blocked orchestrator input because supervision is paused')
+            await this.recordTerminalSupervisionEvent(supervisor, worker, 'write_blocked', 'supervisor', 'Blocked supervisor input because supervision is paused')
             return { delivered: false, blockedReason: 'paused' }
         }
 
         const lastHumanActivityAt = this.recentHumanTerminalActivityBySessionId.get(worker.id) ?? 0
         if (Date.now() - lastHumanActivityAt < this.terminalSupervisionHumanOverrideMs) {
-            await this.recordTerminalSupervisionEvent(orchestrator, worker, 'write_blocked', 'orchestrator', 'Blocked orchestrator input because the human is actively using the worker terminal')
+            await this.recordTerminalSupervisionEvent(supervisor, worker, 'write_blocked', 'supervisor', 'Blocked supervisor input because the human is actively using the worker terminal')
             return { delivered: false, blockedReason: 'human_override' }
         }
 
@@ -929,7 +929,7 @@ export class SyncEngine {
             terminalId,
             data
         })
-        await this.recordTerminalSupervisionEvent(orchestrator, worker, 'write_accepted', 'orchestrator', 'Sent orchestrator input to worker terminal')
+        await this.recordTerminalSupervisionEvent(supervisor, worker, 'write_accepted', 'supervisor', 'Sent supervisor input to worker terminal')
         return { delivered: true }
     }
 
@@ -945,9 +945,9 @@ export class SyncEngine {
         return session
     }
 
-    private assertTerminalSupervisionEligible(session: Session, role: 'worker' | 'orchestrator'): void {
+    private assertTerminalSupervisionEligible(session: Session, role: 'worker' | 'supervisor'): void {
         if (!session.metadata?.shellTerminalId || session.metadata.shellTerminalState !== 'ready') {
-            throw new Error(`${role === 'worker' ? 'Worker' : 'Orchestrator'} terminal is not ready`)
+            throw new Error(`${role === 'worker' ? 'Worker' : 'Supervisor'} terminal is not ready`)
         }
     }
 
@@ -998,14 +998,14 @@ export class SyncEngine {
     }
 
     private async recordTerminalSupervisionEvent(
-        orchestrator: Session,
+        supervisor: Session,
         worker: Session,
         type: TerminalSupervisionEvent['type'],
         actor: TerminalSupervisionEvent['actor'],
         message: string
     ): Promise<void> {
         const event = this.createTerminalSupervisionEvent(type, actor, message)
-        await this.sessionCache.updateSessionMetadataFields(orchestrator.id, (metadata) => ({
+        await this.sessionCache.updateSessionMetadataFields(supervisor.id, (metadata) => ({
             ...metadata,
             terminalSupervision: metadata.terminalSupervision ? {
                 ...metadata.terminalSupervision,

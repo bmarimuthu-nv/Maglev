@@ -154,7 +154,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             const target = engine.getTerminalSupervisionTarget(sessionResult.sessionId, c.get('namespace'))
             return c.json({
                 worker: toSessionSummary(target.worker),
-                orchestrator: toSessionSummary(target.orchestrator),
+                supervisor: toSessionSummary(target.supervisor),
                 snapshot: target.snapshot,
                 events: target.events
             })

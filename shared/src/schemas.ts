@@ -5,7 +5,7 @@ const MetadataSummarySchema = z.object({
     updatedAt: z.number()
 })
 
-export const TerminalSupervisionRoleSchema = z.enum(['worker', 'orchestrator'])
+export const TerminalSupervisionRoleSchema = z.enum(['worker', 'supervisor'])
 export type TerminalSupervisionRole = z.infer<typeof TerminalSupervisionRoleSchema>
 
 export const TerminalSupervisionStateSchema = z.enum(['active', 'paused'])
@@ -22,7 +22,7 @@ export const TerminalSupervisionEventSchema = z.object({
         'write_accepted',
         'write_blocked'
     ]),
-    actor: z.enum(['human', 'orchestrator', 'system']),
+    actor: z.enum(['human', 'supervisor', 'system']),
     message: z.string()
 })
 
