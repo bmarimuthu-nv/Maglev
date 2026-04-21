@@ -2,7 +2,7 @@ import type React from 'react'
 import { useCallback, useRef } from 'react'
 
 type UseLongPressOptions = {
-    onLongPress: (point: { x: number; y: number }) => void
+    onLongPress: (point: { x: number; y: number; source: 'longpress' | 'contextmenu' }) => void
     onClick?: () => void
     threshold?: number
     disabled?: boolean
@@ -25,7 +25,7 @@ export function useLongPress(options: UseLongPressOptions): UseLongPressHandlers
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const isLongPressRef = useRef(false)
     const touchMoved = useRef(false)
-    const pressPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
+    const pressPointRef = useRef<{ x: number; y: number; source: 'longpress' | 'contextmenu' }>({ x: 0, y: 0, source: 'longpress' })
 
     const clearTimer = useCallback(() => {
         if (timerRef.current) {
@@ -40,7 +40,7 @@ export function useLongPress(options: UseLongPressOptions): UseLongPressHandlers
         clearTimer()
         isLongPressRef.current = false
         touchMoved.current = false
-        pressPointRef.current = { x: clientX, y: clientY }
+        pressPointRef.current = { x: clientX, y: clientY, source: 'longpress' }
 
         timerRef.current = setTimeout(() => {
             isLongPressRef.current = true
@@ -94,7 +94,7 @@ export function useLongPress(options: UseLongPressOptions): UseLongPressHandlers
             e.preventDefault()
             clearTimer()
             isLongPressRef.current = true
-            onLongPress({ x: e.clientX, y: e.clientY })
+            onLongPress({ x: e.clientX, y: e.clientY, source: 'contextmenu' })
         }
     }, [disabled, clearTimer, onLongPress])
 

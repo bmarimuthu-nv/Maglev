@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { getSessionRows } from './SessionList'
+import { getSessionRows, getSessionSubgroups } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -128,5 +128,60 @@ describe('getSessionRows', () => {
         expect(rows[0].sessions[0].id).toBe('orphan')
         // Should appear as top-level since parent is missing
         expect(rows[0].isChild).toBeFalsy()
+    })
+})
+
+describe('getSessionSubgroups', () => {
+    it('creates separate folder and worktree subgroups within the same base directory', () => {
+        const rows = getSessionRows([
+            makeSession({
+                id: 'folder-session',
+                metadata: { path: '/repo' }
+            }),
+            makeSession({
+                id: 'worktree-a',
+                metadata: {
+                    path: '/repo/.worktrees/feature-a',
+                    worktree: {
+                        basePath: '/repo',
+                        branch: 'feature/a',
+                        name: 'feature-a',
+                        worktreePath: '/repo/.worktrees/feature-a'
+                    }
+                }
+            }),
+            makeSession({
+                id: 'worktree-b',
+                metadata: {
+                    path: '/repo/.worktrees/feature-b',
+                    worktree: {
+                        basePath: '/repo',
+                        branch: 'feature/b',
+                        name: 'feature-b',
+                        worktreePath: '/repo/.worktrees/feature-b'
+                    }
+                }
+            }),
+        ])
+
+        const subgroups = getSessionSubgroups('/repo', rows)
+
+        expect(subgroups.map((subgroup) => subgroup.label)).toEqual(['Folder', 'feature-a', 'feature-b'])
+        expect(subgroups[0]?.rows.map((row) => row.sessions[0].id)).toEqual(['folder-session'])
+        expect(subgroups[1]?.hint).toBe('feature/a')
+        expect(subgroups[2]?.hint).toBe('feature/b')
+    })
+
+    it('keeps a single folder subgroup for plain sessions without worktrees', () => {
+        const rows = getSessionRows([
+            makeSession({ id: 'a', metadata: { path: '/repo' } }),
+            makeSession({ id: 'b', metadata: { path: '/repo' } }),
+        ])
+
+        const subgroups = getSessionSubgroups('/repo', rows)
+
+        expect(subgroups).toHaveLength(1)
+        expect(subgroups[0]?.label).toBe('Folder')
+        expect(subgroups[0]?.rows.map((row) => row.sessions[0].id)).toEqual(['a', 'b'])
     })
 })

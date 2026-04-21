@@ -107,7 +107,7 @@ function ReviewThreadCard(props: {
                                     props.onReply(next)
                                     setReply('')
                                 }}
-                                className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 Reply
                             </button>
@@ -332,14 +332,14 @@ export function FilePreviewPanel(props: {
                         <button
                             type="button"
                             onClick={() => setPanelMode('view')}
-                            className={`px-2 py-1 transition-colors ${panelMode === 'view' ? 'bg-[var(--app-link)] text-white' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
+                            className={`px-2 py-1 transition-colors ${panelMode === 'view' ? 'bg-[var(--app-link)] text-[var(--app-button-text)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
                         >
                             View
                         </button>
                         <button
                             type="button"
                             onClick={() => setPanelMode('review')}
-                            className={`px-2 py-1 transition-colors ${panelMode === 'review' ? 'bg-[var(--app-link)] text-white' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
+                            className={`px-2 py-1 transition-colors ${panelMode === 'review' ? 'bg-[var(--app-link)] text-[var(--app-button-text)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
                         >
                             Review
                         </button>
@@ -350,14 +350,14 @@ export function FilePreviewPanel(props: {
                         <button
                             type="button"
                             onClick={() => setViewMode('rendered')}
-                            className={`px-2 py-1 rounded-l-md transition-colors ${viewMode === 'rendered' ? 'bg-[var(--app-link)] text-white' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
+                            className={`px-2 py-1 rounded-l-md transition-colors ${viewMode === 'rendered' ? 'bg-[var(--app-link)] text-[var(--app-button-text)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
                         >
                             Preview
                         </button>
                         <button
                             type="button"
                             onClick={() => setViewMode('source')}
-                            className={`px-2 py-1 rounded-r-md transition-colors ${viewMode === 'source' ? 'bg-[var(--app-link)] text-white' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
+                            className={`px-2 py-1 rounded-r-md transition-colors ${viewMode === 'source' ? 'bg-[var(--app-link)] text-[var(--app-button-text)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
                         >
                             Source
                         </button>
@@ -388,7 +388,7 @@ export function FilePreviewPanel(props: {
                         type="button"
                         onClick={() => void saveFile()}
                         disabled={isSaving || !isDirty}
-                        className="rounded-md bg-[var(--app-link)] px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-50"
+                        className="rounded-md bg-[var(--app-link)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-button-text)] disabled:opacity-50"
                     >
                         {isSaving ? 'Saving…' : 'Save'}
                     </button>
@@ -492,7 +492,7 @@ export function FilePreviewPanel(props: {
                                                     onClick={() => {
                                                         void handleCreateThread(lineNumber)
                                                     }}
-                                                    className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                                    className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
                                                 >
                                                     Save comment
                                                 </button>

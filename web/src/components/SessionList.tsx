@@ -35,6 +35,8 @@ type GroupRenderState = {
     group: SessionGroup
     isCollapsed: boolean
     orderedRows: SessionRow[]
+    subgroups: SessionSubgroup[]
+    shouldShowSubgroups: boolean
 }
 
 type VirtualHeaderItem = {
@@ -43,15 +45,23 @@ type VirtualHeaderItem = {
     groupState: GroupRenderState
 }
 
+type VirtualSubgroupItem = {
+    key: string
+    kind: 'subgroup'
+    groupState: GroupRenderState
+    subgroup: SessionSubgroup
+}
+
 type VirtualRowItem = {
     key: string
     kind: 'row'
     groupState: GroupRenderState
+    subgroup: SessionSubgroup
     row: SessionRow
     rowIndex: number
 }
 
-type VirtualListItem = VirtualHeaderItem | VirtualRowItem
+type VirtualListItem = VirtualHeaderItem | VirtualSubgroupItem | VirtualRowItem
 
 type VirtualItemLayout = {
     item: VirtualListItem
@@ -66,9 +76,18 @@ type ViewportMetrics = {
 }
 
 const HEADER_HEIGHT_ESTIMATE = 48
+const SUBGROUP_HEIGHT_ESTIMATE = 34
 const ROW_HEIGHT_ESTIMATE = 112
 const PAIRED_ROW_HEIGHT_ESTIMATE = 176
 const VIRTUAL_OVERSCAN_PX = 500
+
+type SessionSubgroup = {
+    key: string
+    label: string
+    hint?: string
+    rows: SessionRow[]
+    kind: 'folder' | 'worktree'
+}
 
 function getGroupDisplayName(directory: string): string {
     if (directory === 'Other') return directory
@@ -319,6 +338,59 @@ export function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
     return rows
 }
 
+function getSubgroupIdentity(row: SessionRow): { key: string; label: string; hint?: string; kind: 'folder' | 'worktree' } {
+    const primarySession = row.sessions[0]
+    const worktree = primarySession?.metadata?.worktree
+    if (worktree) {
+        const label = worktree.name?.trim() || worktree.branch.trim()
+        const hint = worktree.name?.trim() && worktree.name !== worktree.branch
+            ? worktree.branch
+            : undefined
+        return {
+            key: `worktree:${worktree.worktreePath ?? primarySession.metadata?.path ?? primarySession.id}`,
+            label,
+            hint,
+            kind: 'worktree'
+        }
+    }
+
+    return {
+        key: 'folder:main',
+        label: 'Folder',
+        kind: 'folder'
+    }
+}
+
+export function getSessionSubgroups(_groupDirectory: string, orderedRows: SessionRow[]): SessionSubgroup[] {
+    const subgroupMap = new Map<string, SessionSubgroup>()
+
+    for (const row of orderedRows) {
+        const subgroupIdentity = getSubgroupIdentity(row)
+        const existing = subgroupMap.get(subgroupIdentity.key)
+        if (existing) {
+            existing.rows.push(row)
+            continue
+        }
+        subgroupMap.set(subgroupIdentity.key, {
+            key: subgroupIdentity.key,
+            label: subgroupIdentity.label,
+            hint: subgroupIdentity.hint,
+            kind: subgroupIdentity.kind,
+            rows: [row]
+        })
+    }
+
+    const subgroups = Array.from(subgroupMap.values())
+    subgroups.sort((left, right) => {
+        if (left.kind !== right.kind) {
+            return left.kind === 'folder' ? -1 : 1
+        }
+        return left.label.localeCompare(right.label)
+    })
+
+    return subgroups
+}
+
 const SESSION_ORDER_KEY = 'maglev-session-order'
 
 function loadSessionOrders(): Record<string, string[]> {
@@ -354,6 +426,9 @@ function applyCustomOrder(rows: SessionRow[], savedOrder: string[] | undefined):
 function estimateVirtualItemHeight(item: VirtualListItem): number {
     if (item.kind === 'header') {
         return HEADER_HEIGHT_ESTIMATE
+    }
+    if (item.kind === 'subgroup') {
+        return SUBGROUP_HEIGHT_ESTIMATE
     }
     return item.row.paired ? PAIRED_ROW_HEIGHT_ESTIMATE : ROW_HEIGHT_ESTIMATE
 }
@@ -470,6 +545,7 @@ function SessionItem(props: {
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+    const [menuAnchorMode, setMenuAnchorMode] = useState<'centered' | 'context'>('centered')
     const [editOpen, setEditOpen] = useState(false)
     const [startupCommandOpen, setStartupCommandOpen] = useState(false)
     const [closeOpen, setCloseOpen] = useState(false)
@@ -517,8 +593,7 @@ function SessionItem(props: {
                 s.metadata.autoRespawn,
                 startupCommand ?? s.metadata.startupCommand ?? undefined,
                 undefined,
-                undefined,
-                s.id
+                undefined
             )
             if (result.type === 'success') {
                 await queryClient.invalidateQueries({ queryKey: ['sessions', scopeKey] })
@@ -532,7 +607,8 @@ function SessionItem(props: {
     const longPressHandlers = useLongPress({
         onLongPress: (point) => {
             haptic.impact('medium')
-            setMenuAnchorPoint(point)
+            setMenuAnchorPoint({ x: point.x, y: point.y })
+            setMenuAnchorMode(point.source === 'contextmenu' ? 'context' : 'centered')
             setMenuOpen(true)
         },
         onClick: () => {
@@ -670,6 +746,7 @@ function SessionItem(props: {
                 onEdit={() => setEditOpen(true)}
                 onCloseSession={() => setCloseOpen(true)}
                 anchorPoint={menuAnchorPoint}
+                anchorMode={menuAnchorMode}
             />
 
             <Dialog open={attachOpen} onOpenChange={setAttachOpen}>
@@ -938,10 +1015,14 @@ export function SessionList(props: {
             const isCollapsed = isGroupCollapsed(group)
             const rows = getSessionRows(group.sessions)
             const orderedRows = applyCustomOrder(rows, sessionOrders[group.directory])
+            const subgroups = getSessionSubgroups(group.directory, orderedRows)
+            const shouldShowSubgroups = subgroups.length > 1 || subgroups.some((subgroup) => subgroup.kind === 'worktree')
             return {
                 group,
                 isCollapsed,
-                orderedRows
+                orderedRows,
+                subgroups,
+                shouldShowSubgroups
             }
         })
     }, [groups, sessionOrders, collapseOverrides])
@@ -954,13 +1035,29 @@ export function SessionList(props: {
                 groupState
             }]
             if (!groupState.isCollapsed) {
-                items.push(...groupState.orderedRows.map((row, rowIndex) => ({
-                    key: `row:${groupState.group.directory}:${row.key}`,
-                    kind: 'row' as const,
-                    groupState,
-                    row,
-                    rowIndex
-                })))
+                let rowIndex = 0
+                for (const subgroup of groupState.subgroups) {
+                    if (groupState.shouldShowSubgroups) {
+                        items.push({
+                            key: `subgroup:${groupState.group.directory}:${subgroup.key}`,
+                            kind: 'subgroup',
+                            groupState,
+                            subgroup
+                        })
+                    }
+                    items.push(...subgroup.rows.map((row) => {
+                        const item: VirtualRowItem = {
+                            key: `row:${groupState.group.directory}:${row.key}`,
+                            kind: 'row',
+                            groupState,
+                            subgroup,
+                            row,
+                            rowIndex
+                        }
+                        rowIndex += 1
+                        return item
+                    }))
+                }
             }
             return items
         })
@@ -1124,6 +1221,19 @@ export function SessionList(props: {
                             ? t('dialog.clearGroup.confirming')
                             : t('session.group.clearAll')}
                     </button>
+                </div>
+            )
+        }
+
+        if (item.kind === 'subgroup') {
+            return (
+                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)]/55 px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--app-hint)]">
+                    <span className="font-medium">{item.subgroup.label}</span>
+                    {item.subgroup.hint ? (
+                        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 normal-case tracking-normal text-[10px] text-[var(--app-fg)]">
+                            {item.subgroup.hint}
+                        </span>
+                    ) : null}
                 </div>
             )
         }

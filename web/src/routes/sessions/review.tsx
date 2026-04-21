@@ -128,7 +128,7 @@ function ReviewThreadCard(props: ReviewThreadCardProps) {
                                     props.onReply(next)
                                     setReply('')
                                 }}
-                                className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 Reply
                             </button>
@@ -423,7 +423,7 @@ export default function ReviewPage() {
                                 search: { mode: 'branch', path: selectedPath || undefined, threadId: highlightedThreadId || undefined }
                             })
                         }}
-                        className={`rounded-full border px-3 py-1 ${mode === 'branch' ? 'border-[var(--app-link)] bg-[var(--app-link)] text-white' : 'border-[var(--app-border)] text-[var(--app-fg)]'}`}
+                        className={`rounded-full border px-3 py-1 ${mode === 'branch' ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-button-text)]' : 'border-[var(--app-border)] text-[var(--app-fg)]'}`}
                     >
                         Branch diff
                     </button>
@@ -436,7 +436,7 @@ export default function ReviewPage() {
                                 search: { mode: 'working', path: selectedPath || undefined, threadId: highlightedThreadId || undefined }
                             })
                         }}
-                        className={`rounded-full border px-3 py-1 ${mode === 'working' ? 'border-[var(--app-link)] bg-[var(--app-link)] text-white' : 'border-[var(--app-border)] text-[var(--app-fg)]'}`}
+                        className={`rounded-full border px-3 py-1 ${mode === 'working' ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-button-text)]' : 'border-[var(--app-border)] text-[var(--app-fg)]'}`}
                     >
                         Uncommitted only
                     </button>
@@ -594,7 +594,7 @@ export default function ReviewPage() {
                                                             onClick={() => {
                                                                 void handleCreateThread(line)
                                                             }}
-                                                            className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             Save comment
                                                         </button>

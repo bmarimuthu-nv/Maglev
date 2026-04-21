@@ -45,6 +45,7 @@ type SessionActionMenuProps = {
     onEdit: () => void
     onCloseSession: () => void
     anchorPoint: { x: number; y: number }
+    anchorMode?: 'centered' | 'context'
     menuId?: string
 }
 
@@ -261,6 +262,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onEdit,
         onCloseSession,
         anchorPoint,
+        anchorMode = 'centered',
         menuId
     } = props
     const menuRef = useRef<HTMLDivElement | null>(null)
@@ -357,21 +359,25 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         const viewportWidth = window.innerWidth
         const viewportHeight = window.innerHeight
         const padding = 8
-        const gap = 8
+        const gap = anchorMode === 'context' ? 2 : 8
 
         const spaceBelow = viewportHeight - anchorPoint.y
         const spaceAbove = anchorPoint.y
         const openAbove = spaceBelow < menuRect.height + gap && spaceAbove > spaceBelow
 
         let top = openAbove ? anchorPoint.y - menuRect.height - gap : anchorPoint.y + gap
-        let left = anchorPoint.x - menuRect.width / 2
-        const transformOrigin = openAbove ? 'bottom center' : 'top center'
+        let left = anchorMode === 'context'
+            ? anchorPoint.x
+            : anchorPoint.x - menuRect.width / 2
+        const transformOrigin = anchorMode === 'context'
+            ? (openAbove ? 'bottom left' : 'top left')
+            : (openAbove ? 'bottom center' : 'top center')
 
         top = Math.min(Math.max(top, padding), viewportHeight - menuRect.height - padding)
         left = Math.min(Math.max(left, padding), viewportWidth - menuRect.width - padding)
 
         setMenuPosition({ top, left, transformOrigin })
-    }, [anchorPoint])
+    }, [anchorMode, anchorPoint])
 
     useLayoutEffect(() => {
         if (!isOpen) return
