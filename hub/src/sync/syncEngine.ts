@@ -476,7 +476,27 @@ export class SyncEngine {
     }
 
     async renameSession(sessionId: string, name: string): Promise<void> {
-        await this.sessionCache.renameSession(sessionId, name)
+        await this.updateSessionDetails(sessionId, { name })
+    }
+
+    async updateSessionDetails(sessionId: string, updates: { name?: string; directory?: string }): Promise<void> {
+        await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => {
+            const next = { ...metadata }
+            if (updates.name !== undefined) {
+                next.name = updates.name
+            }
+            if (updates.directory !== undefined) {
+                if (metadata.worktree) {
+                    next.worktree = {
+                        ...metadata.worktree,
+                        basePath: updates.directory
+                    }
+                } else {
+                    next.path = updates.directory
+                }
+            }
+            return next
+        })
     }
 
     async setSessionNotesPath(sessionId: string, notesPath: string): Promise<void> {
@@ -523,6 +543,27 @@ export class SyncEngine {
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
         this.terminalStateCache.removeSession(sessionId)
+    }
+
+    async closeSession(sessionId: string): Promise<void> {
+        const session = this.getSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        if (session.metadata?.flavor === 'shell' && (session.metadata.pinned || session.metadata.autoRespawn)) {
+            await this.setShellSessionOptions(sessionId, {
+                pinned: false,
+                autoRespawn: false
+            })
+        }
+
+        const refreshed = this.getSession(sessionId)
+        if (refreshed?.active) {
+            await this.archiveSession(sessionId)
+        }
+
+        await this.deleteSession(sessionId)
     }
 
     async applySessionConfig(

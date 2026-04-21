@@ -6,7 +6,7 @@ import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
-import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { SessionEditDialog } from '@/components/SessionEditDialog'
 import { StartupCommandDialog } from '@/components/StartupCommandDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/lib/use-translation'
@@ -470,15 +470,13 @@ function SessionItem(props: {
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-    const [renameOpen, setRenameOpen] = useState(false)
+    const [editOpen, setEditOpen] = useState(false)
     const [startupCommandOpen, setStartupCommandOpen] = useState(false)
-    const [archiveOpen, setArchiveOpen] = useState(false)
-    const [deleteOpen, setDeleteOpen] = useState(false)
+    const [closeOpen, setCloseOpen] = useState(false)
 
     const {
-        archiveSession,
-        renameSession,
-        deleteSession,
+        updateSession,
+        closeSession,
         setPinned,
         setShellOptions,
         attachTerminalSupervision,
@@ -669,9 +667,8 @@ function SessionItem(props: {
                 onClone={() => void handleClone()}
                 onCloneWithClaude={() => void handleClone('claude')}
                 onCloneWithCodex={() => void handleClone('codex')}
-                onRename={() => setRenameOpen(true)}
-                onArchive={() => setArchiveOpen(true)}
-                onDelete={() => setDeleteOpen(true)}
+                onEdit={() => setEditOpen(true)}
+                onCloseSession={() => setCloseOpen(true)}
                 anchorPoint={menuAnchorPoint}
             />
 
@@ -751,11 +748,12 @@ function SessionItem(props: {
                 </DialogContent>
             </Dialog>
 
-            <RenameSessionDialog
-                isOpen={renameOpen}
-                onClose={() => setRenameOpen(false)}
+            <SessionEditDialog
+                isOpen={editOpen}
+                onClose={() => setEditOpen(false)}
                 currentName={sessionName}
-                onRename={renameSession}
+                currentDirectory={s.metadata?.worktree?.basePath ?? s.metadata?.path ?? ''}
+                onSave={updateSession}
                 isPending={isPending}
             />
 
@@ -770,35 +768,13 @@ function SessionItem(props: {
             />
 
             <ConfirmDialog
-                isOpen={archiveOpen}
-                onClose={() => setArchiveOpen(false)}
-                title={t('dialog.archive.title')}
-                description={t('dialog.archive.description', { name: sessionName })}
-                confirmLabel={t('dialog.archive.confirm')}
-                confirmingLabel={t('dialog.archive.confirming')}
-                onConfirm={async () => {
-                    if (s.metadata?.pinned) {
-                        await setPinned(false)
-                    }
-                    await archiveSession()
-                }}
-                isPending={isPending}
-                destructive
-            />
-
-            <ConfirmDialog
-                isOpen={deleteOpen}
-                onClose={() => setDeleteOpen(false)}
-                title={t('dialog.delete.title')}
-                description={t('dialog.delete.description', { name: sessionName })}
-                confirmLabel={t('dialog.delete.confirm')}
-                confirmingLabel={t('dialog.delete.confirming')}
-                onConfirm={async () => {
-                    if (s.metadata?.pinned) {
-                        await setPinned(false)
-                    }
-                    await deleteSession()
-                }}
+                isOpen={closeOpen}
+                onClose={() => setCloseOpen(false)}
+                title={t('dialog.close.title')}
+                description={t('dialog.close.description', { name: sessionName })}
+                confirmLabel={t('dialog.close.confirm')}
+                confirmingLabel={t('dialog.close.confirming')}
+                onConfirm={closeSession}
                 isPending={isPending}
                 destructive
             />
@@ -872,13 +848,7 @@ export function SessionList(props: {
             const failures: string[] = []
             for (const session of group.sessions) {
                 try {
-                    if (session.metadata?.pinned) {
-                        await api.setSessionPinned(session.id, false)
-                    }
-                    if (session.active) {
-                        await api.archiveSession(session.id)
-                    }
-                    await api.deleteSession(session.id)
+                    await api.closeSession(session.id)
                 } catch (error) {
                     const message = error instanceof Error ? error.message : t('dialog.error.default')
                     failures.push(`${getSessionTitle(session)}: ${message}`)

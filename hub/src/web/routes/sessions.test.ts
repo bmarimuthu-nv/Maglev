@@ -62,6 +62,61 @@ function createApp(session: Session) {
 }
 
 describe('sessions routes', () => {
+    it('forwards session detail updates to the sync engine', async () => {
+        const session = createSession()
+        const updateCalls: Array<[string, { name?: string; directory?: string }]> = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+            updateSessionDetails: async (sessionId: string, updates: { name?: string; directory?: string }) => {
+                updateCalls.push([sessionId, updates])
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/session-1', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: 'Renamed', directory: '/tmp/next-project' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(updateCalls).toEqual([[
+            'session-1',
+            { name: 'Renamed', directory: '/tmp/next-project' }
+        ]])
+    })
+
+    it('forwards close requests to the sync engine', async () => {
+        const session = createSession()
+        const closeCalls: string[] = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+            closeSession: async (sessionId: string) => {
+                closeCalls.push(sessionId)
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/session-1/close', {
+            method: 'POST'
+        })
+
+        expect(response.status).toBe(200)
+        expect(closeCalls).toEqual(['session-1'])
+    })
+
     it('forwards terminal pair rebind requests to the sync engine', async () => {
         const session = createSession({
             metadata: {

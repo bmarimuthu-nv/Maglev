@@ -435,10 +435,13 @@ export class ApiClient {
         })
     }
 
-    async renameSession(sessionId: string, name: string): Promise<void> {
+    async updateSession(sessionId: string, updates: {
+        name?: string
+        directory?: string
+    }): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'PATCH',
-            body: JSON.stringify({ name })
+            body: JSON.stringify(updates)
         })
     }
 
@@ -446,6 +449,16 @@ export class ApiClient {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'DELETE'
         })
+    }
+
+    async closeSession(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/close`, {
+            method: 'POST'
+        })
+    }
+
+    async renameSession(sessionId: string, name: string): Promise<void> {
+        await this.updateSession(sessionId, { name })
     }
 
     async setSessionPinned(sessionId: string, pinned: boolean): Promise<void> {

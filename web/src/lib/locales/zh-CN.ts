@@ -59,19 +59,33 @@ export default {
   'session.more': '更多操作',
 
   // Session actions
+  'session.action.edit': '编辑详情',
   'session.action.rename': '重命名',
   'session.action.archive': '归档',
   'session.action.delete': '删除',
+  'session.action.close': '关闭',
   'session.action.copy': '复制',
   'session.action.openFolder': '打开文件夹',
   'session.group.clearAll': '全部清除',
 
   // Dialogs
+  'dialog.edit.title': '编辑会话',
+  'dialog.edit.name': '会话名称',
+  'dialog.edit.namePlaceholder': '会话名称',
+  'dialog.edit.directory': '启动目录',
+  'dialog.edit.directoryPlaceholder': '/path/to/project',
+  'dialog.edit.directoryRequired': '请输入目录。',
+  'dialog.edit.saving': '保存中…',
+  'dialog.edit.error': '保存会话详情失败，请重试。',
   'dialog.rename.title': '重命名会话',
   'dialog.rename.placeholder': '会话名称',
   'dialog.rename.save': '保存',
   'dialog.rename.saving': '保存中…',
   'dialog.rename.error': '重命名失败，请重试。',
+  'dialog.close.title': '关闭会话',
+  'dialog.close.description': '确定要关闭并删除 "{name}" 吗？活动会话将被断开，已固定的 shell 也会被取消固定。',
+  'dialog.close.confirm': '关闭',
+  'dialog.close.confirming': '关闭中…',
 
   'dialog.archive.title': '归档会话',
   'dialog.archive.description': '确定要归档 "{name}" 吗？这将断开活动会话。',

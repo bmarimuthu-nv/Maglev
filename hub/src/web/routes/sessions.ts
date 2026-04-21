@@ -8,8 +8,9 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 import { configuration } from '../../configuration'
 
-const renameSessionSchema = z.object({
-    name: z.string().min(1).max(255)
+const updateSessionSchema = z.object({
+    name: z.string().trim().min(1).max(255).optional(),
+    directory: z.string().trim().min(1).max(4000).optional()
 })
 
 const pinSessionSchema = z.object({
@@ -479,20 +480,47 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const body = await c.req.json().catch(() => null)
-        const parsed = renameSessionSchema.safeParse(body)
+        const parsed = updateSessionSchema.safeParse(body)
         if (!parsed.success) {
-            return c.json({ error: 'Invalid body: name is required' }, 400)
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        if (parsed.data.name === undefined && parsed.data.directory === undefined) {
+            return c.json({ error: 'At least one session update is required' }, 400)
         }
 
         try {
-            await engine.renameSession(sessionResult.sessionId, parsed.data.name)
+            await engine.updateSessionDetails(sessionResult.sessionId, {
+                name: parsed.data.name,
+                directory: parsed.data.directory
+            })
             return c.json({ ok: true })
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to rename session'
+            const message = error instanceof Error ? error.message : 'Failed to update session'
             // Map concurrency/version errors to 409 conflict
             if (message.includes('concurrently') || message.includes('version')) {
                 return c.json({ error: message }, 409)
             }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.post('/sessions/:id/close', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        try {
+            await engine.closeSession(sessionResult.sessionId)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to close session'
             return c.json({ error: message }, 500)
         }
     })

@@ -42,9 +42,8 @@ type SessionActionMenuProps = {
     onClone?: () => void
     onCloneWithClaude?: () => void
     onCloneWithCodex?: () => void
-    onRename: () => void
-    onArchive: () => void
-    onDelete: () => void
+    onEdit: () => void
+    onCloseSession: () => void
     anchorPoint: { x: number; y: number }
     menuId?: string
 }
@@ -259,9 +258,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onClone,
         onCloneWithClaude,
         onCloneWithCodex,
-        onRename,
-        onArchive,
-        onDelete,
+        onEdit,
+        onCloseSession,
         anchorPoint,
         menuId
     } = props
@@ -271,9 +269,9 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const resolvedMenuId = menuId ?? `session-action-menu-${internalId}`
     const headingId = `${resolvedMenuId}-heading`
 
-    const handleRename = () => {
+    const handleEdit = () => {
         onClose()
-        onRename()
+        onEdit()
     }
 
     const handleOpenFolder = () => {
@@ -286,11 +284,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onOpenReview?.()
     }
 
-    const handleArchive = () => {
-        onClose()
-        onArchive()
-    }
-
     const handleTogglePin = () => {
         onClose()
         onTogglePin?.()
@@ -301,9 +294,9 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onEditStartupCommand?.()
     }
 
-    const handleDelete = () => {
+    const handleCloseSession = () => {
         onClose()
-        onDelete()
+        onCloseSession()
     }
 
     const handleAttachTerminalSupervision = () => {
@@ -628,33 +621,21 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     type="button"
                     role="menuitem"
                     className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
-                    onClick={handleRename}
+                    onClick={handleEdit}
                 >
                     <EditIcon className="text-[var(--app-hint)]" />
-                    {t('session.action.rename')}
+                    {t('session.action.edit')}
                 </button>
 
-                {sessionActive ? (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
-                        onClick={handleArchive}
-                    >
-                        <ArchiveIcon className="text-red-500" />
-                        {t('session.action.archive')}
-                    </button>
-                ) : (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
-                        onClick={handleDelete}
-                    >
-                        <TrashIcon className="text-red-500" />
-                        {t('session.action.delete')}
-                    </button>
-                )}
+                <button
+                    type="button"
+                    role="menuitem"
+                    className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
+                    onClick={handleCloseSession}
+                >
+                    {sessionActive ? <ArchiveIcon className="text-red-500" /> : <TrashIcon className="text-red-500" />}
+                    {t('session.action.close')}
+                </button>
             </div>
         </div>
     )
