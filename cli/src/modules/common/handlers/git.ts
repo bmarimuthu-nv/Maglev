@@ -164,6 +164,12 @@ async function resolveBranchUpstream(cwd: string, timeout?: number): Promise<str
     return await tryRunGitText(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], cwd, timeout)
 }
 
+async function resolveForkPointBaseRef(cwd: string, timeout?: number): Promise<string | null> {
+    return await resolveRemoteDefaultBranch('upstream', cwd, timeout)
+        ?? await resolveRemoteDefaultBranch('origin', cwd, timeout)
+        ?? await resolveBranchUpstream(cwd, timeout)
+}
+
 async function resolveReviewBase(cwd: string, mode: GitReviewMode, timeout: number | undefined, baseMode: GitReviewBaseMode = 'origin'): Promise<{
     mode: GitReviewMode
     baseMode: GitReviewBaseMode
@@ -186,19 +192,18 @@ async function resolveReviewBase(cwd: string, mode: GitReviewMode, timeout: numb
     }
 
     if (baseMode === 'fork-point') {
-        const upstreamRef = await resolveBranchUpstream(cwd, timeout)
-            ?? await resolveRemoteDefaultBranch('origin', cwd, timeout)
-        if (!upstreamRef) {
-            throw new Error('Could not resolve branch upstream for fork-point diff')
+        const baseRef = await resolveForkPointBaseRef(cwd, timeout)
+        if (!baseRef) {
+            throw new Error('Could not resolve base branch for fork-point diff')
         }
 
-        const mergeBase = await tryRunGitText(['merge-base', '--fork-point', upstreamRef, 'HEAD'], cwd, timeout)
-            ?? await runGitText(['merge-base', 'HEAD', upstreamRef], cwd, timeout)
+        const mergeBase = await tryRunGitText(['merge-base', '--fork-point', baseRef, 'HEAD'], cwd, timeout)
+            ?? await runGitText(['merge-base', 'HEAD', baseRef], cwd, timeout)
         return {
             mode,
             baseMode,
             currentBranch,
-            defaultBranch: upstreamRef,
+            defaultBranch: baseRef,
             mergeBase,
             rangeArgs: [`${mergeBase}..HEAD`]
         }

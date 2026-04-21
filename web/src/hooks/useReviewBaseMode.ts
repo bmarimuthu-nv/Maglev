@@ -50,7 +50,7 @@ export function getReviewBaseModeOptions(): Array<{ value: ReviewBaseMode; label
         {
             value: 'fork-point',
             label: 'Branch fork point',
-            description: 'Compare from the branch base/fork-point commit against the tracked upstream'
+            description: 'Compare from the branch base/fork-point commit against upstream default branch first, then origin'
         }
     ]
 }

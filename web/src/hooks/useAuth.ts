@@ -6,7 +6,7 @@ import { getBrokerBasepath } from '@/utils/url'
 export type AuthSource =
     | { type: 'telegram'; initData: string }
     | { type: 'accessToken'; token: string }
-    | { type: 'broker' }
+    | { type: 'broker'; bootstrapToken?: string }
     | { type: 'jwt'; token: string }
 
 function decodeJwtExpMs(token: string): number | null {
@@ -237,7 +237,18 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 return
             }
 
-            setIsLoading(true)
+            const brokerBootstrapToken = authSource.type === 'broker'
+                ? authSource.bootstrapToken ?? null
+                : null
+            if (brokerBootstrapToken) {
+                tokenRef.current = brokerBootstrapToken
+                setToken(brokerBootstrapToken)
+                setUser(null)
+                setError(null)
+                setNeedsBinding(false)
+            }
+
+            setIsLoading(!brokerBootstrapToken)
             setError(null)
             setNeedsBinding(false)
             try {
@@ -267,10 +278,12 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                         redirectToBrokerRoot()
                         return
                     }
-                    setToken(null)
-                    setUser(null)
-                    setNeedsBinding(false)
-                    setError(e instanceof Error ? e.message : 'Unable to reach the hub through the server.')
+                    if (!brokerBootstrapToken) {
+                        setToken(null)
+                        setUser(null)
+                        setNeedsBinding(false)
+                        setError(e instanceof Error ? e.message : 'Unable to reach the hub through the server.')
+                    }
                     return
                 }
                 setNeedsBinding(false)
