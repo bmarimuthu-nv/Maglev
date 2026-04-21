@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
@@ -30,6 +30,45 @@ type SessionRow = {
     paired: boolean
     isChild?: boolean
 }
+
+type GroupRenderState = {
+    group: SessionGroup
+    isCollapsed: boolean
+    orderedRows: SessionRow[]
+}
+
+type VirtualHeaderItem = {
+    key: string
+    kind: 'header'
+    groupState: GroupRenderState
+}
+
+type VirtualRowItem = {
+    key: string
+    kind: 'row'
+    groupState: GroupRenderState
+    row: SessionRow
+    rowIndex: number
+}
+
+type VirtualListItem = VirtualHeaderItem | VirtualRowItem
+
+type VirtualItemLayout = {
+    item: VirtualListItem
+    start: number
+    size: number
+    end: number
+}
+
+type ViewportMetrics = {
+    start: number
+    height: number
+}
+
+const HEADER_HEIGHT_ESTIMATE = 48
+const ROW_HEIGHT_ESTIMATE = 112
+const PAIRED_ROW_HEIGHT_ESTIMATE = 176
+const VIRTUAL_OVERSCAN_PX = 500
 
 function getGroupDisplayName(directory: string): string {
     if (directory === 'Other') return directory
@@ -310,6 +349,95 @@ function applyCustomOrder(rows: SessionRow[], savedOrder: string[] | undefined):
         if (bIdx !== undefined) return 1
         return 0
     })
+}
+
+function estimateVirtualItemHeight(item: VirtualListItem): number {
+    if (item.kind === 'header') {
+        return HEADER_HEIGHT_ESTIMATE
+    }
+    return item.row.paired ? PAIRED_ROW_HEIGHT_ESTIMATE : ROW_HEIGHT_ESTIMATE
+}
+
+function isWindowScrollContainer(container: HTMLElement | Window): container is Window {
+    return typeof window !== 'undefined' && container === window
+}
+
+function findScrollContainer(node: HTMLElement | null): HTMLElement | Window {
+    let current = node?.parentElement ?? null
+    while (current && typeof window !== 'undefined') {
+        const style = window.getComputedStyle(current)
+        if (/(auto|scroll)/.test(style.overflowY)) {
+            return current
+        }
+        current = current.parentElement
+    }
+    return window
+}
+
+function getViewportMetrics(root: HTMLElement, container: HTMLElement | Window): ViewportMetrics {
+    if (typeof window === 'undefined') {
+        return { start: 0, height: 0 }
+    }
+
+    if (isWindowScrollContainer(container)) {
+        const scrollTop = window.scrollY
+        const rootTop = root.getBoundingClientRect().top + scrollTop
+        return {
+            start: Math.max(0, scrollTop - rootTop),
+            height: window.innerHeight
+        }
+    }
+
+    const containerRect = container.getBoundingClientRect()
+    const rootRect = root.getBoundingClientRect()
+    const rootTop = rootRect.top - containerRect.top + container.scrollTop
+    return {
+        start: Math.max(0, container.scrollTop - rootTop),
+        height: container.clientHeight
+    }
+}
+
+function VirtualMeasuredItem(props: {
+    itemKey: string
+    top: number
+    onMeasure: (key: string, height: number) => void
+    children: React.ReactNode
+}) {
+    const ref = useRef<HTMLDivElement | null>(null)
+
+    useLayoutEffect(() => {
+        const node = ref.current
+        if (!node) {
+            return
+        }
+
+        const measure = () => {
+            const nextHeight = Math.ceil(node.getBoundingClientRect().height)
+            props.onMeasure(props.itemKey, nextHeight)
+        }
+
+        measure()
+
+        if (typeof ResizeObserver === 'undefined') {
+            return
+        }
+
+        const observer = new ResizeObserver(() => {
+            measure()
+        })
+        observer.observe(node)
+        return () => observer.disconnect()
+    }, [props.itemKey, props.onMeasure])
+
+    return (
+        <div
+            ref={ref}
+            className="absolute inset-x-0"
+            style={{ transform: `translateY(${props.top}px)` }}
+        >
+            {props.children}
+        </div>
+    )
 }
 
 function formatRelativeTime(value: number, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -835,6 +963,250 @@ export function SessionList(props: {
         setDropIndicator(null)
     }
 
+    const groupRenderStates = useMemo<GroupRenderState[]>(() => {
+        return groups.map((group) => {
+            const isCollapsed = isGroupCollapsed(group)
+            const rows = getSessionRows(group.sessions)
+            const orderedRows = applyCustomOrder(rows, sessionOrders[group.directory])
+            return {
+                group,
+                isCollapsed,
+                orderedRows
+            }
+        })
+    }, [groups, sessionOrders, collapseOverrides])
+
+    const virtualItems = useMemo<VirtualListItem[]>(() => {
+        return groupRenderStates.flatMap((groupState) => {
+            const items: VirtualListItem[] = [{
+                key: `header:${groupState.group.directory}`,
+                kind: 'header',
+                groupState
+            }]
+            if (!groupState.isCollapsed) {
+                items.push(...groupState.orderedRows.map((row, rowIndex) => ({
+                    key: `row:${groupState.group.directory}:${row.key}`,
+                    kind: 'row' as const,
+                    groupState,
+                    row,
+                    rowIndex
+                })))
+            }
+            return items
+        })
+    }, [groupRenderStates])
+
+    const [measuredHeights, setMeasuredHeights] = useState<Record<string, number>>({})
+    const virtualRootRef = useRef<HTMLDivElement | null>(null)
+    const scrollContainerRef = useRef<HTMLElement | Window | null>(null)
+    const [viewport, setViewport] = useState<ViewportMetrics>({ start: 0, height: 0 })
+
+    useEffect(() => {
+        const knownKeys = new Set(virtualItems.map((item) => item.key))
+        setMeasuredHeights((prev) => {
+            let changed = false
+            const next: Record<string, number> = {}
+            for (const [key, value] of Object.entries(prev)) {
+                if (!knownKeys.has(key)) {
+                    changed = true
+                    continue
+                }
+                next[key] = value
+            }
+            return changed ? next : prev
+        })
+    }, [virtualItems])
+
+    const handleMeasureItem = useCallback((key: string, height: number) => {
+        setMeasuredHeights((prev) => {
+            if (prev[key] === height) {
+                return prev
+            }
+            return {
+                ...prev,
+                [key]: height
+            }
+        })
+    }, [])
+
+    useLayoutEffect(() => {
+        const root = virtualRootRef.current
+        if (!root || typeof window === 'undefined') {
+            return
+        }
+
+        const container = findScrollContainer(root)
+        scrollContainerRef.current = container
+        let frame = 0
+
+        const update = () => {
+            frame = 0
+            const node = virtualRootRef.current
+            const target = scrollContainerRef.current
+            if (!node || !target) {
+                return
+            }
+            const next = getViewportMetrics(node, target)
+            setViewport((prev) => (
+                prev.start === next.start && prev.height === next.height
+                    ? prev
+                    : next
+            ))
+        }
+
+        const scheduleUpdate = () => {
+            if (frame !== 0) {
+                return
+            }
+            frame = window.requestAnimationFrame(update)
+        }
+
+        const resizeObserver = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(() => scheduleUpdate())
+            : null
+
+        resizeObserver?.observe(root)
+        if (!isWindowScrollContainer(container)) {
+            resizeObserver?.observe(container)
+            container.addEventListener('scroll', scheduleUpdate, { passive: true })
+        } else {
+            window.addEventListener('scroll', scheduleUpdate, { passive: true })
+        }
+        window.addEventListener('resize', scheduleUpdate)
+
+        update()
+
+        return () => {
+            if (frame !== 0) {
+                window.cancelAnimationFrame(frame)
+            }
+            resizeObserver?.disconnect()
+            if (!isWindowScrollContainer(container)) {
+                container.removeEventListener('scroll', scheduleUpdate)
+            } else {
+                window.removeEventListener('scroll', scheduleUpdate)
+            }
+            window.removeEventListener('resize', scheduleUpdate)
+        }
+    }, [virtualItems.length])
+
+    const itemLayouts = useMemo<VirtualItemLayout[]>(() => {
+        let start = 0
+        return virtualItems.map((item) => {
+            const size = measuredHeights[item.key] ?? estimateVirtualItemHeight(item)
+            const layout = {
+                item,
+                start,
+                size,
+                end: start + size
+            }
+            start += size
+            return layout
+        })
+    }, [measuredHeights, virtualItems])
+
+    const totalVirtualHeight = itemLayouts[itemLayouts.length - 1]?.end ?? 0
+    const visibleItemLayouts = useMemo(() => {
+        if (itemLayouts.length === 0) {
+            return []
+        }
+        if (viewport.height <= 0) {
+            return itemLayouts.slice(0, 40)
+        }
+
+        const visibleStart = Math.max(0, viewport.start - VIRTUAL_OVERSCAN_PX)
+        const visibleEnd = viewport.start + viewport.height + VIRTUAL_OVERSCAN_PX
+        return itemLayouts.filter((layout) => layout.end >= visibleStart && layout.start <= visibleEnd)
+    }, [itemLayouts, viewport])
+
+    const renderVirtualItem = (layout: VirtualItemLayout) => {
+        const item = layout.item
+        if (item.kind === 'header') {
+            const { group, isCollapsed } = item.groupState
+            return (
+                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-bg)] px-3 py-2">
+                    <button
+                        type="button"
+                        onClick={() => toggleGroup(group.directory, isCollapsed)}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left transition-colors hover:bg-[var(--app-secondary-bg)]"
+                    >
+                        <ChevronIcon
+                            className="h-4 w-4 text-[var(--app-hint)]"
+                            collapsed={isCollapsed}
+                        />
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <span className="font-medium text-base break-words" title={group.directory}>
+                                {group.displayName}
+                            </span>
+                            <span className="shrink-0 text-xs text-[var(--app-hint)]">
+                                ({group.sessions.length})
+                            </span>
+                        </div>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setClearGroupTarget(group)}
+                        disabled={!api || clearGroupMutation.isPending}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        title={t('session.group.clearAll')}
+                    >
+                        {clearGroupMutation.isPending && clearGroupTarget?.directory === group.directory
+                            ? t('dialog.clearGroup.confirming')
+                            : t('session.group.clearAll')}
+                    </button>
+                </div>
+            )
+        }
+
+        const { row, rowIndex, groupState } = item
+        const isDropBefore = dropIndicator?.groupDir === groupState.group.directory && dropIndicator.insertIndex === rowIndex
+        const isDropAfter = dropIndicator?.groupDir === groupState.group.directory
+            && dropIndicator.insertIndex === groupState.orderedRows.length
+            && rowIndex === groupState.orderedRows.length - 1
+        const dropClass = isDropBefore
+            ? 'shadow-[inset_0_2px_0_0_#007AFF]'
+            : isDropAfter
+                ? 'shadow-[inset_0_-2px_0_0_#007AFF]'
+                : ''
+
+        return (
+            <div
+                draggable
+                onDragStart={(e) => handleDragStart(groupState.group.directory, row.key, e)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => handleDragOver(groupState.group.directory, rowIndex, e)}
+                onDrop={(e) => handleDrop(groupState.group.directory, groupState.orderedRows, e)}
+                className={`group/drag flex items-stretch border-b border-[var(--app-divider)] ${dropClass}`}
+            >
+                <div
+                    className="flex items-center px-1 cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity"
+                    onMouseDown={() => { gripActiveRef.current = true }}
+                    onMouseUp={() => { gripActiveRef.current = false }}
+                >
+                    <GripVerticalIcon className="text-[var(--app-hint)]" />
+                </div>
+                <div className={`flex-1 min-w-0 ${row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''} ${row.isChild ? 'pl-5 border-l-2 border-l-[var(--app-hint)]/20' : ''}`}>
+                    {row.sessions.map((session, index) => (
+                        <div
+                            key={session.id}
+                            className={`${getTerminalSupervisionTone(session)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''}`}
+                        >
+                            <SessionItem
+                                session={session}
+                                sessions={props.sessions}
+                                onSelect={props.onSelect}
+                                onClone={props.onClone}
+                                showPath={false}
+                                api={api}
+                                selected={session.id === selectedSessionId}
+                            />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )
+    }
+
     return (
         <div className="mx-auto w-full max-w-content flex flex-col">
             {renderHeader ? (
@@ -853,105 +1225,27 @@ export function SessionList(props: {
                 </div>
             ) : null}
 
-            <div className="flex flex-col">
-                {groups.map((group) => {
-                    const isCollapsed = isGroupCollapsed(group)
-                    const rows = getSessionRows(group.sessions)
-                    const orderedRows = applyCustomOrder(rows, sessionOrders[group.directory])
-                    return (
-                        <div key={group.directory}>
-                            <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-bg)] px-3 py-2">
-                                <button
-                                    type="button"
-                                    onClick={() => toggleGroup(group.directory, isCollapsed)}
-                                    className="flex min-w-0 flex-1 items-center gap-2 text-left transition-colors hover:bg-[var(--app-secondary-bg)]"
-                                >
-                                    <ChevronIcon
-                                        className="h-4 w-4 text-[var(--app-hint)]"
-                                        collapsed={isCollapsed}
-                                    />
-                                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                                        <span className="font-medium text-base break-words" title={group.directory}>
-                                            {group.displayName}
-                                        </span>
-                                        <span className="shrink-0 text-xs text-[var(--app-hint)]">
-                                            ({group.sessions.length})
-                                        </span>
-                                    </div>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setClearGroupTarget(group)}
-                                    disabled={!api || clearGroupMutation.isPending}
-                                    className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                                    title={t('session.group.clearAll')}
-                                >
-                                    {clearGroupMutation.isPending && clearGroupTarget?.directory === group.directory
-                                        ? t('dialog.clearGroup.confirming')
-                                        : t('session.group.clearAll')}
-                                </button>
-                            </div>
-                            {!isCollapsed ? (
-                                <div
-                                    className="flex flex-col divide-y divide-[var(--app-divider)] border-b border-[var(--app-divider)]"
-                                    onDragLeave={(e) => {
-                                        const related = e.relatedTarget as Node | null
-                                        if (!related || !e.currentTarget.contains(related)) {
-                                            setDropIndicator(null)
-                                        }
-                                    }}
-                                >
-                                    {orderedRows.map((row, rowIndex) => {
-                                        const isDropBefore = dropIndicator?.groupDir === group.directory && dropIndicator.insertIndex === rowIndex
-                                        const isDropAfter = dropIndicator?.groupDir === group.directory && dropIndicator.insertIndex === orderedRows.length && rowIndex === orderedRows.length - 1
-                                        const dropClass = isDropBefore
-                                            ? 'shadow-[inset_0_2px_0_0_#007AFF]'
-                                            : isDropAfter
-                                            ? 'shadow-[inset_0_-2px_0_0_#007AFF]'
-                                            : ''
-                                        return (
-                                            <div
-                                                key={row.key}
-                                                draggable
-                                                onDragStart={(e) => handleDragStart(group.directory, row.key, e)}
-                                                onDragEnd={handleDragEnd}
-                                                onDragOver={(e) => handleDragOver(group.directory, rowIndex, e)}
-                                                onDrop={(e) => handleDrop(group.directory, orderedRows, e)}
-                                                className={`group/drag flex items-stretch ${dropClass}`}
-                                            >
-                                                <div
-                                                    className="flex items-center px-1 cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity"
-                                                    onMouseDown={() => { gripActiveRef.current = true }}
-                                                    onMouseUp={() => { gripActiveRef.current = false }}
-                                                >
-                                                    <GripVerticalIcon className="text-[var(--app-hint)]" />
-                                                </div>
-                                                <div className={`flex-1 min-w-0 ${row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''} ${row.isChild ? 'pl-5 border-l-2 border-l-[var(--app-hint)]/20' : ''}`}>
-                                                    {row.sessions.map((s, index) => (
-                                                        <div
-                                                            key={s.id}
-                                                            className={`${getTerminalSupervisionTone(s)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''}`}
-                                                        >
-                                                            <SessionItem
-                                                                session={s}
-                                                                sessions={props.sessions}
-                                                                onSelect={props.onSelect}
-                                                                onClone={props.onClone}
-                                                                showPath={false}
-                                                                api={api}
-                                                                selected={s.id === selectedSessionId}
-                                                            />
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            ) : null}
-                        </div>
-                    )
-                })}
+            <div
+                ref={virtualRootRef}
+                className="relative"
+                style={{ height: totalVirtualHeight > 0 ? `${totalVirtualHeight}px` : undefined }}
+                onDragLeave={(e) => {
+                    const related = e.relatedTarget as Node | null
+                    if (!related || !e.currentTarget.contains(related)) {
+                        setDropIndicator(null)
+                    }
+                }}
+            >
+                {visibleItemLayouts.map((layout) => (
+                    <VirtualMeasuredItem
+                        key={layout.item.key}
+                        itemKey={layout.item.key}
+                        top={layout.start}
+                        onMeasure={handleMeasureItem}
+                    >
+                        {renderVirtualItem(layout)}
+                    </VirtualMeasuredItem>
+                ))}
             </div>
 
             <ConfirmDialog

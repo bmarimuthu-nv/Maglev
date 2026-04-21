@@ -252,8 +252,13 @@ function AppInner() {
     }, [addToast])
 
     const eventSubscription = useMemo(() => {
+        const match = pathname.match(/^\/sessions\/([^/]+)(?:\/|$)/)
+        const sessionId = match?.[1]
+        if (sessionId && sessionId !== 'new') {
+            return { sessionId }
+        }
         return { all: true }
-    }, [])
+    }, [pathname])
 
     const { subscriptionId } = useSSE({
         enabled: Boolean(api && token),
