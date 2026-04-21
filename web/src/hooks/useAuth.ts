@@ -156,7 +156,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 const isExpired = expMs ? Date.now() >= expMs : false
                 if (currentSource.type === 'broker' && !isBrokerSessionExpiredError(error)) {
                     if (options?.hardFail || isExpired) {
-                        setError('Unable to reach the hub through the broker. Retry in a moment.')
+                        setError('Unable to reach the hub through the server. Retry in a moment.')
                     }
                     return null
                 }
@@ -167,7 +167,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 const msg = currentSource.type === 'telegram'
                     ? 'Session expired. Reopen the Mini App from Telegram.'
                     : currentSource.type === 'broker'
-                    ? 'Broker session expired. Sign in at the broker and reload.'
+                    ? 'Server session expired. Sign in at the server and reload.'
                     : 'Session expired. Please login again.'
                 setError(msg)
             }
@@ -263,14 +263,14 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                         setToken(null)
                         setUser(null)
                         setNeedsBinding(false)
-                        setError('Broker session expired. Redirecting to broker login...')
+                        setError('Server session expired. Redirecting to server login...')
                         redirectToBrokerRoot()
                         return
                     }
                     setToken(null)
                     setUser(null)
                     setNeedsBinding(false)
-                    setError(e instanceof Error ? e.message : 'Unable to reach the hub through the broker.')
+                    setError(e instanceof Error ? e.message : 'Unable to reach the hub through the server.')
                     return
                 }
                 setNeedsBinding(false)

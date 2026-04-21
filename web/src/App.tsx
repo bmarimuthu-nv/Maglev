@@ -348,10 +348,10 @@ function AppInner() {
                 <div className="p-4 space-y-3">
                     <div className="text-base font-semibold">{t('login.title')}</div>
                     <div className="text-sm text-red-600">
-                        {authError ?? 'Broker session required.'}
+                        {authError ?? 'Server session required.'}
                     </div>
                     <div className="text-xs text-[var(--app-hint)]">
-                        Open the broker root URL, sign in there, then reopen this hub from the broker page.
+                        Open the server root URL, sign in there, then reopen this hub from the server page.
                     </div>
                 </div>
             )
