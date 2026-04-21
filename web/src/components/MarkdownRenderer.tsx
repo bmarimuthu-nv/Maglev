@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import { MARKDOWN_PLUGINS } from '@/components/markdown/markdown-text'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { useTheme } from '@/hooks/useTheme'
 import { useShikiHighlighter } from '@/lib/shiki'
 import { cn } from '@/lib/utils'
 import { CheckIcon, CopyIcon } from '@/components/icons'
@@ -67,7 +68,16 @@ function StandaloneCodeBlock(props: { code: string; language?: string }) {
     )
 }
 
+function readThemeColor(name: string, fallback: string): string {
+    if (typeof window === 'undefined') {
+        return fallback
+    }
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    return value || fallback
+}
+
 function MermaidBlock(props: { code: string }) {
+    const { isDark } = useTheme()
     const containerRef = useRef<HTMLDivElement | null>(null)
     const diagramId = useId().replace(/:/g, '-')
     const [svg, setSvg] = useState<string | null>(null)
@@ -83,11 +93,68 @@ function MermaidBlock(props: { code: string }) {
             try {
                 const mermaidModule = await import('mermaid')
                 const mermaid = mermaidModule.default
-                const theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'neutral'
+                const appBg = readThemeColor('--app-bg', isDark ? '#1c1c1e' : '#ffffff')
+                const appFg = readThemeColor('--app-fg', isDark ? '#ffffff' : '#111827')
+                const appHint = readThemeColor('--app-hint', isDark ? '#8e8e93' : '#6b7280')
+                const appLink = readThemeColor('--app-link', isDark ? '#ffffff' : '#111827')
+                const appBorder = readThemeColor('--app-border', isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.16)')
+                const appSecondaryBg = readThemeColor('--app-secondary-bg', isDark ? '#2C2C2E' : '#f3f4f6')
+                const appSubtleBg = readThemeColor('--app-subtle-bg', isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')
                 mermaid.initialize({
                     startOnLoad: false,
                     securityLevel: 'strict',
-                    theme,
+                    theme: 'base',
+                    themeVariables: {
+                        background: appBg,
+                        fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                        primaryColor: appSecondaryBg,
+                        primaryTextColor: appFg,
+                        primaryBorderColor: appBorder,
+                        secondaryColor: appSubtleBg,
+                        secondaryTextColor: appFg,
+                        secondaryBorderColor: appBorder,
+                        tertiaryColor: appBg,
+                        tertiaryTextColor: appFg,
+                        tertiaryBorderColor: appBorder,
+                        mainBkg: appSecondaryBg,
+                        secondBkg: appSubtleBg,
+                        tertiaryBkg: appBg,
+                        nodeBkg: appSecondaryBg,
+                        nodeTextColor: appFg,
+                        nodeBorder: appBorder,
+                        clusterBkg: appBg,
+                        clusterBorder: appBorder,
+                        defaultLinkColor: appHint,
+                        lineColor: appHint,
+                        textColor: appFg,
+                        titleColor: appFg,
+                        edgeLabelBackground: appBg,
+                        actorBkg: appSecondaryBg,
+                        actorBorder: appBorder,
+                        actorTextColor: appFg,
+                        labelBoxBkgColor: appBg,
+                        labelTextColor: appFg,
+                        loopTextColor: appFg,
+                        signalColor: appHint,
+                        signalTextColor: appFg,
+                        noteBkgColor: appBg,
+                        noteTextColor: appFg,
+                        noteBorderColor: appBorder,
+                        activationBorderColor: appBorder,
+                        activationBkgColor: appSecondaryBg,
+                        sequenceNumberColor: appBg,
+                        cScale0: appSecondaryBg,
+                        cScaleLabel0: appFg,
+                        cScale1: appSubtleBg,
+                        cScaleLabel1: appFg,
+                        cScale2: appBg,
+                        cScaleLabel2: appFg,
+                        pie1: appLink,
+                        pie2: appHint,
+                        pie3: appSecondaryBg,
+                        pie4: appSubtleBg,
+                        pie5: appBorder,
+                    },
                 })
                 const { svg: renderedSvg, bindFunctions } = await mermaid.render(`maglev-mermaid-${diagramId}`, props.code)
                 if (!active) {
@@ -114,7 +181,7 @@ function MermaidBlock(props: { code: string }) {
         return () => {
             active = false
         }
-    }, [diagramId, props.code])
+    }, [diagramId, isDark, props.code])
 
     return (
         <div className="aui-md-mermaid min-w-0 w-full max-w-full overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
@@ -198,7 +265,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 }
 
 function Paragraph(props: ComponentPropsWithoutRef<'p'>) {
-    return <p {...props} className={cn('aui-md-p leading-relaxed', props.className)} />
+    return <p {...props} className={cn('aui-md-p my-4 leading-7', props.className)} />
 }
 
 function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
@@ -206,7 +273,7 @@ function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
         <blockquote
             {...props}
             className={cn(
-                'aui-md-blockquote border-l-4 border-[var(--app-hint)] pl-3 opacity-85',
+                'aui-md-blockquote my-5 border-l-4 border-[var(--app-hint)] pl-4 opacity-85',
                 props.className
             )}
         />
@@ -214,11 +281,11 @@ function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
 }
 
 function UnorderedList(props: ComponentPropsWithoutRef<'ul'>) {
-    return <ul {...props} className={cn('aui-md-ul list-disc pl-6', props.className)} />
+    return <ul {...props} className={cn('aui-md-ul my-4 list-disc space-y-1.5 pl-6', props.className)} />
 }
 
 function OrderedList(props: ComponentPropsWithoutRef<'ol'>) {
-    return <ol {...props} className={cn('aui-md-ol list-decimal pl-6', props.className)} />
+    return <ol {...props} className={cn('aui-md-ol my-4 list-decimal space-y-1.5 pl-6', props.className)} />
 }
 
 function ListItem(props: ComponentPropsWithoutRef<'li'>) {
@@ -226,14 +293,14 @@ function ListItem(props: ComponentPropsWithoutRef<'li'>) {
 }
 
 function Hr(props: ComponentPropsWithoutRef<'hr'>) {
-    return <hr {...props} className={cn('aui-md-hr border-[var(--app-divider)]', props.className)} />
+    return <hr {...props} className={cn('aui-md-hr my-6 border-[var(--app-divider)]', props.className)} />
 }
 
 function Table(props: ComponentPropsWithoutRef<'table'>) {
     const { className, ...rest } = props
 
     return (
-        <div className="aui-md-table-wrapper max-w-full overflow-x-auto">
+        <div className="aui-md-table-wrapper my-5 max-w-full overflow-x-auto">
             <table {...rest} className={cn('aui-md-table w-full border-collapse', className)} />
         </div>
     )
@@ -268,27 +335,27 @@ function Td(props: ComponentPropsWithoutRef<'td'>) {
 }
 
 function H1(props: ComponentPropsWithoutRef<'h1'>) {
-    return <h1 {...props} className={cn('aui-md-h1 mt-3 text-base font-semibold', props.className)} />
+    return <h1 {...props} className={cn('aui-md-h1 mb-4 mt-2 text-2xl font-semibold leading-tight tracking-tight', props.className)} />
 }
 
 function H2(props: ComponentPropsWithoutRef<'h2'>) {
-    return <h2 {...props} className={cn('aui-md-h2 mt-3 text-base font-semibold', props.className)} />
+    return <h2 {...props} className={cn('aui-md-h2 mb-3 mt-8 text-xl font-semibold leading-tight tracking-tight', props.className)} />
 }
 
 function H3(props: ComponentPropsWithoutRef<'h3'>) {
-    return <h3 {...props} className={cn('aui-md-h3 mt-2 text-base font-semibold', props.className)} />
+    return <h3 {...props} className={cn('aui-md-h3 mb-3 mt-6 text-lg font-semibold leading-snug', props.className)} />
 }
 
 function H4(props: ComponentPropsWithoutRef<'h4'>) {
-    return <h4 {...props} className={cn('aui-md-h4 mt-2 text-base font-semibold', props.className)} />
+    return <h4 {...props} className={cn('aui-md-h4 mb-2 mt-5 text-base font-semibold leading-snug', props.className)} />
 }
 
 function H5(props: ComponentPropsWithoutRef<'h5'>) {
-    return <h5 {...props} className={cn('aui-md-h5 mt-2 text-base font-semibold', props.className)} />
+    return <h5 {...props} className={cn('aui-md-h5 mb-2 mt-4 text-sm font-semibold uppercase tracking-wide', props.className)} />
 }
 
 function H6(props: ComponentPropsWithoutRef<'h6'>) {
-    return <h6 {...props} className={cn('aui-md-h6 mt-2 text-base font-semibold', props.className)} />
+    return <h6 {...props} className={cn('aui-md-h6 mb-2 mt-4 text-sm font-semibold uppercase tracking-wide text-[var(--app-hint)]', props.className)} />
 }
 
 function Strong(props: ComponentPropsWithoutRef<'strong'>) {
@@ -336,7 +403,7 @@ export function MarkdownRenderer(props: MarkdownRendererProps) {
         : defaultComponents
 
     return (
-        <div className={cn('aui-md mx-auto min-w-0 max-w-4xl break-words rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-6 py-5 text-base shadow-sm')}>
+        <div className={cn('aui-md mx-auto min-w-0 max-w-4xl break-words rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-6 py-6 text-base leading-7 shadow-sm')}>
             <ReactMarkdown
                 remarkPlugins={MARKDOWN_PLUGINS}
                 components={mergedComponents}

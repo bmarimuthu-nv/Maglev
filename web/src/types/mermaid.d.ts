@@ -9,6 +9,7 @@ declare module 'mermaid' {
             startOnLoad?: boolean
             securityLevel?: 'strict' | 'loose' | 'antiscript' | 'sandbox'
             theme?: string
+            themeVariables?: Record<string, string>
         }) => void
         render: (id: string, code: string) => Promise<MermaidRenderResult>
     }
