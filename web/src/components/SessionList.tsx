@@ -89,6 +89,12 @@ type SessionSubgroup = {
     kind: 'folder' | 'worktree'
 }
 
+type SessionListOrders = {
+    groups: string[]
+    subgroups: Record<string, string[]>
+    rows: Record<string, string[]>
+}
+
 function getGroupDisplayName(directory: string): string {
     if (directory === 'Other') return directory
     const parts = directory.split(/[\\/]+/).filter(Boolean)
@@ -241,7 +247,7 @@ function getTerminalSupervisionTone(session: SessionSummary): string {
     if (role === 'worker') {
         return 'bg-amber-500/8'
     }
-    if (role === 'supervisor' || role === 'orchestrator') {
+    if (role === 'supervisor') {
         return 'bg-sky-500/8'
     }
     return ''
@@ -391,18 +397,35 @@ export function getSessionSubgroups(_groupDirectory: string, orderedRows: Sessio
     return subgroups
 }
 
-const SESSION_ORDER_KEY = 'maglev-session-order'
+const SESSION_ORDER_KEY = 'maglev-session-order-v2'
 
-function loadSessionOrders(): Record<string, string[]> {
+function getRowOrderKey(groupDir: string, subgroupKey: string): string {
+    return `${groupDir}::${subgroupKey}`
+}
+
+function loadSessionOrders(): SessionListOrders {
     try {
         const raw = localStorage.getItem(SESSION_ORDER_KEY)
-        return raw ? JSON.parse(raw) : {}
+        const parsed = raw ? JSON.parse(raw) : null
+        if (!parsed || typeof parsed !== 'object') {
+            return { groups: [], subgroups: {}, rows: {} }
+        }
+        const candidate = parsed as {
+            groups?: unknown
+            subgroups?: unknown
+            rows?: unknown
+        }
+        return {
+            groups: Array.isArray(candidate.groups) ? candidate.groups.filter((value): value is string => typeof value === 'string') : [],
+            subgroups: candidate.subgroups && typeof candidate.subgroups === 'object' ? candidate.subgroups as Record<string, string[]> : {},
+            rows: candidate.rows && typeof candidate.rows === 'object' ? candidate.rows as Record<string, string[]> : {},
+        }
     } catch {
-        return {}
+        return { groups: [], subgroups: {}, rows: {} }
     }
 }
 
-function saveSessionOrders(orders: Record<string, string[]>): void {
+function saveSessionOrders(orders: SessionListOrders): void {
     try {
         localStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(orders))
     } catch {
@@ -410,17 +433,30 @@ function saveSessionOrders(orders: Record<string, string[]>): void {
     }
 }
 
-function applyCustomOrder(rows: SessionRow[], savedOrder: string[] | undefined): SessionRow[] {
-    if (!savedOrder || savedOrder.length === 0) return rows
-    const orderMap = new Map(savedOrder.map((key, idx) => [key, idx]))
-    return [...rows].sort((a, b) => {
-        const aIdx = orderMap.get(a.key)
-        const bIdx = orderMap.get(b.key)
-        if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx
-        if (aIdx !== undefined) return -1
-        if (bIdx !== undefined) return 1
-        return 0
-    })
+export function reconcileOrder<T>(items: T[], savedOrder: string[] | undefined, getKey: (item: T) => string): string[] {
+    const currentKeys = items.map(getKey)
+    const currentKeySet = new Set(currentKeys)
+    const next: string[] = []
+
+    for (const key of savedOrder ?? []) {
+        if (currentKeySet.has(key) && !next.includes(key)) {
+            next.push(key)
+        }
+    }
+
+    for (const key of currentKeys) {
+        if (!next.includes(key)) {
+            next.push(key)
+        }
+    }
+
+    return next
+}
+
+function applyCustomOrder<T>(items: T[], savedOrder: string[] | undefined, getKey: (item: T) => string): T[] {
+    const orderedKeys = reconcileOrder(items, savedOrder, getKey)
+    const byKey = new Map(items.map((item) => [getKey(item), item]))
+    return orderedKeys.map((key) => byKey.get(key)).filter((item): item is T => Boolean(item))
 }
 
 function estimateVirtualItemHeight(item: VirtualListItem): number {
@@ -712,13 +748,13 @@ function SessionItem(props: {
                 }}
                 canAttachTerminalSupervision={s.metadata?.flavor === 'shell' && !supervision && !pairLink}
                 onAttachTerminalSupervision={() => setAttachOpen(true)}
-                canPauseTerminalSupervision={Boolean(supervision)}
+                canPauseTerminalSupervision={Boolean(supervision && !pairLink)}
                 terminalSupervisionPaused={supervision?.state === 'paused'}
                 onToggleTerminalSupervisionPaused={() => {
                     if (!supervision) return
                     void setTerminalSupervisionPaused(supervision.state !== 'paused')
                 }}
-                canDetachTerminalSupervision={Boolean(supervision)}
+                canDetachTerminalSupervision={Boolean(supervision && !pairLink)}
                 onDetachTerminalSupervision={() => {
                     void detachTerminalSupervision()
                 }}
@@ -912,10 +948,20 @@ export function SessionList(props: {
         })
     }, [groups])
 
-    const [sessionOrders, setSessionOrders] = useState<Record<string, string[]>>(loadSessionOrders)
+    const [sessionOrders, setSessionOrders] = useState<SessionListOrders>(loadSessionOrders)
     const gripActiveRef = useRef(false)
-    const draggedRef = useRef<{ groupDir: string; rowKey: string } | null>(null)
-    const [dropIndicator, setDropIndicator] = useState<{ groupDir: string; insertIndex: number } | null>(null)
+    const draggedRef = useRef<
+        | { kind: 'group'; groupDir: string }
+        | { kind: 'subgroup'; groupDir: string; subgroupKey: string }
+        | { kind: 'row'; groupDir: string; subgroupKey: string; rowKey: string }
+        | null
+    >(null)
+    const [dropIndicator, setDropIndicator] = useState<
+        | { kind: 'group'; insertIndex: number }
+        | { kind: 'subgroup'; groupDir: string; insertIndex: number }
+        | { kind: 'row'; groupDir: string; subgroupKey: string; insertIndex: number }
+        | null
+    >(null)
     const clearGroupMutation = useMutation({
         mutationFn: async (group: SessionGroup) => {
             if (!api) {
@@ -949,12 +995,38 @@ export function SessionList(props: {
         }
     })
 
-    const handleDragStart = useCallback((groupDir: string, rowKey: string, e: React.DragEvent) => {
+    const handleGroupDragStart = useCallback((groupDir: string, e: React.DragEvent) => {
         if (!gripActiveRef.current) {
             e.preventDefault()
             return
         }
-        draggedRef.current = { groupDir, rowKey }
+        draggedRef.current = { kind: 'group', groupDir }
+        e.dataTransfer.effectAllowed = 'move'
+        const el = e.currentTarget as HTMLElement
+        requestAnimationFrame(() => {
+            el.style.opacity = '0.4'
+        })
+    }, [])
+
+    const handleSubgroupDragStart = useCallback((groupDir: string, subgroupKey: string, e: React.DragEvent) => {
+        if (!gripActiveRef.current) {
+            e.preventDefault()
+            return
+        }
+        draggedRef.current = { kind: 'subgroup', groupDir, subgroupKey }
+        e.dataTransfer.effectAllowed = 'move'
+        const el = e.currentTarget as HTMLElement
+        requestAnimationFrame(() => {
+            el.style.opacity = '0.4'
+        })
+    }, [])
+
+    const handleRowDragStart = useCallback((groupDir: string, subgroupKey: string, rowKey: string, e: React.DragEvent) => {
+        if (!gripActiveRef.current) {
+            e.preventDefault()
+            return
+        }
+        draggedRef.current = { kind: 'row', groupDir, subgroupKey, rowKey }
         e.dataTransfer.effectAllowed = 'move'
         const el = e.currentTarget as HTMLElement
         requestAnimationFrame(() => {
@@ -969,9 +1041,41 @@ export function SessionList(props: {
         setDropIndicator(null)
     }, [])
 
-    const handleDragOver = useCallback((groupDir: string, rowIndex: number, e: React.DragEvent) => {
+    const handleGroupDragOver = useCallback((groupIndex: number, e: React.DragEvent) => {
         const dragged = draggedRef.current
-        if (!dragged || dragged.groupDir !== groupDir) return
+        if (!dragged || dragged.kind !== 'group') return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const midY = rect.top + rect.height / 2
+        const insertIndex = e.clientY < midY ? groupIndex : groupIndex + 1
+
+        setDropIndicator(prev => {
+            if (prev?.kind === 'group' && prev.insertIndex === insertIndex) return prev
+            return { kind: 'group', insertIndex }
+        })
+    }, [])
+
+    const handleSubgroupDragOver = useCallback((groupDir: string, subgroupIndex: number, e: React.DragEvent) => {
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'subgroup' || dragged.groupDir !== groupDir) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const midY = rect.top + rect.height / 2
+        const insertIndex = e.clientY < midY ? subgroupIndex : subgroupIndex + 1
+
+        setDropIndicator(prev => {
+            if (prev?.kind === 'subgroup' && prev.groupDir === groupDir && prev.insertIndex === insertIndex) return prev
+            return { kind: 'subgroup', groupDir, insertIndex }
+        })
+    }, [])
+
+    const handleRowDragOver = useCallback((groupDir: string, subgroupKey: string, rowIndex: number, e: React.DragEvent) => {
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'row' || dragged.groupDir !== groupDir || dragged.subgroupKey !== subgroupKey) return
         e.preventDefault()
         e.dataTransfer.dropEffect = 'move'
 
@@ -980,17 +1084,73 @@ export function SessionList(props: {
         const insertIndex = e.clientY < midY ? rowIndex : rowIndex + 1
 
         setDropIndicator(prev => {
-            if (prev?.groupDir === groupDir && prev.insertIndex === insertIndex) return prev
-            return { groupDir, insertIndex }
+            if (prev?.kind === 'row' && prev.groupDir === groupDir && prev.subgroupKey === subgroupKey && prev.insertIndex === insertIndex) return prev
+            return { kind: 'row', groupDir, subgroupKey, insertIndex }
         })
     }, [])
 
-    const handleDrop = (groupDir: string, orderedRows: SessionRow[], e: React.DragEvent) => {
+    const handleGroupDrop = (orderedGroups: SessionGroup[], e: React.DragEvent) => {
         e.preventDefault()
         const dragged = draggedRef.current
-        if (!dragged || dragged.groupDir !== groupDir || !dropIndicator) return
+        if (!dragged || dragged.kind !== 'group' || !dropIndicator || dropIndicator.kind !== 'group') return
 
-        const currentKeys = orderedRows.map(r => r.key)
+        const currentKeys = orderedGroups.map((group) => group.directory)
+        const draggedIdx = currentKeys.indexOf(dragged.groupDir)
+        if (draggedIdx === -1) return
+
+        const newKeys = [...currentKeys]
+        newKeys.splice(draggedIdx, 1)
+
+        let insertIdx = dropIndicator.insertIndex
+        if (draggedIdx < insertIdx) insertIdx--
+
+        newKeys.splice(insertIdx, 0, dragged.groupDir)
+
+        const updated = { ...sessionOrders, groups: newKeys }
+        setSessionOrders(updated)
+        saveSessionOrders(updated)
+
+        draggedRef.current = null
+        setDropIndicator(null)
+    }
+
+    const handleSubgroupDrop = (groupDir: string, subgroups: SessionSubgroup[], e: React.DragEvent) => {
+        e.preventDefault()
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'subgroup' || dragged.groupDir !== groupDir || !dropIndicator || dropIndicator.kind !== 'subgroup' || dropIndicator.groupDir !== groupDir) return
+
+        const currentKeys = subgroups.map((subgroup) => subgroup.key)
+        const draggedIdx = currentKeys.indexOf(dragged.subgroupKey)
+        if (draggedIdx === -1) return
+
+        const newKeys = [...currentKeys]
+        newKeys.splice(draggedIdx, 1)
+
+        let insertIdx = dropIndicator.insertIndex
+        if (draggedIdx < insertIdx) insertIdx--
+
+        newKeys.splice(insertIdx, 0, dragged.subgroupKey)
+
+        const updated = {
+            ...sessionOrders,
+            subgroups: {
+                ...sessionOrders.subgroups,
+                [groupDir]: newKeys
+            }
+        }
+        setSessionOrders(updated)
+        saveSessionOrders(updated)
+
+        draggedRef.current = null
+        setDropIndicator(null)
+    }
+
+    const handleRowDrop = (groupDir: string, subgroupKey: string, rows: SessionRow[], e: React.DragEvent) => {
+        e.preventDefault()
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'row' || dragged.groupDir !== groupDir || dragged.subgroupKey !== subgroupKey || !dropIndicator || dropIndicator.kind !== 'row' || dropIndicator.groupDir !== groupDir || dropIndicator.subgroupKey !== subgroupKey) return
+
+        const currentKeys = rows.map((row) => row.key)
         const draggedIdx = currentKeys.indexOf(dragged.rowKey)
         if (draggedIdx === -1) return
 
@@ -1002,7 +1162,14 @@ export function SessionList(props: {
 
         newKeys.splice(insertIdx, 0, dragged.rowKey)
 
-        const updated = { ...sessionOrders, [groupDir]: newKeys }
+        const rowOrderKey = getRowOrderKey(groupDir, subgroupKey)
+        const updated = {
+            ...sessionOrders,
+            rows: {
+                ...sessionOrders.rows,
+                [rowOrderKey]: newKeys
+            }
+        }
         setSessionOrders(updated)
         saveSessionOrders(updated)
 
@@ -1011,11 +1178,22 @@ export function SessionList(props: {
     }
 
     const groupRenderStates = useMemo<GroupRenderState[]>(() => {
-        return groups.map((group) => {
+        const unorderedStates = groups.map((group) => {
             const isCollapsed = isGroupCollapsed(group)
             const rows = getSessionRows(group.sessions)
-            const orderedRows = applyCustomOrder(rows, sessionOrders[group.directory])
-            const subgroups = getSessionSubgroups(group.directory, orderedRows)
+            const subgroups = applyCustomOrder(
+                getSessionSubgroups(group.directory, rows),
+                sessionOrders.subgroups[group.directory],
+                (subgroup) => subgroup.key
+            ).map((subgroup) => ({
+                ...subgroup,
+                rows: applyCustomOrder(
+                    subgroup.rows,
+                    sessionOrders.rows[getRowOrderKey(group.directory, subgroup.key)],
+                    (row) => row.key
+                )
+            }))
+            const orderedRows = subgroups.flatMap((subgroup) => subgroup.rows)
             const shouldShowSubgroups = subgroups.length > 1 || subgroups.some((subgroup) => subgroup.kind === 'worktree')
             return {
                 group,
@@ -1025,7 +1203,39 @@ export function SessionList(props: {
                 shouldShowSubgroups
             }
         })
+        return applyCustomOrder(unorderedStates, sessionOrders.groups, (groupState) => groupState.group.directory)
     }, [groups, sessionOrders, collapseOverrides])
+
+    useEffect(() => {
+        const nextOrders: SessionListOrders = {
+            groups: reconcileOrder(groupRenderStates, sessionOrders.groups, (groupState) => groupState.group.directory),
+            subgroups: {},
+            rows: {}
+        }
+
+        for (const groupState of groupRenderStates) {
+            nextOrders.subgroups[groupState.group.directory] = reconcileOrder(
+                groupState.subgroups,
+                sessionOrders.subgroups[groupState.group.directory],
+                (subgroup) => subgroup.key
+            )
+
+            for (const subgroup of groupState.subgroups) {
+                nextOrders.rows[getRowOrderKey(groupState.group.directory, subgroup.key)] = reconcileOrder(
+                    subgroup.rows,
+                    sessionOrders.rows[getRowOrderKey(groupState.group.directory, subgroup.key)],
+                    (row) => row.key
+                )
+            }
+        }
+
+        if (JSON.stringify(nextOrders) === JSON.stringify(sessionOrders)) {
+            return
+        }
+
+        setSessionOrders(nextOrders)
+        saveSessionOrders(nextOrders)
+    }, [groupRenderStates, sessionOrders])
 
     const virtualItems = useMemo<VirtualListItem[]>(() => {
         return groupRenderStates.flatMap((groupState) => {
@@ -1186,12 +1396,40 @@ export function SessionList(props: {
         return itemLayouts.filter((layout) => layout.end >= visibleStart && layout.start <= visibleEnd)
     }, [itemLayouts, viewport])
 
+    const renderDragHandle = () => (
+        <div
+            className="flex items-center px-0.5 cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity"
+            onMouseDown={() => { gripActiveRef.current = true }}
+            onMouseUp={() => { gripActiveRef.current = false }}
+        >
+            <GripVerticalIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />
+        </div>
+    )
+
     const renderVirtualItem = (layout: VirtualItemLayout) => {
         const item = layout.item
         if (item.kind === 'header') {
             const { group, isCollapsed } = item.groupState
+            const groupIndex = groupRenderStates.findIndex((groupState) => groupState.group.directory === group.directory)
+            const isDropBefore = dropIndicator?.kind === 'group' && dropIndicator.insertIndex === groupIndex
+            const isDropAfter = dropIndicator?.kind === 'group'
+                && dropIndicator.insertIndex === groupRenderStates.length
+                && groupIndex === groupRenderStates.length - 1
+            const dropClass = isDropBefore
+                ? 'shadow-[inset_0_2px_0_0_#007AFF]'
+                : isDropAfter
+                    ? 'shadow-[inset_0_-2px_0_0_#007AFF]'
+                    : ''
             return (
-                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-3 py-2">
+                <div
+                    draggable
+                    onDragStart={(e) => handleGroupDragStart(group.directory, e)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => handleGroupDragOver(groupIndex, e)}
+                    onDrop={(e) => handleGroupDrop(groupRenderStates.map((groupState) => groupState.group), e)}
+                    className={`group/drag flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-3 py-2 ${dropClass}`}
+                >
+                    {renderDragHandle()}
                     <button
                         type="button"
                         onClick={() => toggleGroup(group.directory, isCollapsed)}
@@ -1226,8 +1464,29 @@ export function SessionList(props: {
         }
 
         if (item.kind === 'subgroup') {
+            const subgroupIndex = item.groupState.subgroups.findIndex((subgroup) => subgroup.key === item.subgroup.key)
+            const isDropBefore = dropIndicator?.kind === 'subgroup'
+                && dropIndicator.groupDir === item.groupState.group.directory
+                && dropIndicator.insertIndex === subgroupIndex
+            const isDropAfter = dropIndicator?.kind === 'subgroup'
+                && dropIndicator.groupDir === item.groupState.group.directory
+                && dropIndicator.insertIndex === item.groupState.subgroups.length
+                && subgroupIndex === item.groupState.subgroups.length - 1
+            const dropClass = isDropBefore
+                ? 'shadow-[inset_0_2px_0_0_#007AFF]'
+                : isDropAfter
+                    ? 'shadow-[inset_0_-2px_0_0_#007AFF]'
+                    : ''
             return (
-                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)]/55 px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--app-hint)]">
+                <div
+                    draggable
+                    onDragStart={(e) => handleSubgroupDragStart(item.groupState.group.directory, item.subgroup.key, e)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => handleSubgroupDragOver(item.groupState.group.directory, subgroupIndex, e)}
+                    onDrop={(e) => handleSubgroupDrop(item.groupState.group.directory, item.groupState.subgroups, e)}
+                    className={`group/drag flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)]/55 px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--app-hint)] ${dropClass}`}
+                >
+                    {renderDragHandle()}
                     <span className="font-medium">{item.subgroup.label}</span>
                     {item.subgroup.hint ? (
                         <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 normal-case tracking-normal text-[10px] text-[var(--app-fg)]">
@@ -1238,11 +1497,17 @@ export function SessionList(props: {
             )
         }
 
-        const { row, rowIndex, groupState } = item
-        const isDropBefore = dropIndicator?.groupDir === groupState.group.directory && dropIndicator.insertIndex === rowIndex
-        const isDropAfter = dropIndicator?.groupDir === groupState.group.directory
-            && dropIndicator.insertIndex === groupState.orderedRows.length
-            && rowIndex === groupState.orderedRows.length - 1
+        const { row, groupState } = item
+        const subgroupRowIndex = item.subgroup.rows.findIndex((subgroupRow) => subgroupRow.key === row.key)
+        const isDropBefore = dropIndicator?.kind === 'row'
+            && dropIndicator.groupDir === groupState.group.directory
+            && dropIndicator.subgroupKey === item.subgroup.key
+            && dropIndicator.insertIndex === subgroupRowIndex
+        const isDropAfter = dropIndicator?.kind === 'row'
+            && dropIndicator.groupDir === groupState.group.directory
+            && dropIndicator.subgroupKey === item.subgroup.key
+            && dropIndicator.insertIndex === item.subgroup.rows.length
+            && subgroupRowIndex === item.subgroup.rows.length - 1
         const dropClass = isDropBefore
             ? 'shadow-[inset_0_2px_0_0_#007AFF]'
             : isDropAfter
@@ -1252,19 +1517,13 @@ export function SessionList(props: {
         return (
             <div
                 draggable
-                onDragStart={(e) => handleDragStart(groupState.group.directory, row.key, e)}
+                onDragStart={(e) => handleRowDragStart(groupState.group.directory, item.subgroup.key, row.key, e)}
                 onDragEnd={handleDragEnd}
-                onDragOver={(e) => handleDragOver(groupState.group.directory, rowIndex, e)}
-                onDrop={(e) => handleDrop(groupState.group.directory, groupState.orderedRows, e)}
+                onDragOver={(e) => handleRowDragOver(groupState.group.directory, item.subgroup.key, subgroupRowIndex, e)}
+                onDrop={(e) => handleRowDrop(groupState.group.directory, item.subgroup.key, item.subgroup.rows, e)}
                 className={`group/drag flex items-stretch border-b border-[var(--app-divider)] ${dropClass}`}
             >
-                <div
-                    className="flex items-center px-1 cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity"
-                    onMouseDown={() => { gripActiveRef.current = true }}
-                    onMouseUp={() => { gripActiveRef.current = false }}
-                >
-                    <GripVerticalIcon className="text-[var(--app-hint)]" />
-                </div>
+                {renderDragHandle()}
                 <div className={`flex-1 min-w-0 ${row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''} ${row.isChild ? 'pl-5 border-l-2 border-l-[var(--app-hint)]/20' : ''}`}>
                     {row.sessions.map((session, index) => (
                         <div

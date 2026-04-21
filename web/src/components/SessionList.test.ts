@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { getSessionRows, getSessionSubgroups } from './SessionList'
+import { getSessionRows, getSessionSubgroups, reconcileOrder } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -48,7 +48,7 @@ describe('getSessionRows', () => {
         const sessions = [
             makeSession({
                 id: 'orch',
-                metadata: { path: '/tmp', terminalSupervision: { role: 'orchestrator', peerSessionId: 'work', state: 'active' } }
+                metadata: { path: '/tmp', terminalSupervision: { role: 'supervisor', peerSessionId: 'work', state: 'active' } }
             }),
             makeSession({
                 id: 'work',
@@ -105,7 +105,7 @@ describe('getSessionRows', () => {
                 id: 'supervisor',
                 metadata: {
                     path: '/tmp',
-                    terminalSupervision: { role: 'orchestrator', peerSessionId: 'child', state: 'active' }
+                    terminalSupervision: { role: 'supervisor', peerSessionId: 'child', state: 'active' }
                 }
             }),
         ]
@@ -183,5 +183,19 @@ describe('getSessionSubgroups', () => {
         expect(subgroups).toHaveLength(1)
         expect(subgroups[0]?.label).toBe('Folder')
         expect(subgroups[0]?.rows.map((row) => row.sessions[0].id)).toEqual(['a', 'b'])
+    })
+})
+
+describe('reconcileOrder', () => {
+    it('keeps saved positions for known keys and appends new keys', () => {
+        const items = [{ key: 'a' }, { key: 'b' }, { key: 'c' }]
+        const order = reconcileOrder(items, ['b', 'a'], (item) => item.key)
+        expect(order).toEqual(['b', 'a', 'c'])
+    })
+
+    it('drops removed keys from the saved order', () => {
+        const items = [{ key: 'b' }, { key: 'c' }]
+        const order = reconcileOrder(items, ['b', 'a', 'c'], (item) => item.key)
+        expect(order).toEqual(['b', 'c'])
     })
 })
