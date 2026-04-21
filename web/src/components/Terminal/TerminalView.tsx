@@ -4,14 +4,63 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
+import { useTheme } from '@/hooks/useTheme'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 
-function resolveThemeColors(): { background: string; foreground: string; selectionBackground: string } {
+function resolveThemeColors(isDark: boolean) {
     const styles = getComputedStyle(document.documentElement)
     const background = styles.getPropertyValue('--app-bg').trim() || '#000000'
     const foreground = styles.getPropertyValue('--app-fg').trim() || '#ffffff'
     const selectionBackground = styles.getPropertyValue('--app-subtle-bg').trim() || 'rgba(255, 255, 255, 0.2)'
-    return { background, foreground, selectionBackground }
+    const cursor = foreground
+
+    if (isDark) {
+        return {
+            background,
+            foreground: foreground || '#d0d7de',
+            cursor,
+            selectionBackground,
+            black: '#1f2428',
+            red: '#c4435b',
+            green: '#3f8f5b',
+            yellow: '#b98412',
+            blue: '#4f8cc9',
+            magenta: '#9b72cf',
+            cyan: '#2f8f9d',
+            white: '#d0d7de',
+            brightBlack: '#6e7681',
+            brightRed: '#e05d6f',
+            brightGreen: '#57ab5a',
+            brightYellow: '#c69026',
+            brightBlue: '#6cb6ff',
+            brightMagenta: '#b083f0',
+            brightCyan: '#56d4dd',
+            brightWhite: '#f0f6fc'
+        }
+    }
+
+    return {
+        background,
+        foreground: foreground || '#24292f',
+        cursor,
+        selectionBackground,
+        black: '#24292f',
+        red: '#c93c37',
+        green: '#2f7d4a',
+        yellow: '#9a6700',
+        blue: '#0969da',
+        magenta: '#8250df',
+        cyan: '#1b7c83',
+        white: '#f6f8fa',
+        brightBlack: '#57606a',
+        brightRed: '#e5534b',
+        brightGreen: '#46954a',
+        brightYellow: '#b97a00',
+        brightBlue: '#218bff',
+        brightMagenta: '#a475f9',
+        brightCyan: '#3192aa',
+        brightWhite: '#ffffff'
+    }
 }
 
 function configureTerminalTextarea(terminal: Terminal): void {
@@ -38,7 +87,9 @@ export function TerminalView(props: {
     suppressFocus?: boolean
     onFocusChange?: (focused: boolean) => void
 }) {
+    const { isDark } = useTheme()
     const containerRef = useRef<HTMLDivElement | null>(null)
+    const terminalRef = useRef<Terminal | null>(null)
     const onMountRef = useRef(props.onMount)
     const onResizeRef = useRef(props.onResize)
     const suppressFocusRef = useRef(Boolean(props.suppressFocus))
@@ -74,23 +125,19 @@ export function TerminalView(props: {
         const abortController = new AbortController()
 
         const fontProvider = getFontProvider()
-        const { background, foreground, selectionBackground } = resolveThemeColors()
+        const theme = resolveThemeColors(isDark)
         const terminal = new Terminal({
             cursorBlink: true,
             fontFamily: fontProvider.getFontFamily(),
             fontSize: 13,
             scrollback: 0,
-            theme: {
-                background,
-                foreground,
-                cursor: foreground,
-                selectionBackground
-            },
+            theme,
             // This is a real tmux/PTTY byte stream, not a plain log viewer.
             // Converting bare LF to CRLF breaks cursor-driven TUIs and causes stacked redraws.
             convertEol: false,
             customGlyphs: true
         })
+        terminalRef.current = terminal
 
         const fitAddon = new FitAddon()
         const webLinksAddon = new WebLinksAddon()
@@ -165,6 +212,7 @@ export function TerminalView(props: {
             fitAddon.dispose()
             webLinksAddon.dispose()
             canvasAddon.dispose()
+            terminalRef.current = null
             terminal.dispose()
         })
 
@@ -183,6 +231,17 @@ export function TerminalView(props: {
             abortController.abort()
         }
     }, [])
+
+    useEffect(() => {
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return
+        }
+        terminal.options.theme = resolveThemeColors(isDark)
+        if (terminal.rows > 0) {
+            terminal.refresh(0, terminal.rows - 1)
+        }
+    }, [isDark])
 
     return (
         <div
