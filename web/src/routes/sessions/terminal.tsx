@@ -14,6 +14,7 @@ import { rankFiles } from '@/lib/file-search'
 import { getOpenFileShortcut, matchShortcutEvent } from '@/lib/open-file-shortcut'
 import { useTranslation } from '@/lib/use-translation'
 import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
+import { clearPendingTerminalFocus, hasPendingTerminalFocus } from '@/lib/pending-terminal-focus'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { FilePreviewPanel } from '@/components/FilePreviewPanel'
 import { SplitTerminalPanel } from '@/components/SplitTerminalPanel'
@@ -311,12 +312,20 @@ export default function TerminalPage() {
     const [isRespawningPinnedShell, setIsRespawningPinnedShell] = useState(false)
     const [pinnedShellRespawnError, setPinnedShellRespawnError] = useState<string | null>(null)
     const respawnAttemptedRef = useRef(false)
+    const pendingNewSessionFocusRef = useRef(false)
 
     const focusTerminalIfAllowed = useCallback(() => {
         if (keyboardVisible) {
-            return
+            return false
         }
-        terminalRef.current?.focus()
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return false
+        }
+        terminal.focus()
+        const textarea = (terminal as unknown as { textarea?: HTMLTextAreaElement | null }).textarea
+        textarea?.focus({ preventScroll: true })
+        return true
     }, [keyboardVisible])
 
     const blurTerminal = useCallback(() => {
@@ -461,6 +470,10 @@ export default function TerminalPage() {
     }, [sessionId])
 
     useEffect(() => {
+        pendingNewSessionFocusRef.current = hasPendingTerminalFocus(sessionId)
+    }, [sessionId])
+
+    useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
             connectOnceRef.current = false
@@ -497,6 +510,37 @@ export default function TerminalPage() {
         })
         return () => cancelAnimationFrame(timer)
     }, [focusTerminalIfAllowed, terminalState.status])
+
+    useEffect(() => {
+        if (!pendingNewSessionFocusRef.current || terminalState.status !== 'connected') {
+            return
+        }
+        if (!session?.active) {
+            return
+        }
+        if (!focusTerminalIfAllowed()) {
+            return
+        }
+
+        pendingNewSessionFocusRef.current = false
+        clearPendingTerminalFocus(sessionId)
+
+        const replayFocus = () => {
+            focusTerminalIfAllowed()
+        }
+
+        const firstFrame = requestAnimationFrame(replayFocus)
+        const secondFrame = requestAnimationFrame(() => {
+            requestAnimationFrame(replayFocus)
+        })
+        const timeout = window.setTimeout(replayFocus, 150)
+
+        return () => {
+            cancelAnimationFrame(firstFrame)
+            cancelAnimationFrame(secondFrame)
+            window.clearTimeout(timeout)
+        }
+    }, [focusTerminalIfAllowed, session?.active, sessionId, terminalState.status])
 
     useEffect(() => {
         respawnAttemptedRef.current = false

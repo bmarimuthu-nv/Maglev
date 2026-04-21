@@ -23,6 +23,7 @@ import { useHubConfig } from '@/hooks/queries/useHubConfig'
 import { useSession } from '@/hooks/queries/useSession'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { queryKeys } from '@/lib/query-keys'
+import { markPendingTerminalFocus } from '@/lib/pending-terminal-focus'
 import { useTranslation } from '@/lib/use-translation'
 import { getCurrentHubLabel } from '@/utils/url'
 import type { AgentType } from '@/components/NewSession/types'
@@ -484,6 +485,10 @@ function NewSessionPage() {
     }, [navigate])
 
     const handleSuccess = useCallback((sessionId: string, _agent: AgentType) => {
+        markPendingTerminalFocus(sessionId)
+        if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur()
+        }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
         navigate({
             to: '/sessions/$sessionId/terminal',
