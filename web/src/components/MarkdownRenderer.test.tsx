@@ -2,18 +2,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
+const mermaidInitialize = vi.fn()
+const mermaidRender = vi.fn(async (_id: string, code: string) => ({
+    svg: `<svg data-rendered="true"><text>${code}</text></svg>`,
+    bindFunctions: vi.fn()
+}))
+
 vi.mock('mermaid', () => ({
     default: {
-        initialize: vi.fn(),
-        render: vi.fn(async (_id: string, code: string) => ({
-            svg: `<svg data-rendered="true"><text>${code}</text></svg>`,
-            bindFunctions: vi.fn()
-        }))
+        initialize: mermaidInitialize,
+        render: mermaidRender
     }
 }))
 
 describe('MarkdownRenderer', () => {
     beforeEach(() => {
+        mermaidInitialize.mockClear()
+        mermaidRender.mockClear()
         Object.defineProperty(window, 'matchMedia', {
             configurable: true,
             writable: true,
@@ -44,5 +49,16 @@ describe('MarkdownRenderer', () => {
 
         await waitFor(() => expect(screen.getByTestId('mermaid-diagram')).toBeInTheDocument())
         expect(screen.getByText('Diagram')).toBeInTheDocument()
+    })
+
+    it('configures Mermaid with distinct node fill and text colors', async () => {
+        render(<MarkdownRenderer content={`\`\`\`mermaid\ngraph TD\nA-->B\n\`\`\``} />)
+
+        await waitFor(() => expect(mermaidInitialize).toHaveBeenCalled())
+        const initConfig = mermaidInitialize.mock.calls.at(-1)?.[0]
+        expect(initConfig?.themeVariables?.primaryColor).toBeTruthy()
+        expect(initConfig?.themeVariables?.primaryTextColor).toBeTruthy()
+        expect(initConfig?.themeVariables?.primaryColor).not.toBe(initConfig?.themeVariables?.primaryTextColor)
+        expect(initConfig?.themeVariables?.noteBkgColor).not.toBe(initConfig?.themeVariables?.noteTextColor)
     })
 })

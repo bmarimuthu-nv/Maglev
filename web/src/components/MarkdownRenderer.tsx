@@ -76,6 +76,98 @@ function readThemeColor(name: string, fallback: string): string {
     return value || fallback
 }
 
+type RgbColor = { r: number; g: number; b: number }
+
+function clampChannel(value: number): number {
+    return Math.max(0, Math.min(255, Math.round(value)))
+}
+
+function parseHexColor(value: string): RgbColor | null {
+    const normalized = value.trim().replace(/^#/, '')
+    if (!/^[\da-f]{3}$|^[\da-f]{6}$/i.test(normalized)) {
+        return null
+    }
+    if (normalized.length === 3) {
+        return {
+            r: Number.parseInt(normalized[0] + normalized[0], 16),
+            g: Number.parseInt(normalized[1] + normalized[1], 16),
+            b: Number.parseInt(normalized[2] + normalized[2], 16),
+        }
+    }
+    return {
+        r: Number.parseInt(normalized.slice(0, 2), 16),
+        g: Number.parseInt(normalized.slice(2, 4), 16),
+        b: Number.parseInt(normalized.slice(4, 6), 16),
+    }
+}
+
+function parseRgbColor(value: string): RgbColor | null {
+    const match = value.trim().match(/^rgba?\(([^)]+)\)$/i)
+    if (!match) {
+        return null
+    }
+    const channels = match[1].split(',').map((part) => Number.parseFloat(part.trim()))
+    if (channels.length < 3 || channels.slice(0, 3).some((channel) => Number.isNaN(channel))) {
+        return null
+    }
+    return {
+        r: clampChannel(channels[0]),
+        g: clampChannel(channels[1]),
+        b: clampChannel(channels[2]),
+    }
+}
+
+function parseColor(value: string, fallback: string): RgbColor {
+    return parseHexColor(value) ?? parseRgbColor(value) ?? parseHexColor(fallback) ?? parseRgbColor(fallback) ?? { r: 0, g: 0, b: 0 }
+}
+
+function rgbToCss(color: RgbColor): string {
+    return `rgb(${color.r}, ${color.g}, ${color.b})`
+}
+
+function mixColors(base: string, overlay: string, weight: number, fallback = '#000000'): string {
+    const safeWeight = Math.max(0, Math.min(1, weight))
+    const baseColor = parseColor(base, fallback)
+    const overlayColor = parseColor(overlay, fallback)
+    return rgbToCss({
+        r: baseColor.r + (overlayColor.r - baseColor.r) * safeWeight,
+        g: baseColor.g + (overlayColor.g - baseColor.g) * safeWeight,
+        b: baseColor.b + (overlayColor.b - baseColor.b) * safeWeight,
+    })
+}
+
+function relativeLuminance(value: string, fallback = '#000000'): number {
+    const { r, g, b } = parseColor(value, fallback)
+    const channels = [r, g, b].map((channel) => {
+        const normalized = channel / 255
+        return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+    })
+    return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2])
+}
+
+function contrastRatio(foreground: string, background: string): number {
+    const lighter = Math.max(relativeLuminance(foreground, '#ffffff'), relativeLuminance(background, '#000000'))
+    const darker = Math.min(relativeLuminance(foreground, '#ffffff'), relativeLuminance(background, '#000000'))
+    return (lighter + 0.05) / (darker + 0.05)
+}
+
+function pickReadableText(background: string, preferred: string, fallbacks: string[] = []): string {
+    const candidates = [preferred, ...fallbacks, '#111827', '#ffffff']
+    let best = candidates[0]
+    let bestScore = -1
+    for (const candidate of candidates) {
+        const score = contrastRatio(candidate, background)
+        if (score > bestScore) {
+            best = candidate
+            bestScore = score
+        }
+        if (score >= 7) {
+            return candidate
+        }
+    }
+    return best
+}
+
 function MermaidBlock(props: { code: string }) {
     const { isDark } = useTheme()
     const containerRef = useRef<HTMLDivElement | null>(null)
@@ -97,9 +189,20 @@ function MermaidBlock(props: { code: string }) {
                 const appFg = readThemeColor('--app-fg', isDark ? '#ffffff' : '#111827')
                 const appHint = readThemeColor('--app-hint', isDark ? '#8e8e93' : '#6b7280')
                 const appLink = readThemeColor('--app-link', isDark ? '#ffffff' : '#111827')
+                const appButtonText = readThemeColor('--app-button-text', isDark ? '#111827' : '#ffffff')
                 const appBorder = readThemeColor('--app-border', isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.16)')
                 const appSecondaryBg = readThemeColor('--app-secondary-bg', isDark ? '#2C2C2E' : '#f3f4f6')
-                const appSubtleBg = readThemeColor('--app-subtle-bg', isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')
+                const surfaceColor = mixColors(appBg, appFg, isDark ? 0.14 : 0.05, isDark ? '#1c1c1e' : '#ffffff')
+                const accentSurfaceColor = mixColors(appBg, appFg, isDark ? 0.22 : 0.1, isDark ? '#1c1c1e' : '#ffffff')
+                const mutedSurfaceColor = mixColors(appBg, appFg, isDark ? 0.09 : 0.03, isDark ? '#1c1c1e' : '#ffffff')
+                const noteSurfaceColor = mixColors(appSecondaryBg, appBg, isDark ? 0.35 : 0.2, isDark ? '#2C2C2E' : '#f3f4f6')
+                const borderColor = mixColors(appBg, appFg, isDark ? 0.3 : 0.22, isDark ? '#1c1c1e' : '#ffffff')
+                const lineColor = mixColors(appBg, appFg, isDark ? 0.55 : 0.5, isDark ? '#1c1c1e' : '#ffffff')
+                const primaryTextColor = pickReadableText(surfaceColor, appFg, [appButtonText, appHint])
+                const secondaryTextColor = pickReadableText(accentSurfaceColor, appFg, [appButtonText, appHint])
+                const tertiaryTextColor = pickReadableText(mutedSurfaceColor, appFg, [appButtonText, appHint])
+                const noteTextColor = pickReadableText(noteSurfaceColor, appFg, [appButtonText])
+                const edgeLabelTextColor = pickReadableText(appBg, appFg, [appButtonText])
                 mermaid.initialize({
                     startOnLoad: false,
                     securityLevel: 'strict',
@@ -107,53 +210,53 @@ function MermaidBlock(props: { code: string }) {
                     themeVariables: {
                         background: appBg,
                         fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-                        primaryColor: appSecondaryBg,
-                        primaryTextColor: appFg,
-                        primaryBorderColor: appBorder,
-                        secondaryColor: appSubtleBg,
-                        secondaryTextColor: appFg,
-                        secondaryBorderColor: appBorder,
-                        tertiaryColor: appBg,
-                        tertiaryTextColor: appFg,
-                        tertiaryBorderColor: appBorder,
-                        mainBkg: appSecondaryBg,
-                        secondBkg: appSubtleBg,
-                        tertiaryBkg: appBg,
-                        nodeBkg: appSecondaryBg,
-                        nodeTextColor: appFg,
-                        nodeBorder: appBorder,
-                        clusterBkg: appBg,
-                        clusterBorder: appBorder,
-                        defaultLinkColor: appHint,
-                        lineColor: appHint,
-                        textColor: appFg,
+                        primaryColor: surfaceColor,
+                        primaryTextColor,
+                        primaryBorderColor: borderColor,
+                        secondaryColor: accentSurfaceColor,
+                        secondaryTextColor,
+                        secondaryBorderColor: borderColor,
+                        tertiaryColor: mutedSurfaceColor,
+                        tertiaryTextColor,
+                        tertiaryBorderColor: borderColor,
+                        mainBkg: surfaceColor,
+                        secondBkg: accentSurfaceColor,
+                        tertiaryBkg: mutedSurfaceColor,
+                        nodeBkg: surfaceColor,
+                        nodeTextColor: primaryTextColor,
+                        nodeBorder: borderColor,
+                        clusterBkg: mixColors(appBg, appSecondaryBg, isDark ? 0.3 : 0.55, isDark ? '#1c1c1e' : '#ffffff'),
+                        clusterBorder: borderColor,
+                        defaultLinkColor: lineColor,
+                        lineColor,
+                        textColor: edgeLabelTextColor,
                         titleColor: appFg,
                         edgeLabelBackground: appBg,
-                        actorBkg: appSecondaryBg,
-                        actorBorder: appBorder,
-                        actorTextColor: appFg,
+                        actorBkg: surfaceColor,
+                        actorBorder: borderColor,
+                        actorTextColor: primaryTextColor,
                         labelBoxBkgColor: appBg,
-                        labelTextColor: appFg,
-                        loopTextColor: appFg,
-                        signalColor: appHint,
-                        signalTextColor: appFg,
-                        noteBkgColor: appBg,
-                        noteTextColor: appFg,
-                        noteBorderColor: appBorder,
-                        activationBorderColor: appBorder,
-                        activationBkgColor: appSecondaryBg,
-                        sequenceNumberColor: appBg,
-                        cScale0: appSecondaryBg,
-                        cScaleLabel0: appFg,
-                        cScale1: appSubtleBg,
-                        cScaleLabel1: appFg,
-                        cScale2: appBg,
-                        cScaleLabel2: appFg,
-                        pie1: appLink,
-                        pie2: appHint,
-                        pie3: appSecondaryBg,
-                        pie4: appSubtleBg,
-                        pie5: appBorder,
+                        labelTextColor: edgeLabelTextColor,
+                        loopTextColor: edgeLabelTextColor,
+                        signalColor: lineColor,
+                        signalTextColor: edgeLabelTextColor,
+                        noteBkgColor: noteSurfaceColor,
+                        noteTextColor,
+                        noteBorderColor: borderColor,
+                        activationBorderColor: borderColor,
+                        activationBkgColor: accentSurfaceColor,
+                        sequenceNumberColor: pickReadableText(appLink, appFg, ['#111827', '#ffffff']),
+                        cScale0: surfaceColor,
+                        cScaleLabel0: primaryTextColor,
+                        cScale1: accentSurfaceColor,
+                        cScaleLabel1: secondaryTextColor,
+                        cScale2: mutedSurfaceColor,
+                        cScaleLabel2: tertiaryTextColor,
+                        pie1: mixColors(appBg, appLink, isDark ? 0.45 : 0.7, isDark ? '#1c1c1e' : '#ffffff'),
+                        pie2: accentSurfaceColor,
+                        pie3: surfaceColor,
+                        pie4: mutedSurfaceColor,
+                        pie5: borderColor,
                     },
                 })
                 const { svg: renderedSvg, bindFunctions } = await mermaid.render(`maglev-mermaid-${diagramId}`, props.code)
