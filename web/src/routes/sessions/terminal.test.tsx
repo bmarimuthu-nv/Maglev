@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useEffect } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
 import TerminalPage from './terminal'
 
@@ -7,8 +8,13 @@ const writeMock = vi.fn()
 const closeSessionMock = vi.fn()
 const AUTO_SCROLL_KEY = 'maglev-auto-scroll'
 const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
+const PENDING_TERMINAL_FOCUS_KEY = 'maglev:pending-terminal-focus-session-id'
 const useSessionFileSearchMock = vi.fn()
 let mockSessions: Array<{ id: string; active: boolean; metadata?: Record<string, unknown> }> = []
+let allowMockTerminalTextareaFocus = true
+let mockTerminalTextarea: HTMLTextAreaElement | null = null
+const originalRequestAnimationFrame = globalThis.requestAnimationFrame
+const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
@@ -71,7 +77,41 @@ vi.mock('@/hooks/useLongPress', () => ({
 }))
 
 vi.mock('@/components/Terminal/TerminalView', () => ({
-    TerminalView: () => <div data-testid="terminal-view" />
+    TerminalView: (props: { onMount?: (terminal: {
+        focus: () => void
+        blur: () => void
+        onData: () => { dispose: () => void }
+        textarea?: HTMLTextAreaElement | null
+    }) => void }) => {
+        useEffect(() => {
+            const textarea = document.createElement('textarea')
+            document.body.appendChild(textarea)
+            mockTerminalTextarea = textarea
+            const realFocus = textarea.focus.bind(textarea)
+            const focusSpy = vi.fn(() => {
+                if (allowMockTerminalTextareaFocus) {
+                    realFocus()
+                }
+            })
+            textarea.focus = focusSpy as typeof textarea.focus
+
+            props.onMount?.({
+                focus: vi.fn(),
+                blur: vi.fn(),
+                onData: () => ({ dispose: vi.fn() }),
+                textarea
+            })
+
+            return () => {
+                textarea.remove()
+                if (mockTerminalTextarea === textarea) {
+                    mockTerminalTextarea = null
+                }
+            }
+        }, [props])
+
+        return <div data-testid="terminal-view" />
+    }
 }))
 
 vi.mock('@/components/FilePreviewPanel', () => ({
@@ -98,6 +138,8 @@ describe('TerminalPage paste behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mockSessions = []
+        allowMockTerminalTextareaFocus = true
+        mockTerminalTextarea = null
         closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
         Object.defineProperty(window, 'matchMedia', {
@@ -156,6 +198,8 @@ describe('TerminalPage auto-scroll wheel detection', () => {
         cleanup()
         vi.clearAllMocks()
         mockSessions = []
+        allowMockTerminalTextareaFocus = true
+        mockTerminalTextarea = null
         closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
         localStorage.removeItem(AUTO_SCROLL_KEY)
@@ -371,6 +415,8 @@ describe('TerminalPage split close behavior', () => {
                 metadata: { parentSessionId: 'session-1' }
             }
         ]
+        allowMockTerminalTextareaFocus = true
+        mockTerminalTextarea = null
         closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
         Object.defineProperty(window, 'matchMedia', {
@@ -405,5 +451,62 @@ describe('TerminalPage split close behavior', () => {
         })
 
         expect(screen.getAllByTestId('terminal-view')).toHaveLength(1)
+    })
+})
+
+describe('TerminalPage new session focus handoff', () => {
+    beforeEach(() => {
+        cleanup()
+        vi.clearAllMocks()
+        vi.useFakeTimers()
+        mockSessions = []
+        allowMockTerminalTextareaFocus = false
+        mockTerminalTextarea = null
+        closeSessionMock.mockResolvedValue(undefined)
+        setDefaultFileSearchMock()
+        sessionStorage.setItem(PENDING_TERMINAL_FOCUS_KEY, 'session-1')
+        globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => window.setTimeout(() => {
+            callback(performance.now())
+        }, 16)) as typeof requestAnimationFrame
+        globalThis.cancelAnimationFrame = ((handle: number) => {
+            window.clearTimeout(handle)
+        }) as typeof cancelAnimationFrame
+        Object.defineProperty(window, 'matchMedia', {
+            configurable: true,
+            writable: true,
+            value: vi.fn().mockReturnValue({
+                matches: false,
+                media: '',
+                onchange: null,
+                addListener: vi.fn(),
+                removeListener: vi.fn(),
+                addEventListener: vi.fn(),
+                removeEventListener: vi.fn(),
+                dispatchEvent: vi.fn()
+            })
+        })
+    })
+
+    afterEach(() => {
+        sessionStorage.removeItem(PENDING_TERMINAL_FOCUS_KEY)
+        cleanup()
+        globalThis.requestAnimationFrame = originalRequestAnimationFrame
+        globalThis.cancelAnimationFrame = originalCancelAnimationFrame
+        vi.useRealTimers()
+    })
+
+    it('keeps pending focus until the terminal textarea actually takes focus', async () => {
+        renderWithProviders()
+
+        expect(sessionStorage.getItem(PENDING_TERMINAL_FOCUS_KEY)).toBe('session-1')
+
+        allowMockTerminalTextareaFocus = true
+        await act(async () => {
+            vi.advanceTimersByTime(1000)
+        })
+
+        expect(mockTerminalTextarea).not.toBeNull()
+        expect(sessionStorage.getItem(PENDING_TERMINAL_FOCUS_KEY)).toBeNull()
+        expect(document.activeElement).toBe(mockTerminalTextarea)
     })
 })

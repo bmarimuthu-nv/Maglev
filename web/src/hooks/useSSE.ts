@@ -214,27 +214,8 @@ export function useSSE(options: {
         let activeEventSource: EventSource | null = null
         let activeWatchdog: ReturnType<typeof setInterval> | null = null
 
-        const connectWithAuth = (auth: { ticket: string } | { token: string }) => {
-            if (cancelled) return
-            const url = buildEventsUrl(options.baseUrl, auth, {
-                ...subscription,
-                sessionId: subscription.sessionId ?? undefined
-            }, getVisibilityState())
-            const eventSource = new EventSource(url)
-            activeEventSource = eventSource
-            eventSourceRef.current = eventSource
-            lastActivityAtRef.current = Date.now()
-            setupEventSource(eventSource)
-        }
-
-        // Fetch a short-lived ticket, falling back to raw token
-        const api = apiRef.current
-        if (api) {
-            api.createEventsTicket()
-                .then((res) => connectWithAuth({ ticket: res.ticket }))
-                .catch(() => connectWithAuth({ token: options.token }))
-        } else {
-            connectWithAuth({ token: options.token })
+        const isCurrentEventSource = (eventSource: EventSource): boolean => {
+            return !cancelled && eventSourceRef.current === eventSource
         }
 
         const setupEventSource = (eventSource: EventSource) => {
@@ -257,6 +238,9 @@ export function useSSE(options: {
         }
 
         const notifyDisconnect = (reason: string) => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             if (disconnectNotified) {
                 return
             }
@@ -265,6 +249,9 @@ export function useSSE(options: {
         }
 
         const requestReconnect = (reason: string) => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             if (reconnectRequested) {
                 return
             }
@@ -408,6 +395,9 @@ export function useSSE(options: {
         }
 
         const handleSyncEvent = (event: SyncEvent) => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             lastActivityAtRef.current = Date.now()
 
             if (event.type === 'heartbeat') {
@@ -468,6 +458,9 @@ export function useSSE(options: {
         }
 
         const handleMessage = (message: MessageEvent<string>) => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             if (typeof message.data !== 'string') {
                 return
             }
@@ -491,6 +484,9 @@ export function useSSE(options: {
 
         eventSource.onmessage = handleMessage
         eventSource.onopen = () => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current)
                 reconnectTimerRef.current = null
@@ -501,6 +497,9 @@ export function useSSE(options: {
             onConnectRef.current?.()
         }
         eventSource.onerror = (error) => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             onErrorRef.current?.(error)
             if (eventSource.readyState === EventSource.CLOSED) {
                 requestReconnect('closed')
@@ -525,6 +524,29 @@ export function useSSE(options: {
 
         } // end setupEventSource
 
+        const connectWithAuth = (auth: { ticket: string } | { token: string }) => {
+            if (cancelled) return
+            const url = buildEventsUrl(options.baseUrl, auth, {
+                ...subscription,
+                sessionId: subscription.sessionId ?? undefined
+            }, getVisibilityState())
+            const eventSource = new EventSource(url)
+            activeEventSource = eventSource
+            eventSourceRef.current = eventSource
+            lastActivityAtRef.current = Date.now()
+            setupEventSource(eventSource)
+        }
+
+        // Fetch a short-lived ticket, falling back to raw token
+        const api = apiRef.current
+        if (api) {
+            api.createEventsTicket()
+                .then((res) => connectWithAuth({ ticket: res.ticket }))
+                .catch(() => connectWithAuth({ token: options.token }))
+        } else {
+            connectWithAuth({ token: options.token })
+        }
+
         return () => {
             cancelled = true
             if (activeWatchdog) {
@@ -541,6 +563,9 @@ export function useSSE(options: {
                 reconnectTimerRef.current = null
             }
             if (activeEventSource) {
+                activeEventSource.onopen = null
+                activeEventSource.onmessage = null
+                activeEventSource.onerror = null
                 activeEventSource.close()
             }
             if (eventSourceRef.current === activeEventSource) {

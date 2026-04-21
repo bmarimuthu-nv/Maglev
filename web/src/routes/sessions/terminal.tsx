@@ -393,6 +393,14 @@ export default function TerminalPage() {
     const respawnAttemptedRef = useRef(false)
     const pendingNewSessionFocusRef = useRef(false)
 
+    const getTerminalTextarea = useCallback((): HTMLTextAreaElement | null => {
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return null
+        }
+        return (terminal as unknown as { textarea?: HTMLTextAreaElement | null }).textarea ?? null
+    }, [])
+
     const focusTerminalIfAllowed = useCallback(() => {
         if (keyboardVisible) {
             return false
@@ -402,10 +410,13 @@ export default function TerminalPage() {
             return false
         }
         terminal.focus()
-        const textarea = (terminal as unknown as { textarea?: HTMLTextAreaElement | null }).textarea
+        const textarea = getTerminalTextarea()
+        if (!textarea) {
+            return false
+        }
         textarea?.focus({ preventScroll: true })
-        return true
-    }, [keyboardVisible])
+        return document.activeElement === textarea
+    }, [getTerminalTextarea, keyboardVisible])
 
     const blurTerminal = useCallback(() => {
         terminalRef.current?.blur()
@@ -636,27 +647,39 @@ export default function TerminalPage() {
         if (!session?.active) {
             return
         }
-        if (!focusTerminalIfAllowed()) {
-            return
+        let cancelled = false
+        let attempt = 0
+        let frameId = 0
+        let timeoutId = 0
+
+        const maxAttempts = 12
+        const retryFocus = () => {
+            if (cancelled) {
+                return
+            }
+            if (focusTerminalIfAllowed()) {
+                pendingNewSessionFocusRef.current = false
+                clearPendingTerminalFocus(sessionId)
+                return
+            }
+            attempt += 1
+            if (attempt >= maxAttempts) {
+                return
+            }
+            frameId = requestAnimationFrame(() => {
+                retryFocus()
+            })
         }
 
-        pendingNewSessionFocusRef.current = false
-        clearPendingTerminalFocus(sessionId)
-
-        const replayFocus = () => {
-            focusTerminalIfAllowed()
-        }
-
-        const firstFrame = requestAnimationFrame(replayFocus)
-        const secondFrame = requestAnimationFrame(() => {
-            requestAnimationFrame(replayFocus)
-        })
-        const timeout = window.setTimeout(replayFocus, 150)
+        retryFocus()
+        timeoutId = window.setTimeout(() => {
+            retryFocus()
+        }, 150)
 
         return () => {
-            cancelAnimationFrame(firstFrame)
-            cancelAnimationFrame(secondFrame)
-            window.clearTimeout(timeout)
+            cancelled = true
+            cancelAnimationFrame(frameId)
+            window.clearTimeout(timeoutId)
         }
     }, [focusTerminalIfAllowed, session?.active, sessionId, terminalState.status])
 
