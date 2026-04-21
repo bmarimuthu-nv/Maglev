@@ -588,7 +588,7 @@ function renderHubListItems(hubs: RegisteredHub[], emptyText: string, options?: 
         : `<div class="hub-empty">${htmlEscape(emptyText)}</div>`
 }
 
-function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], recentHubs: RegisteredHub[]): string {
+function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], recentHubs: RegisteredHub[], session: BrokerUserSession): string {
     const activeHubItems = renderHubListItems(activeHubs, 'No active hubs registered.')
     const recentHubItems = renderHubListItems(recentHubs, 'No recent hubs recorded.', { link: false })
     const brokerHost = (() => {
@@ -660,6 +660,38 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
       padding: 0.4rem 0 1.25rem;
       border-bottom: 1px solid var(--border);
       margin-bottom: 1.5rem;
+    }
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .hero-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.6rem;
+      flex-shrink: 0;
+    }
+    .hero-user {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .logout-button {
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 0.6rem 0.95rem;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .logout-button:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(140, 168, 209, 0.28);
     }
     .hero-grid {
       display: grid;
@@ -818,6 +850,12 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
         padding: 1.2rem;
         border-radius: 18px;
       }
+      .hero-top {
+        flex-direction: column;
+      }
+      .hero-actions {
+        align-items: stretch;
+      }
       .hub-card-header {
         flex-direction: column;
       }
@@ -827,8 +865,16 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
 <body>
   <main>
     <section class="hero">
-      <h1>Maglev Server · ${htmlEscape(brokerHost)}</h1>
-      <p>Self-hosted control plane for remote hubs. Active cards show the launch folders and branch layout each hub was started with.</p>
+      <div class="hero-top">
+        <div>
+          <h1>Maglev Server · ${htmlEscape(brokerHost)}</h1>
+          <p>Self-hosted control plane for remote hubs. Active cards show the launch folders and branch layout each hub was started with.</p>
+        </div>
+        <div class="hero-actions">
+          <div class="hero-user">Signed in as <code>${htmlEscape(session.login)}</code></div>
+          <button id="logout" class="logout-button" type="button">Logout</button>
+        </div>
+      </div>
       <div class="hero-grid">
         <div class="hero-stat">
           <div class="hero-stat-label">Public URL</div>
@@ -855,6 +901,17 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
       </div>
     </section>
   </main>
+  <script>
+    const logoutButton = document.getElementById('logout');
+    logoutButton?.addEventListener('click', async () => {
+      logoutButton.setAttribute('disabled', 'true');
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } finally {
+        window.location.replace('/');
+      }
+    });
+  </script>
 </body>
 </html>`
 }
@@ -1246,7 +1303,7 @@ export async function startBroker(): Promise<void> {
                         }
                     })
                 }
-                return new Response(renderBrokerIndex(config, listActiveHubs(), listRecentHubs()), {
+                return new Response(renderBrokerIndex(config, listActiveHubs(), listRecentHubs(), brokerSession), {
                     headers: {
                         'content-type': 'text/html; charset=utf-8'
                     }
