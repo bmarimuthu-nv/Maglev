@@ -64,6 +64,7 @@ export default {
   'session.action.delete': 'Delete',
   'session.action.copy': 'Copy',
   'session.action.openFolder': 'Open Folder',
+  'session.group.clearAll': 'Clear all',
 
   // Dialogs
   'dialog.rename.title': 'Rename Session',
@@ -79,6 +80,10 @@ export default {
   'dialog.delete.description': 'Are you sure you want to delete "{name}"? This action cannot be undone.',
   'dialog.delete.confirm': 'Delete',
   'dialog.delete.confirming': 'Deleting…',
+  'dialog.clearGroup.title': 'Clear Folder Sessions',
+  'dialog.clearGroup.description': 'Close and delete all {count} sessions in "{name}"? Active sessions will be disconnected. This action cannot be undone.',
+  'dialog.clearGroup.confirm': 'Clear all',
+  'dialog.clearGroup.confirming': 'Clearing…',
   'dialog.error.default': 'Operation failed. Please try again.',
 
   // Common buttons

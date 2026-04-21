@@ -131,6 +131,7 @@ const recentRegistry = new Map<string, RegisteredHub>()
 const socketHubMap = new Map<string, string>()
 const browserWsMap = new Map<string, ServerWebSocket<HubSocketData>>()
 const pendingRequests = new Map<string, {
+    targetClientId?: string
     resolve: (response: ProxyResponseMessage | ProxyStreamStartMessage) => void
     reject: (error: Error) => void
 }>()
@@ -864,7 +865,16 @@ function renderBrokerLogin(config: BrokerConfig, errorMessage?: string): string 
 </html>`
 }
 
-function createTimeoutPromise(requestId: string): Promise<ProxyResponseMessage | ProxyStreamStartMessage> {
+function rejectPendingRequestsForClient(clientId: string, reason: string): void {
+    for (const [requestId, pending] of Array.from(pendingRequests.entries())) {
+        if (pending.targetClientId !== clientId) {
+            continue
+        }
+        pending.reject(new Error(`${reason} (${requestId})`))
+    }
+}
+
+function createTimeoutPromise(requestId: string, targetClientId?: string): Promise<ProxyResponseMessage | ProxyStreamStartMessage> {
     return new Promise<ProxyResponseMessage | ProxyStreamStartMessage>((resolve, reject) => {
         const timeout = setTimeout(() => {
             pendingRequests.delete(requestId)
@@ -872,6 +882,7 @@ function createTimeoutPromise(requestId: string): Promise<ProxyResponseMessage |
         }, REQUEST_TIMEOUT_MS)
 
         pendingRequests.set(requestId, {
+            targetClientId,
             resolve: (response) => {
                 clearTimeout(timeout)
                 pendingRequests.delete(requestId)
@@ -914,8 +925,18 @@ async function proxyHttpRequest(config: BrokerConfig, hub: RegisteredHub, req: R
         bodyBase64: bodyBytes.length > 0 ? encodeBase64(bodyBytes) : undefined
     }
 
-    hub.socket.send(JSON.stringify(message))
-    const response = await createTimeoutPromise(requestId)
+    // Register the pending request before sending so a fast hub response cannot race past us.
+    const responsePromise = createTimeoutPromise(requestId, hub.socket.data.clientId)
+    try {
+        hub.socket.send(JSON.stringify(message))
+    } catch (error) {
+        const pending = pendingRequests.get(requestId)
+        if (pending) {
+            pending.reject(error instanceof Error ? error : new Error(String(error)))
+        }
+        throw error
+    }
+    const response = await responsePromise
     const responseHeaders = new Headers(response.headers)
 
     if (response.type === 'proxy-stream-start') {
@@ -1240,6 +1261,12 @@ export async function startBroker(): Promise<void> {
                             launchFolders: payload.launchFolders ?? [],
                             configError: payload.configError ?? null
                         }
+                        if (existing?.socket && existing.socket !== ws) {
+                            rejectPendingRequestsForClient(
+                                existing.socket.data.clientId,
+                                `Hub ${payload.hubId} reconnected before completing the request`
+                            )
+                        }
                         registry.set(hub.hubId, hub)
                         rememberHub(hub)
                         socketHubMap.set(ws.data.clientId, hub.hubId)
@@ -1336,6 +1363,7 @@ export async function startBroker(): Promise<void> {
                 socketHubMap.delete(ws.data.clientId)
                 const hub = registry.get(hubId)
                 if (hub && hub.socket === ws) {
+                    rejectPendingRequestsForClient(ws.data.clientId, `Hub ${hubId} disconnected while waiting for response`)
                     hub.socket = null
                     hub.lastSeenAt = Date.now()
                     rememberHub(hub)

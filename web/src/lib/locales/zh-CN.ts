@@ -64,6 +64,7 @@ export default {
   'session.action.delete': '删除',
   'session.action.copy': '复制',
   'session.action.openFolder': '打开文件夹',
+  'session.group.clearAll': '全部清除',
 
   // Dialogs
   'dialog.rename.title': '重命名会话',
@@ -81,6 +82,10 @@ export default {
   'dialog.delete.description': '确定要删除 "{name}" 吗？此操作无法撤销。',
   'dialog.delete.confirm': '删除',
   'dialog.delete.confirming': '删除中…',
+  'dialog.clearGroup.title': '清除文件夹会话',
+  'dialog.clearGroup.description': '确定要关闭并删除 "{name}" 中的全部 {count} 个会话吗？活动会话将被断开，此操作无法撤销。',
+  'dialog.clearGroup.confirm': '全部清除',
+  'dialog.clearGroup.confirming': '清除中…',
   'dialog.error.default': '操作失败，请重试。',
 
   // Common buttons

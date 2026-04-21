@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -11,6 +11,7 @@ import { StartupCommandDialog } from '@/components/StartupCommandDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
+import { queryKeys } from '@/lib/query-keys'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { openSessionReviewWindow } from '@/utils/sessionReview'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -690,10 +691,13 @@ export function SessionList(props: {
 }) {
     const { t } = useTranslation()
     const { renderHeader = true, api, selectedSessionId } = props
+    const { scopeKey } = useAppContext()
+    const queryClient = useQueryClient()
     const groups = useMemo(
         () => groupSessionsByDirectory(props.sessions),
         [props.sessions]
     )
+    const [clearGroupTarget, setClearGroupTarget] = useState<SessionGroup | null>(null)
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
@@ -731,6 +735,44 @@ export function SessionList(props: {
     const gripActiveRef = useRef(false)
     const draggedRef = useRef<{ groupDir: string; rowKey: string } | null>(null)
     const [dropIndicator, setDropIndicator] = useState<{ groupDir: string; insertIndex: number } | null>(null)
+    const clearGroupMutation = useMutation({
+        mutationFn: async (group: SessionGroup) => {
+            if (!api) {
+                throw new Error('Session unavailable')
+            }
+
+            const failures: string[] = []
+            for (const session of group.sessions) {
+                try {
+                    if (session.metadata?.pinned) {
+                        await api.setSessionPinned(session.id, false)
+                    }
+                    if (session.active) {
+                        await api.archiveSession(session.id)
+                    }
+                    await api.deleteSession(session.id)
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : t('dialog.error.default')
+                    failures.push(`${getSessionTitle(session)}: ${message}`)
+                }
+            }
+
+            if (failures.length > 0) {
+                const preview = failures.slice(0, 2).join(' ')
+                const suffix = failures.length > 2 ? ` (+${failures.length - 2} more)` : ''
+                throw new Error(preview + suffix)
+            }
+        },
+        onSettled: async (_data, _error, group) => {
+            if (!group) {
+                return
+            }
+            for (const session of group.sessions) {
+                queryClient.removeQueries({ queryKey: queryKeys.session(scopeKey, session.id) })
+            }
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
+        }
+    })
 
     const handleDragStart = useCallback((groupDir: string, rowKey: string, e: React.DragEvent) => {
         if (!gripActiveRef.current) {
@@ -818,24 +860,37 @@ export function SessionList(props: {
                     const orderedRows = applyCustomOrder(rows, sessionOrders[group.directory])
                     return (
                         <div key={group.directory}>
-                            <button
-                                type="button"
-                                onClick={() => toggleGroup(group.directory, isCollapsed)}
-                                className="sticky top-0 z-10 flex w-full items-center gap-2 px-3 py-2 text-left bg-[var(--app-bg)] border-b border-[var(--app-divider)] transition-colors hover:bg-[var(--app-secondary-bg)]"
-                            >
-                                <ChevronIcon
-                                    className="h-4 w-4 text-[var(--app-hint)]"
-                                    collapsed={isCollapsed}
-                                />
-                                <div className="flex items-center gap-2 min-w-0 flex-1">
-                                    <span className="font-medium text-base break-words" title={group.directory}>
-                                        {group.displayName}
-                                    </span>
-                                    <span className="shrink-0 text-xs text-[var(--app-hint)]">
-                                        ({group.sessions.length})
-                                    </span>
-                                </div>
-                            </button>
+                            <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-bg)] px-3 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleGroup(group.directory, isCollapsed)}
+                                    className="flex min-w-0 flex-1 items-center gap-2 text-left transition-colors hover:bg-[var(--app-secondary-bg)]"
+                                >
+                                    <ChevronIcon
+                                        className="h-4 w-4 text-[var(--app-hint)]"
+                                        collapsed={isCollapsed}
+                                    />
+                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                        <span className="font-medium text-base break-words" title={group.directory}>
+                                            {group.displayName}
+                                        </span>
+                                        <span className="shrink-0 text-xs text-[var(--app-hint)]">
+                                            ({group.sessions.length})
+                                        </span>
+                                    </div>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setClearGroupTarget(group)}
+                                    disabled={!api || clearGroupMutation.isPending}
+                                    className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                    title={t('session.group.clearAll')}
+                                >
+                                    {clearGroupMutation.isPending && clearGroupTarget?.directory === group.directory
+                                        ? t('dialog.clearGroup.confirming')
+                                        : t('session.group.clearAll')}
+                                </button>
+                            </div>
                             {!isCollapsed ? (
                                 <div
                                     className="flex flex-col divide-y divide-[var(--app-divider)] border-b border-[var(--app-divider)]"
@@ -898,6 +953,31 @@ export function SessionList(props: {
                     )
                 })}
             </div>
+
+            <ConfirmDialog
+                isOpen={clearGroupTarget !== null}
+                onClose={() => {
+                    if (!clearGroupMutation.isPending) {
+                        setClearGroupTarget(null)
+                    }
+                }}
+                title={t('dialog.clearGroup.title')}
+                description={t('dialog.clearGroup.description', {
+                    name: clearGroupTarget?.displayName ?? '',
+                    count: clearGroupTarget?.sessions.length ?? 0
+                })}
+                confirmLabel={t('dialog.clearGroup.confirm')}
+                confirmingLabel={t('dialog.clearGroup.confirming')}
+                onConfirm={async () => {
+                    if (!clearGroupTarget) {
+                        return
+                    }
+                    await clearGroupMutation.mutateAsync(clearGroupTarget)
+                    setClearGroupTarget(null)
+                }}
+                isPending={clearGroupMutation.isPending}
+                destructive
+            />
         </div>
     )
 }
