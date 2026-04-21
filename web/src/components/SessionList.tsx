@@ -1124,11 +1124,11 @@ export function SessionList(props: {
         if (item.kind === 'header') {
             const { group, isCollapsed } = item.groupState
             return (
-                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-bg)] px-3 py-2">
+                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-3 py-2">
                     <button
                         type="button"
                         onClick={() => toggleGroup(group.directory, isCollapsed)}
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left transition-colors hover:bg-[var(--app-secondary-bg)]"
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
                     >
                         <ChevronIcon
                             className="h-4 w-4 text-[var(--app-hint)]"
