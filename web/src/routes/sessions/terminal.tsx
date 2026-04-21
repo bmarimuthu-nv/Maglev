@@ -351,6 +351,8 @@ export default function TerminalPage() {
         } catch { return FILE_PREVIEW_DEFAULT_WIDTH }
     })
     const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
+    const [closingSplitSessionId, setClosingSplitSessionId] = useState<string | null>(null)
+    const [mainTerminalFocused, setMainTerminalFocused] = useState(false)
     const [splitPanelWidth, setSplitPanelWidth] = useState(() => {
         try {
             const saved = localStorage.getItem(SPLIT_TERMINAL_WIDTH_KEY)
@@ -362,12 +364,22 @@ export default function TerminalPage() {
     useEffect(() => {
         if (splitSessionId || !loadedSessionId) return
         const child = allSessions.find(
-            (s) => s.active && s.metadata?.parentSessionId === loadedSessionId
+            (s) => s.active && s.metadata?.parentSessionId === loadedSessionId && s.id !== closingSplitSessionId
         )
         if (child) {
             setSplitSessionId(child.id)
         }
-    }, [allSessions, loadedSessionId, splitSessionId])
+    }, [allSessions, closingSplitSessionId, loadedSessionId, splitSessionId])
+
+    useEffect(() => {
+        if (!closingSplitSessionId) {
+            return
+        }
+        const stillPresent = allSessions.some((session) => session.id === closingSplitSessionId)
+        if (!stillPresent) {
+            setClosingSplitSessionId(null)
+        }
+    }, [allSessions, closingSplitSessionId])
 
     const { copied, copy } = useCopyToClipboard()
     const notesAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1027,6 +1039,20 @@ export default function TerminalPage() {
         }
     }, [api, session?.metadata?.path, session?.metadata?.name, sessionId])
 
+    const handleCloseSplit = useCallback(async () => {
+        if (!api || !splitSessionId || closingSplitSessionId === splitSessionId) {
+            return
+        }
+
+        setClosingSplitSessionId(splitSessionId)
+        try {
+            await api.closeSession(splitSessionId)
+            setSplitSessionId((current) => current === splitSessionId ? null : current)
+        } catch {
+            setClosingSplitSessionId(null)
+        }
+    }, [api, closingSplitSessionId, splitSessionId])
+
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             // Allow the shortcut from the terminal (xterm textarea) since it always has modifiers.
@@ -1311,18 +1337,21 @@ export default function TerminalPage() {
                                 type="button"
                                 onClick={() => {
                                     if (splitSessionId) {
-                                        setSplitSessionId(null)
+                                        void handleCloseSplit()
                                     } else {
                                         void handleSplitTerminal()
                                     }
                                 }}
+                                disabled={splitSessionId !== null && closingSplitSessionId === splitSessionId}
                                 className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                                     splitSessionId
                                         ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
                                         : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
-                                }`}
+                                } disabled:cursor-not-allowed disabled:opacity-60`}
                             >
-                                {splitSessionId ? 'Close split' : 'Split'}
+                                {splitSessionId
+                                    ? closingSplitSessionId === splitSessionId ? 'Closing split…' : 'Close split'
+                                    : 'Split'}
                             </button>
                             <button
                                 type="button"
@@ -1409,7 +1438,13 @@ export default function TerminalPage() {
                 <div className="flex-1 min-w-0 overflow-hidden">
                     <div className="h-full w-full p-3">
                         <div
-                            className="h-full w-full"
+                            className={`h-full w-full overflow-hidden rounded-xl border bg-[var(--app-bg)] transition-[border-color,box-shadow] duration-150 ${
+                                splitSessionId
+                                    ? mainTerminalFocused
+                                        ? 'border-[var(--app-link)] shadow-[0_0_0_1px_var(--app-link),0_12px_32px_rgba(37,99,235,0.10)]'
+                                        : 'border-[var(--app-border)]'
+                                    : 'border-transparent'
+                            }`}
                             onTouchStart={handleTerminalTouchStart}
                             onTouchMove={handleTerminalTouchMove}
                             onTouchEnd={handleTerminalTouchEnd}
@@ -1419,6 +1454,7 @@ export default function TerminalPage() {
                             <TerminalView
                                 onMount={handleTerminalMount}
                                 onResize={handleResize}
+                                onFocusChange={setMainTerminalFocused}
                                 className="h-full w-full"
                                 suppressFocus={keyboardVisible}
                             />
@@ -1439,7 +1475,8 @@ export default function TerminalPage() {
                         </div>
                         <SplitTerminalPanel
                             sessionId={splitSessionId}
-                            onClose={() => setSplitSessionId(null)}
+                            onClose={handleCloseSplit}
+                            isClosing={closingSplitSessionId === splitSessionId}
                             onNavigate={(id) => {
                                 setSplitSessionId(null)
                                 void navigate({

@@ -26,13 +26,15 @@ function ConnectionDot(props: { status: string }) {
 
 export function SplitTerminalPanel(props: {
     sessionId: string
-    onClose: () => void
+    onClose: () => Promise<void> | void
     onNavigate?: (sessionId: string) => void
+    isClosing?: boolean
 }) {
-    const { sessionId, onClose, onNavigate } = props
+    const { sessionId, onClose, onNavigate, isClosing = false } = props
     const { api, token, baseUrl } = useAppContext()
     const { session, isLoading: sessionLoading } = useSession(api, sessionId)
     const isShellSession = session?.metadata?.flavor === 'shell'
+    const [isTerminalFocused, setIsTerminalFocused] = useState(false)
 
     const terminalId = useMemo(() => {
         if (sessionLoading) return null
@@ -121,32 +123,44 @@ export function SplitTerminalPanel(props: {
     const sessionName = session?.metadata?.name ?? session?.metadata?.summary?.text ?? sessionId.slice(0, 8)
 
     return (
-        <div className="flex h-full w-full flex-col overflow-hidden">
-            <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-1.5">
-                <ConnectionDot status={terminalState.status} />
-                <button
-                    type="button"
-                    onClick={() => onNavigate?.(sessionId)}
-                    className="min-w-0 flex-1 truncate text-left text-xs font-medium hover:underline"
-                    title={`Navigate to ${sessionName}`}
-                >
-                    {sessionName}
-                </button>
-                <button
-                    type="button"
-                    onClick={onClose}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                    title="Close split"
-                >
-                    <CloseIcon />
-                </button>
-            </div>
-            <div className="flex-1 overflow-hidden p-2">
-                <TerminalView
-                    onMount={handleTerminalMount}
-                    onResize={handleResize}
-                    className="h-full w-full"
-                />
+        <div className="flex h-full w-full flex-col overflow-hidden p-3">
+            <div
+                className={`flex h-full w-full flex-col overflow-hidden rounded-xl border bg-[var(--app-bg)] transition-[border-color,box-shadow] duration-150 ${
+                    isTerminalFocused
+                        ? 'border-[var(--app-link)] shadow-[0_0_0_1px_var(--app-link),0_12px_32px_rgba(37,99,235,0.10)]'
+                        : 'border-[var(--app-border)]'
+                }`}
+            >
+                <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-1.5">
+                    <ConnectionDot status={terminalState.status} />
+                    <button
+                        type="button"
+                        onClick={() => onNavigate?.(sessionId)}
+                        className="min-w-0 flex-1 truncate text-left text-xs font-medium hover:underline"
+                        title={`Navigate to ${sessionName}`}
+                    >
+                        {sessionName}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            void onClose()
+                        }}
+                        disabled={isClosing}
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-[var(--app-hint)]"
+                        title={isClosing ? 'Closing split…' : 'Close split'}
+                    >
+                        <CloseIcon />
+                    </button>
+                </div>
+                <div className="flex-1 overflow-hidden p-2">
+                    <TerminalView
+                        onMount={handleTerminalMount}
+                        onResize={handleResize}
+                        onFocusChange={setIsTerminalFocused}
+                        className="h-full w-full"
+                    />
+                </div>
             </div>
         </div>
     )

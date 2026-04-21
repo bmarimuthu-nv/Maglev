@@ -36,11 +36,13 @@ export function TerminalView(props: {
     onResize?: (cols: number, rows: number) => void
     className?: string
     suppressFocus?: boolean
+    onFocusChange?: (focused: boolean) => void
 }) {
     const containerRef = useRef<HTMLDivElement | null>(null)
     const onMountRef = useRef(props.onMount)
     const onResizeRef = useRef(props.onResize)
     const suppressFocusRef = useRef(Boolean(props.suppressFocus))
+    const onFocusChangeRef = useRef(props.onFocusChange)
 
     useEffect(() => {
         onMountRef.current = props.onMount
@@ -49,6 +51,10 @@ export function TerminalView(props: {
     useEffect(() => {
         onResizeRef.current = props.onResize
     }, [props.onResize])
+
+    useEffect(() => {
+        onFocusChangeRef.current = props.onFocusChange
+    }, [props.onFocusChange])
 
     useEffect(() => {
         suppressFocusRef.current = Boolean(props.suppressFocus)
@@ -101,7 +107,18 @@ export function TerminalView(props: {
             }
             terminal.focus()
         }
+        const handleFocusIn = () => {
+            onFocusChangeRef.current?.(true)
+        }
+        const handleFocusOut = (event: FocusEvent) => {
+            if (event.relatedTarget instanceof Node && container.contains(event.relatedTarget)) {
+                return
+            }
+            onFocusChangeRef.current?.(false)
+        }
         container.addEventListener('pointerdown', handlePointerDown, { signal: abortController.signal })
+        container.addEventListener('focusin', handleFocusIn, { signal: abortController.signal })
+        container.addEventListener('focusout', handleFocusOut, { signal: abortController.signal })
 
         const observer = new ResizeObserver(() => {
             requestAnimationFrame(() => {
@@ -162,6 +179,7 @@ export function TerminalView(props: {
 
         return () => {
             ;(container as HTMLDivElement & { __xterm?: Terminal | null }).__xterm = null
+            onFocusChangeRef.current?.(false)
             abortController.abort()
         }
     }, [])

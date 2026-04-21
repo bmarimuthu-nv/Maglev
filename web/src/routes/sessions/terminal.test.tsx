@@ -4,9 +4,11 @@ import { I18nProvider } from '@/lib/i18n-context'
 import TerminalPage from './terminal'
 
 const writeMock = vi.fn()
+const closeSessionMock = vi.fn()
 const AUTO_SCROLL_KEY = 'maglev-auto-scroll'
 const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
 const useSessionFileSearchMock = vi.fn()
+let mockSessions: Array<{ id: string; active: boolean; metadata?: Record<string, unknown> }> = []
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
@@ -15,7 +17,9 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
-        api: null,
+        api: {
+            closeSession: closeSessionMock
+        },
         token: 'test-token',
         baseUrl: 'http://localhost:3000'
     })
@@ -26,9 +30,9 @@ vi.mock('@/hooks/useAppGoBack', () => ({
 }))
 
 vi.mock('@/hooks/queries/useSession', () => ({
-    useSession: () => ({
+    useSession: (_api: unknown, sessionId: string) => ({
         session: {
-            id: 'session-1',
+            id: sessionId,
             active: true,
             metadata: { path: '/tmp/project' }
         }
@@ -37,7 +41,7 @@ vi.mock('@/hooks/queries/useSession', () => ({
 
 vi.mock('@/hooks/queries/useSessions', () => ({
     useSessions: () => ({
-        sessions: [],
+        sessions: mockSessions,
         isLoading: false,
         error: null,
         refetch: vi.fn()
@@ -93,6 +97,8 @@ function setDefaultFileSearchMock() {
 describe('TerminalPage paste behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mockSessions = []
+        closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
         Object.defineProperty(window, 'matchMedia', {
             configurable: true,
@@ -149,6 +155,8 @@ describe('TerminalPage auto-scroll wheel detection', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        mockSessions = []
+        closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
         localStorage.removeItem(AUTO_SCROLL_KEY)
         Object.defineProperty(window, 'matchMedia', {
@@ -240,6 +248,8 @@ describe('TerminalPage open file dialog', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        mockSessions = []
+        closeSessionMock.mockResolvedValue(undefined)
         localStorage.removeItem(RECENT_OPEN_FILES_KEY)
         setDefaultFileSearchMock()
         Object.defineProperty(window, 'matchMedia', {
@@ -290,7 +300,9 @@ describe('TerminalPage open file dialog', () => {
         expect(screen.queryByText('src/index.ts')).not.toBeInTheDocument()
 
         expect(useSessionFileSearchMock).toHaveBeenLastCalledWith(
-            null,
+            expect.objectContaining({
+                closeSession: closeSessionMock
+            }),
             'session-1',
             '',
             expect.objectContaining({
@@ -303,7 +315,9 @@ describe('TerminalPage open file dialog', () => {
 
         await waitFor(() => {
             expect(useSessionFileSearchMock).toHaveBeenLastCalledWith(
-                null,
+                expect.objectContaining({
+                    closeSession: closeSessionMock
+                }),
                 'session-1',
                 'helper',
                 expect.objectContaining({
@@ -343,5 +357,53 @@ describe('TerminalPage open file dialog', () => {
 
         expect(screen.getByText('Recent files')).toBeInTheDocument()
         expect(screen.getByText('src/nested/helper.ts')).toBeInTheDocument()
+    })
+})
+
+describe('TerminalPage split close behavior', () => {
+    beforeEach(() => {
+        cleanup()
+        vi.clearAllMocks()
+        mockSessions = [
+            {
+                id: 'split-session-1',
+                active: true,
+                metadata: { parentSessionId: 'session-1' }
+            }
+        ]
+        closeSessionMock.mockResolvedValue(undefined)
+        setDefaultFileSearchMock()
+        Object.defineProperty(window, 'matchMedia', {
+            configurable: true,
+            writable: true,
+            value: vi.fn().mockReturnValue({
+                matches: false,
+                media: '',
+                onchange: null,
+                addListener: vi.fn(),
+                removeListener: vi.fn(),
+                addEventListener: vi.fn(),
+                removeEventListener: vi.fn(),
+                dispatchEvent: vi.fn()
+            })
+        })
+    })
+
+    afterEach(() => {
+        cleanup()
+    })
+
+    it('closes the split session instead of only hiding the panel', async () => {
+        renderWithProviders()
+
+        expect(screen.getAllByTestId('terminal-view')).toHaveLength(2)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Close split' })[0]!)
+
+        await waitFor(() => {
+            expect(closeSessionMock).toHaveBeenCalledWith('split-session-1')
+        })
+
+        expect(screen.getAllByTestId('terminal-view')).toHaveLength(1)
     })
 })
