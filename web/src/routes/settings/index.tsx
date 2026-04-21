@@ -6,6 +6,7 @@ import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFo
 import { useAppearance, getAppearanceOptions, type AppearancePreference } from '@/hooks/useTheme'
 import { eventToShortcutLabel, getOpenFileShortcut, setOpenFileShortcut } from '@/lib/open-file-shortcut'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
+import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
 import { PROTOCOL_VERSION } from '@maglev/protocol'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
@@ -83,12 +84,15 @@ export default function SettingsPage() {
     const { appearance, setAppearance } = useAppearance()
     const [openFileShortcut, setOpenFileShortcutState] = useState(() => getOpenFileShortcut())
     const { autoScroll, setAutoScroll } = useAutoScroll()
+    const { reviewBaseMode, setReviewBaseMode } = useReviewBaseMode()
 
     const fontScaleOptions = getFontScaleOptions()
     const appearanceOptions = getAppearanceOptions()
+    const reviewBaseModeOptions = getReviewBaseModeOptions()
     const currentLocale = locales.find((loc) => loc.value === locale)
     const currentAppearanceLabel = appearanceOptions.find((opt) => opt.value === appearance)?.labelKey ?? 'settings.display.appearance.system'
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
+    const currentReviewBaseMode = reviewBaseModeOptions.find((opt) => opt.value === reviewBaseMode) ?? reviewBaseModeOptions[0]
 
     const handleLocaleChange = (newLocale: Locale) => {
         setLocale(newLocale)
@@ -364,6 +368,49 @@ export default function SettingsPage() {
                                     }`}
                                 />
                             </button>
+                        </div>
+                    </div>
+
+                    <div className="border-b border-[var(--app-divider)]">
+                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
+                            Review
+                        </div>
+                        <div className="px-3 py-3">
+                            <div className="text-[var(--app-fg)]">Branch diff base</div>
+                            <div className="mt-1 text-xs text-[var(--app-hint)]">
+                                Choose what branch-review mode compares against
+                            </div>
+                            <div className="mt-3 space-y-2">
+                                {reviewBaseModeOptions.map((option) => {
+                                    const checked = reviewBaseMode === option.value
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setReviewBaseMode(option.value)}
+                                            className={`flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
+                                                checked
+                                                    ? 'border-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                    : 'border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]'
+                                            }`}
+                                            aria-pressed={checked}
+                                        >
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium text-[var(--app-fg)]">{option.label}</div>
+                                                <div className="mt-1 text-xs text-[var(--app-hint)]">{option.description}</div>
+                                            </div>
+                                            {checked ? (
+                                                <span className="shrink-0 text-[var(--app-link)]" aria-hidden="true">
+                                                    <CheckIcon />
+                                                </span>
+                                            ) : null}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                            <div className="mt-2 text-[11px] text-[var(--app-hint)]">
+                                Current: {currentReviewBaseMode.label}
+                            </div>
                         </div>
                     </div>
 

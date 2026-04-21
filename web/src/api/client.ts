@@ -271,18 +271,33 @@ export class ApiClient {
         return await this.request<GitCommandResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/git-diff-file?${params.toString()}`)
     }
 
-    async getReviewSummary(sessionId: string, mode: 'branch' | 'working'): Promise<import('@/types/api').ReviewSummaryResponse> {
+    async getReviewSummary(
+        sessionId: string,
+        mode: 'branch' | 'working',
+        baseMode?: import('@/types/api').ReviewBaseMode
+    ): Promise<import('@/types/api').ReviewSummaryResponse> {
         const params = new URLSearchParams()
         params.set('mode', mode)
+        if (baseMode) {
+            params.set('baseMode', baseMode)
+        }
         return await this.request<import('@/types/api').ReviewSummaryResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/review-summary?${params.toString()}`
         )
     }
 
-    async getReviewFile(sessionId: string, path: string, mode: 'branch' | 'working'): Promise<GitCommandResponse> {
+    async getReviewFile(
+        sessionId: string,
+        path: string,
+        mode: 'branch' | 'working',
+        baseMode?: import('@/types/api').ReviewBaseMode
+    ): Promise<GitCommandResponse> {
         const params = new URLSearchParams()
         params.set('path', path)
         params.set('mode', mode)
+        if (baseMode) {
+            params.set('baseMode', baseMode)
+        }
         return await this.request<GitCommandResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/review-file?${params.toString()}`)
     }
 

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
 import { useSession } from '@/hooks/queries/useSession'
+import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
 import { LoadingState } from '@/components/LoadingState'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
@@ -65,6 +66,33 @@ type ParsedDiffHunk = {
     lines: ParsedDiffLine[]
 }
 
+type ReviewSidebarFile = {
+    kind: 'file'
+    key: string
+    name: string
+    filePath: string
+    oldPath?: string
+    added: number | null
+    removed: number | null
+    depth: number
+}
+
+type ReviewSidebarFolder = {
+    kind: 'folder'
+    key: string
+    name: string
+    depth: number
+}
+
+type ReviewSidebarEntry = ReviewSidebarFolder | ReviewSidebarFile
+
+type ReviewSidebarTreeNode = {
+    name: string
+    path: string
+    folders: Map<string, ReviewSidebarTreeNode>
+    files: ParsedFileDiff[]
+}
+
 function groupDiffHunks(lines: ParsedDiffLine[]): ParsedDiffHunk[] {
     const hunks: ParsedDiffHunk[] = []
     let current: ParsedDiffHunk | null = null
@@ -91,6 +119,105 @@ function groupDiffHunks(lines: ParsedDiffLine[]): ParsedDiffHunk[] {
     }
 
     return hunks
+}
+
+function normalizeReviewFiles(files: Array<{
+    filePath: string
+    oldPath?: string
+    added: number | null
+    removed: number | null
+}>): Array<{
+    filePath: string
+    oldPath?: string
+    added: number | null
+    removed: number | null
+}> {
+    const byPath = new Map<string, {
+        filePath: string
+        oldPath?: string
+        added: number | null
+        removed: number | null
+    }>()
+
+    for (const file of files) {
+        const existing = byPath.get(file.filePath)
+        if (!existing) {
+            byPath.set(file.filePath, { ...file })
+            continue
+        }
+
+        existing.oldPath = existing.oldPath ?? file.oldPath
+        existing.added = existing.added == null || file.added == null
+            ? null
+            : existing.added + file.added
+        existing.removed = existing.removed == null || file.removed == null
+            ? null
+            : existing.removed + file.removed
+    }
+
+    return Array.from(byPath.values()).sort((left, right) => left.filePath.localeCompare(right.filePath))
+}
+
+function buildReviewSidebarEntries(files: ParsedFileDiff[]): ReviewSidebarEntry[] {
+    const root: ReviewSidebarTreeNode = {
+        name: '',
+        path: '',
+        folders: new Map(),
+        files: []
+    }
+
+    for (const file of files) {
+        const parts = file.filePath.split('/').filter(Boolean)
+        let node = root
+        for (const segment of parts.slice(0, -1)) {
+            const nextPath = node.path ? `${node.path}/${segment}` : segment
+            let child = node.folders.get(segment)
+            if (!child) {
+                child = {
+                    name: segment,
+                    path: nextPath,
+                    folders: new Map(),
+                    files: []
+                }
+                node.folders.set(segment, child)
+            }
+            node = child
+        }
+        node.files.push(file)
+    }
+
+    const entries: ReviewSidebarEntry[] = []
+
+    function walk(node: ReviewSidebarTreeNode, depth: number): void {
+        const folders = Array.from(node.folders.values()).sort((left, right) => left.name.localeCompare(right.name))
+        const filesInNode = [...node.files].sort((left, right) => left.filePath.localeCompare(right.filePath))
+
+        for (const folder of folders) {
+            entries.push({
+                kind: 'folder',
+                key: `folder:${folder.path}`,
+                name: folder.name,
+                depth
+            })
+            walk(folder, depth + 1)
+        }
+
+        for (const file of filesInNode) {
+            entries.push({
+                kind: 'file',
+                key: `file:${file.filePath}`,
+                name: file.filePath.split('/').pop() ?? file.filePath,
+                filePath: file.filePath,
+                oldPath: file.oldPath,
+                added: file.added,
+                removed: file.removed,
+                depth
+            })
+        }
+    }
+
+    walk(root, 0)
+    return entries
 }
 
 type ReviewFileCardProps = {
@@ -431,6 +558,8 @@ export default function ReviewPage() {
     const search = useSearch({ from: '/sessions/$sessionId/review' })
     const { session } = useSession(api, sessionId)
     const { copy, copied } = useCopyToClipboard()
+    const { reviewBaseMode } = useReviewBaseMode()
+    const reviewBaseModeOptions = getReviewBaseModeOptions()
     const mode: ReviewMode = search.mode === 'working' ? 'working' : 'branch'
     const selectedPathFromSearch = typeof search.path === 'string' ? search.path : ''
     const highlightedThreadId = typeof search.threadId === 'string' ? search.threadId : null
@@ -446,30 +575,30 @@ export default function ReviewPage() {
     const [collapsedResolvedThreadIds, setCollapsedResolvedThreadIds] = useState<Record<string, boolean>>({})
 
     const summaryQuery = useQuery({
-        queryKey: ['review-summary', scopeKey, sessionId, mode],
+        queryKey: ['review-summary', scopeKey, sessionId, mode, reviewBaseMode],
         queryFn: async () => {
             if (!api) {
                 throw new Error('API unavailable')
             }
-            return await api.getReviewSummary(sessionId, mode)
+            return await api.getReviewSummary(sessionId, mode, reviewBaseMode)
         },
         enabled: Boolean(api && session?.active)
     })
 
     const summary = summaryQuery.data?.success ? summaryQuery.data : null
-    const selectedPath = selectedPathFromSearch || summary?.files?.[0]?.filePath || ''
     const workspacePath = session?.metadata?.path ?? null
     const fileCardRefs = useRef<Record<string, HTMLDivElement | null>>({})
-    const diffFiles = summary?.files ?? []
+    const diffFiles = useMemo(() => normalizeReviewFiles(summary?.files ?? []), [summary?.files])
+    const selectedPath = selectedPathFromSearch || diffFiles[0]?.filePath || ''
 
     const patchQueries = useQueries({
         queries: diffFiles.map((file) => ({
-            queryKey: ['review-patch', scopeKey, sessionId, mode, file.filePath],
+            queryKey: ['review-patch', scopeKey, sessionId, mode, reviewBaseMode, file.filePath],
             queryFn: async () => {
                 if (!api) {
                     throw new Error('API unavailable')
                 }
-                return await api.getReviewFile(sessionId, file.filePath, mode)
+                return await api.getReviewFile(sessionId, file.filePath, mode, reviewBaseMode)
             },
             enabled: Boolean(api && session?.active)
         }))
@@ -523,14 +652,14 @@ export default function ReviewPage() {
     }, [api, sessionId, workspacePath])
 
     useEffect(() => {
-        if (!selectedPathFromSearch && summary?.files?.[0]?.filePath) {
+        if (!selectedPathFromSearch && diffFiles[0]?.filePath) {
             void navigate({
                 to: '/sessions/$sessionId/review',
                 params: { sessionId },
-                search: { mode, path: summary.files[0].filePath }
+                search: { mode, path: diffFiles[0].filePath }
             })
         }
-    }, [mode, navigate, selectedPathFromSearch, sessionId, summary?.files])
+    }, [diffFiles, mode, navigate, selectedPathFromSearch, sessionId])
 
     const parsedFileDiffs = useMemo<ParsedFileDiff[]>(() => diffFiles.map((file, index) => {
         const query = patchQueries[index]
@@ -545,6 +674,8 @@ export default function ReviewPage() {
             lines
         }
     }), [diffFiles, patchQueries])
+
+    const sidebarEntries = useMemo(() => buildReviewSidebarEntries(parsedFileDiffs), [parsedFileDiffs])
 
     const relevantThreads = useMemo(
         () => reviewFile?.threads.filter((thread) => thread.diffMode === mode) ?? [],
@@ -693,6 +824,7 @@ export default function ReviewPage() {
     }, [mutateReview])
 
     const subtitle = session?.metadata?.path ?? sessionId
+    const reviewBaseLabel = reviewBaseModeOptions.find((option) => option.value === reviewBaseMode)?.label ?? reviewBaseMode
 
     if (!session) {
         return <div className="flex h-full items-center justify-center"><LoadingState label="Loading review…" className="text-sm" /></div>
@@ -776,6 +908,11 @@ export default function ReviewPage() {
                             base: {summary.defaultBranch}{summary.mergeBase ? ` @ ${summary.mergeBase.slice(0, 10)}` : ''}
                         </span>
                     ) : null}
+                    {mode === 'branch' ? (
+                        <span className="text-[var(--app-hint)]">
+                            compare mode: {reviewBaseLabel}
+                        </span>
+                    ) : null}
                     {isSaving ? <span className="text-[var(--app-hint)]">Saving…</span> : null}
                 </div>
             </div>
@@ -791,32 +928,47 @@ export default function ReviewPage() {
                             <div className="px-3 py-4 text-sm text-[var(--app-hint)]">Loading diff…</div>
                         ) : summaryQuery.data && !summaryQuery.data.success ? (
                             <div className="px-3 py-4 text-sm text-red-600">{summaryQuery.data.error}</div>
-                        ) : summary?.files?.length ? (
-                            summary.files.map((file) => (
-                                <button
-                                    key={`${file.oldPath ?? ''}:${file.filePath}`}
-                                    type="button"
-                                    onClick={() => {
-                                        void navigate({
-                                            to: '/sessions/$sessionId/review',
-                                            params: { sessionId },
-                                            search: { mode, path: file.filePath }
-                                        })
-                                    }}
-                                    className={`flex w-full items-start justify-between gap-3 border-b border-[var(--app-divider)] px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] ${selectedPath === file.filePath ? 'bg-[var(--app-subtle-bg)]' : ''}`}
-                                >
-                                    <div className="min-w-0 flex-1">
-                                        <div className="truncate text-sm font-medium text-[var(--app-fg)]">{file.filePath}</div>
-                                        {file.oldPath ? (
-                                            <div className="truncate text-xs text-[var(--app-hint)]">renamed from {file.oldPath}</div>
-                                        ) : null}
-                                    </div>
-                                    <div className="shrink-0 text-right text-xs">
-                                        <div className="text-emerald-600">+{file.added ?? '-'}</div>
-                                        <div className="text-red-600">-{file.removed ?? '-'}</div>
-                                    </div>
-                                </button>
-                            ))
+                        ) : sidebarEntries.length ? (
+                            <div className="py-1">
+                                {sidebarEntries.map((entry) => (
+                                    entry.kind === 'folder' ? (
+                                        <div
+                                            key={entry.key}
+                                            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-[var(--app-hint)]"
+                                            style={{ paddingLeft: `${12 + entry.depth * 18}px` }}
+                                        >
+                                            <span aria-hidden="true">▾</span>
+                                            <span className="truncate">{entry.name}</span>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            key={entry.key}
+                                            type="button"
+                                            onClick={() => {
+                                                void navigate({
+                                                    to: '/sessions/$sessionId/review',
+                                                    params: { sessionId },
+                                                    search: { mode, path: entry.filePath }
+                                                })
+                                            }}
+                                            className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] ${selectedPath === entry.filePath ? 'bg-[var(--app-subtle-bg)]' : ''}`}
+                                            style={{ paddingLeft: `${12 + entry.depth * 18}px` }}
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <div className="truncate text-sm font-medium text-[var(--app-fg)]">{entry.name}</div>
+                                                <div className="truncate text-[11px] text-[var(--app-hint)]">{entry.filePath}</div>
+                                                {entry.oldPath ? (
+                                                    <div className="truncate text-[11px] text-[var(--app-hint)]">renamed from {entry.oldPath}</div>
+                                                ) : null}
+                                            </div>
+                                            <div className="shrink-0 text-right text-[11px]">
+                                                <div className="text-emerald-600">+{entry.added ?? '-'}</div>
+                                                <div className="text-red-600">-{entry.removed ?? '-'}</div>
+                                            </div>
+                                        </button>
+                                    )
+                                ))}
+                            </div>
                         ) : (
                             <div className="px-3 py-4 text-sm text-[var(--app-hint)]">No tracked file changes</div>
                         )}

@@ -12,6 +12,7 @@ import {
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const reviewModeSchema = z.enum(['branch', 'working'])
+const reviewBaseModeSchema = z.enum(['origin', 'upstream', 'fork-point'])
 
 const fileSearchSchema = z.object({
     query: z.string().optional(),
@@ -34,11 +35,13 @@ const writeFileBodySchema = z.object({
 })
 
 const reviewSummarySchema = z.object({
-    mode: reviewModeSchema.default('branch')
+    mode: reviewModeSchema.default('branch'),
+    baseMode: reviewBaseModeSchema.optional()
 })
 
 const reviewFileSchema = z.object({
     mode: reviewModeSchema.default('branch'),
+    baseMode: reviewBaseModeSchema.optional(),
     path: z.string().min(1)
 })
 
@@ -173,7 +176,8 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
 
         const result = await runRpc(() => engine.getReviewSummary(sessionResult.sessionId, {
             cwd: sessionPath,
-            mode: parsed.data.mode
+            mode: parsed.data.mode,
+            baseMode: parsed.data.baseMode
         }))
         return c.json(result)
     })
@@ -202,7 +206,8 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         const result = await runRpc(() => engine.getReviewFile(sessionResult.sessionId, {
             cwd: sessionPath,
             filePath: parsed.data.path,
-            mode: parsed.data.mode
+            mode: parsed.data.mode,
+            baseMode: parsed.data.baseMode
         }))
         return c.json(result)
     })

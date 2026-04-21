@@ -32,6 +32,7 @@ import {
     type RpcListDirectoryResponse,
     type RpcPathExistsResponse,
     type RpcReadFileResponse,
+    type RpcReviewBaseMode,
     type RpcReviewMode,
     type RpcReviewSummaryResponse,
     type RpcWriteFileResponse,
@@ -50,6 +51,7 @@ export type {
     RpcPathExistsResponse,
     RpcReadFileResponse,
     RpcReviewMode,
+    RpcReviewBaseMode,
     RpcReviewSummaryResponse,
     RpcWriteFileResponse,
     RpcUploadFileResponse
@@ -1330,11 +1332,11 @@ export class SyncEngine {
         return await this.rpcGateway.getGitDiffFile(sessionId, options)
     }
 
-    async getReviewSummary(sessionId: string, options: { cwd?: string; mode: RpcReviewMode }): Promise<RpcReviewSummaryResponse> {
+    async getReviewSummary(sessionId: string, options: { cwd?: string; mode: RpcReviewMode; baseMode?: RpcReviewBaseMode }): Promise<RpcReviewSummaryResponse> {
         return await this.rpcGateway.getReviewSummary(sessionId, options)
     }
 
-    async getReviewFile(sessionId: string, options: { cwd?: string; filePath: string; mode: RpcReviewMode }): Promise<RpcCommandResponse> {
+    async getReviewFile(sessionId: string, options: { cwd?: string; filePath: string; mode: RpcReviewMode; baseMode?: RpcReviewBaseMode }): Promise<RpcCommandResponse> {
         return await this.rpcGateway.getReviewFile(sessionId, options)
     }
 

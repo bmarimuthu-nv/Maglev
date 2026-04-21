@@ -51,6 +51,7 @@ export type RpcPathExistsResponse = {
 }
 
 export type RpcReviewMode = 'branch' | 'working'
+export type RpcReviewBaseMode = 'origin' | 'upstream' | 'fork-point'
 
 export type RpcReviewSummaryFile = {
     filePath: string
@@ -63,6 +64,7 @@ export type RpcReviewSummaryFile = {
 export type RpcReviewSummaryResponse = {
     success: boolean
     mode?: RpcReviewMode
+    baseMode?: RpcReviewBaseMode
     currentBranch?: string | null
     defaultBranch?: string | null
     mergeBase?: string | null
@@ -203,11 +205,11 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, 'git-diff-file', options) as RpcCommandResponse
     }
 
-    async getReviewSummary(sessionId: string, options: { cwd?: string; mode: RpcReviewMode }): Promise<RpcReviewSummaryResponse> {
+    async getReviewSummary(sessionId: string, options: { cwd?: string; mode: RpcReviewMode; baseMode?: RpcReviewBaseMode }): Promise<RpcReviewSummaryResponse> {
         return await this.sessionRpc(sessionId, 'git-review-summary', options) as RpcReviewSummaryResponse
     }
 
-    async getReviewFile(sessionId: string, options: { cwd?: string; filePath: string; mode: RpcReviewMode }): Promise<RpcCommandResponse> {
+    async getReviewFile(sessionId: string, options: { cwd?: string; filePath: string; mode: RpcReviewMode; baseMode?: RpcReviewBaseMode }): Promise<RpcCommandResponse> {
         return await this.sessionRpc(sessionId, 'git-review-file', options) as RpcCommandResponse
     }
 

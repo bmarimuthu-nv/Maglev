@@ -146,6 +146,7 @@ export type GitCommandResponse = {
 }
 
 export type ReviewMode = 'branch' | 'working'
+export type ReviewBaseMode = 'origin' | 'upstream' | 'fork-point'
 
 export type ReviewSummaryFile = {
     filePath: string
@@ -158,6 +159,7 @@ export type ReviewSummaryFile = {
 export type ReviewSummaryResponse = {
     success: boolean
     mode?: ReviewMode
+    baseMode?: ReviewBaseMode
     currentBranch?: string | null
     defaultBranch?: string | null
     mergeBase?: string | null
