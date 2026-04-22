@@ -195,77 +195,12 @@ function MermaidBlock(props: { code: string }) {
             try {
                 const mermaidModule = await import('mermaid')
                 const mermaid = mermaidModule.default
-                const appBg = normalizeColor(readThemeColor('--app-bg', isDark ? '#1c1c1e' : '#ffffff'), isDark ? '#1c1c1e' : '#ffffff')
-                const appFg = normalizeColor(readThemeColor('--app-fg', isDark ? '#ffffff' : '#111827'), isDark ? '#ffffff' : '#111827')
-                const appHint = normalizeColor(readThemeColor('--app-hint', isDark ? '#8e8e93' : '#6b7280'), isDark ? '#8e8e93' : '#6b7280')
-                const appLink = normalizeColor(readThemeColor('--app-link', isDark ? '#ffffff' : '#111827'), isDark ? '#ffffff' : '#111827')
-                const appButtonText = normalizeColor(readThemeColor('--app-button-text', isDark ? '#111827' : '#ffffff'), isDark ? '#111827' : '#ffffff')
-                const appSecondaryBg = normalizeColor(readThemeColor('--app-secondary-bg', isDark ? '#2C2C2E' : '#f3f4f6'), isDark ? '#2C2C2E' : '#f3f4f6')
-                const surfaceColor = mixColors(appBg, appFg, isDark ? 0.22 : 0.08, isDark ? '#1c1c1e' : '#ffffff')
-                const accentSurfaceColor = mixColors(appBg, appFg, isDark ? 0.32 : 0.14, isDark ? '#1c1c1e' : '#ffffff')
-                const mutedSurfaceColor = mixColors(appBg, appFg, isDark ? 0.15 : 0.05, isDark ? '#1c1c1e' : '#ffffff')
-                const noteSurfaceColor = mixColors(appSecondaryBg, appFg, isDark ? 0.25 : 0.08, isDark ? '#2C2C2E' : '#f3f4f6')
-                const borderColor = mixColors(appBg, appFg, isDark ? 0.38 : 0.28, isDark ? '#1c1c1e' : '#ffffff')
-                const lineColor = mixColors(appBg, appFg, isDark ? 0.6 : 0.55, isDark ? '#1c1c1e' : '#ffffff')
-                const primaryTextColor = pickReadableText(surfaceColor, appFg, [appButtonText, appHint])
-                const secondaryTextColor = pickReadableText(accentSurfaceColor, appFg, [appButtonText, appHint])
-                const tertiaryTextColor = pickReadableText(mutedSurfaceColor, appFg, [appButtonText, appHint])
-                const noteTextColor = pickReadableText(noteSurfaceColor, appFg, [appButtonText])
-                const edgeLabelTextColor = pickReadableText(appBg, appFg, [appButtonText])
                 mermaid.initialize({
                     startOnLoad: false,
                     securityLevel: 'strict',
                     theme: isDark ? 'dark' : 'default',
                     themeVariables: {
-                        background: appBg,
                         fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-                        primaryColor: surfaceColor,
-                        primaryTextColor,
-                        primaryBorderColor: borderColor,
-                        secondaryColor: accentSurfaceColor,
-                        secondaryTextColor,
-                        secondaryBorderColor: borderColor,
-                        tertiaryColor: mutedSurfaceColor,
-                        tertiaryTextColor,
-                        tertiaryBorderColor: borderColor,
-                        mainBkg: surfaceColor,
-                        secondBkg: accentSurfaceColor,
-                        tertiaryBkg: mutedSurfaceColor,
-                        nodeBkg: surfaceColor,
-                        nodeTextColor: primaryTextColor,
-                        nodeBorder: borderColor,
-                        clusterBkg: mixColors(appBg, appSecondaryBg, isDark ? 0.3 : 0.55, isDark ? '#1c1c1e' : '#ffffff'),
-                        clusterBorder: borderColor,
-                        defaultLinkColor: lineColor,
-                        lineColor,
-                        textColor: edgeLabelTextColor,
-                        titleColor: appFg,
-                        edgeLabelBackground: appBg,
-                        actorBkg: surfaceColor,
-                        actorBorder: borderColor,
-                        actorTextColor: primaryTextColor,
-                        labelBoxBkgColor: appBg,
-                        labelTextColor: edgeLabelTextColor,
-                        loopTextColor: edgeLabelTextColor,
-                        signalColor: lineColor,
-                        signalTextColor: edgeLabelTextColor,
-                        noteBkgColor: noteSurfaceColor,
-                        noteTextColor,
-                        noteBorderColor: borderColor,
-                        activationBorderColor: borderColor,
-                        activationBkgColor: accentSurfaceColor,
-                        sequenceNumberColor: pickReadableText(appLink, appFg, ['#111827', '#ffffff']),
-                        cScale0: surfaceColor,
-                        cScaleLabel0: primaryTextColor,
-                        cScale1: accentSurfaceColor,
-                        cScaleLabel1: secondaryTextColor,
-                        cScale2: mutedSurfaceColor,
-                        cScaleLabel2: tertiaryTextColor,
-                        pie1: mixColors(appBg, appLink, isDark ? 0.45 : 0.7, isDark ? '#1c1c1e' : '#ffffff'),
-                        pie2: accentSurfaceColor,
-                        pie3: surfaceColor,
-                        pie4: mutedSurfaceColor,
-                        pie5: borderColor,
                     },
                 })
                 const { svg: renderedSvg, bindFunctions } = await mermaid.render(`maglev-mermaid-${diagramId}`, props.code)
