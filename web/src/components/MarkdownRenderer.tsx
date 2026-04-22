@@ -208,11 +208,12 @@ function MermaidBlock(props: { code: string }) {
                     return
                 }
                 // Fix text contrast: custom CSS classes in user diagrams
-                // may set light node backgrounds while the dark theme
-                // renders all text as white. Post-process the SVG to
-                // find classes that set a light fill and inject dark
-                // text color overrides for them.
-                const lightClassPattern = /\.([\w-]+)\s*>\s*\*\s*\{[^}]*fill\s*:\s*(#[\da-fA-F]{3,8})\s*!important/g
+                // may set light node backgrounds AND set span fill to
+                // the same light color, making text invisible. Detect
+                // classes that set a light fill via !important and
+                // inject black text overrides. The SVG escapes > as &gt;
+                // so we match both forms.
+                const lightClassPattern = /\.([\w-]+)\s*(?:>|&gt;)\s*\*\s*\{[^}]*fill\s*:\s*(#[\da-fA-F]{3,8})\s*!important/g
                 const lightClasses: string[] = []
                 let classMatch: RegExpExecArray | null
                 while ((classMatch = lightClassPattern.exec(renderedSvg)) !== null) {
@@ -229,9 +230,12 @@ function MermaidBlock(props: { code: string }) {
                     if (lightClasses.length > 0) {
                         const selectors = lightClasses.flatMap((cls) => [
                             `.${cls} .nodeLabel`,
+                            `.${cls} .nodeLabel p`,
                             `.${cls} .label text`,
                             `.${cls} .label span`,
+                            `.${cls} .label span p`,
                             `.${cls} span`,
+                            `.${cls} span p`,
                         ])
                         extraCss += `${selectors.join(', ')} { fill: #000000 !important; color: #000000 !important; }`
                     }
