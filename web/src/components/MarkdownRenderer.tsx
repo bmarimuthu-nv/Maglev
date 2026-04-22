@@ -224,17 +224,25 @@ function MermaidBlock(props: { code: string }) {
                 }
 
                 let fixedSvg = renderedSvg
-                if (isDark && lightClasses.length > 0) {
-                    const selectors = lightClasses.flatMap((cls) => [
-                        `.${cls} .nodeLabel`,
-                        `.${cls} .label text`,
-                        `.${cls} .label span`,
-                        `.${cls} span`,
-                    ])
-                    const contrastFix = `${selectors.join(', ')} { fill: #111827 !important; color: #111827 !important; }`
+                if (isDark) {
+                    let extraCss = ''
+                    if (lightClasses.length > 0) {
+                        const selectors = lightClasses.flatMap((cls) => [
+                            `.${cls} .nodeLabel`,
+                            `.${cls} .label text`,
+                            `.${cls} .label span`,
+                            `.${cls} span`,
+                        ])
+                        extraCss += `${selectors.join(', ')} { fill: #000000 !important; color: #000000 !important; }`
+                    }
+                    // Remove dark background behind edge labels
+                    extraCss += ` .edgeLabel { background-color: transparent !important; }
+                        .edgeLabel p { background-color: transparent !important; }
+                        .edgeLabel rect { fill: transparent !important; opacity: 0 !important; }
+                        .labelBkg { background-color: transparent !important; }`
                     fixedSvg = renderedSvg.replace(
                         /<style>([\s\S]*?)<\/style>/,
-                        (_, styles: string) => `<style>${styles}${contrastFix}</style>`
+                        (_, styles: string) => `<style>${styles}${extraCss}</style>`
                     )
                 }
                 setSvg(fixedSvg)
