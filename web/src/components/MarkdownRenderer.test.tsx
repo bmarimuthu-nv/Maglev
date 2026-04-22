@@ -4,7 +4,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 
 const mermaidInitialize = vi.fn()
 const mermaidRender = vi.fn(async (_id: string, code: string) => ({
-    svg: `<svg data-rendered="true"><text>${code}</text></svg>`,
+    svg: `<svg data-rendered="true"><style>.label { color: white; }</style><text>${code}</text></svg>`,
     bindFunctions: vi.fn()
 }))
 
@@ -49,7 +49,6 @@ describe('MarkdownRenderer', () => {
 
         await waitFor(() => expect(screen.getByTestId('mermaid-diagram')).toBeInTheDocument())
         expect(screen.getByText('Diagram')).toBeInTheDocument()
-        expect(screen.getByTestId('mermaid-diagram').innerHTML).toContain('data-maglev-mermaid-contrast="true"')
     })
 
     it('configures Mermaid with distinct node fill and text colors', async () => {
@@ -59,7 +58,9 @@ describe('MarkdownRenderer', () => {
         const initConfig = mermaidInitialize.mock.calls.at(-1)?.[0]
         expect(initConfig?.themeVariables?.primaryColor).toBeTruthy()
         expect(initConfig?.themeVariables?.primaryTextColor).toBeTruthy()
+        expect(initConfig?.themeVariables?.nodeTextColor).toBeTruthy()
         expect(initConfig?.themeVariables?.primaryColor).not.toBe(initConfig?.themeVariables?.primaryTextColor)
+        expect(initConfig?.themeVariables?.nodeTextColor).toBe(initConfig?.themeVariables?.primaryTextColor)
         expect(initConfig?.themeVariables?.noteBkgColor).not.toBe(initConfig?.themeVariables?.noteTextColor)
     })
 })

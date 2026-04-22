@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { getSessionRows, getSessionSubgroups, reconcileOrder } from './SessionList'
+import { buildCloneRequest, getSessionRows, getSessionSubgroups, reconcileOrder } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -197,5 +197,46 @@ describe('reconcileOrder', () => {
         const items = [{ key: 'b' }, { key: 'c' }]
         const order = reconcileOrder(items, ['b', 'a', 'c'], (item) => item.key)
         expect(order).toEqual(['b', 'c'])
+    })
+})
+
+describe('buildCloneRequest', () => {
+    it('does not inherit the source session startup command for the default clone action', () => {
+        const session = makeSession({
+            id: 'shell-1',
+            metadata: {
+                path: '/repo',
+                name: 'Worker shell',
+                startupCommand: 'codex',
+                pinned: true,
+                autoRespawn: true
+            }
+        })
+
+        expect(buildCloneRequest(session)).toEqual({
+            directory: '/repo',
+            name: 'Worker shell (clone)',
+            pinned: true,
+            autoRespawn: true,
+            startupCommand: undefined
+        })
+    })
+
+    it('uses an explicit startup command for clone-with-agent shortcuts', () => {
+        const session = makeSession({
+            id: 'shell-2',
+            metadata: {
+                path: '/repo',
+                startupCommand: 'codex'
+            }
+        })
+
+        expect(buildCloneRequest(session, 'claude')).toEqual({
+            directory: '/repo',
+            name: 'repo (clone)',
+            pinned: undefined,
+            autoRespawn: undefined,
+            startupCommand: 'claude'
+        })
     })
 })

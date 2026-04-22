@@ -76,72 +76,6 @@ function readThemeColor(name: string, fallback: string): string {
     return value || fallback
 }
 
-function injectMermaidContrastStyles(svg: string, colors: {
-    nodeTextColor: string
-    noteTextColor: string
-    edgeLabelTextColor: string
-    nodeFillColor: string
-    noteFillColor: string
-    edgeLabelFillColor: string
-}): string {
-    const styleBlock = `<style data-maglev-mermaid-contrast="true">
-.node .label text,
-.node .label tspan,
-.nodeLabel,
-.nodeLabel p,
-.nodeLabel span,
-.node foreignObject,
-.node foreignObject div,
-.node foreignObject span,
-.node foreignObject p {
-    fill: ${colors.nodeTextColor} !important;
-    color: ${colors.nodeTextColor} !important;
-}
-.node rect,
-.node circle,
-.node ellipse,
-.node polygon,
-.node path {
-    fill: ${colors.nodeFillColor} !important;
-}
-.edgeLabel text,
-.edgeLabel tspan,
-.edgeLabel p,
-.edgeLabel span {
-    fill: ${colors.edgeLabelTextColor} !important;
-    color: ${colors.edgeLabelTextColor} !important;
-}
-.edgeLabel rect,
-.labelBkg {
-    fill: ${colors.edgeLabelFillColor} !important;
-    background-color: ${colors.edgeLabelFillColor} !important;
-}
-.note text,
-.note tspan,
-.note foreignObject,
-.note foreignObject div,
-.note foreignObject span,
-.note foreignObject p {
-    fill: ${colors.noteTextColor} !important;
-    color: ${colors.noteTextColor} !important;
-}
-.note rect,
-.note polygon,
-.statediagram-note rect,
-.statediagram-note polygon {
-    fill: ${colors.noteFillColor} !important;
-}
-</style>`
-
-    if (svg.includes('</style>')) {
-        return svg.replace('</style>', `${styleBlock}</style>`)
-    }
-    if (svg.includes('>')) {
-        return svg.replace(/<svg([^>]*)>/, `<svg$1>${styleBlock}`)
-    }
-    return `${styleBlock}${svg}`
-}
-
 type RgbColor = { r: number; g: number; b: number }
 
 function clampChannel(value: number): number {
@@ -191,11 +125,21 @@ function rgbToCss(color: RgbColor): string {
     return `rgb(${color.r}, ${color.g}, ${color.b})`
 }
 
+function rgbToHex(color: RgbColor): string {
+    return `#${[color.r, color.g, color.b]
+        .map((channel) => clampChannel(channel).toString(16).padStart(2, '0'))
+        .join('')}`
+}
+
+function normalizeColor(value: string, fallback = '#000000'): string {
+    return rgbToHex(parseColor(value, fallback))
+}
+
 function mixColors(base: string, overlay: string, weight: number, fallback = '#000000'): string {
     const safeWeight = Math.max(0, Math.min(1, weight))
     const baseColor = parseColor(base, fallback)
     const overlayColor = parseColor(overlay, fallback)
-    return rgbToCss({
+    return rgbToHex({
         r: baseColor.r + (overlayColor.r - baseColor.r) * safeWeight,
         g: baseColor.g + (overlayColor.g - baseColor.g) * safeWeight,
         b: baseColor.b + (overlayColor.b - baseColor.b) * safeWeight,
@@ -251,13 +195,12 @@ function MermaidBlock(props: { code: string }) {
             try {
                 const mermaidModule = await import('mermaid')
                 const mermaid = mermaidModule.default
-                const appBg = readThemeColor('--app-bg', isDark ? '#1c1c1e' : '#ffffff')
-                const appFg = readThemeColor('--app-fg', isDark ? '#ffffff' : '#111827')
-                const appHint = readThemeColor('--app-hint', isDark ? '#8e8e93' : '#6b7280')
-                const appLink = readThemeColor('--app-link', isDark ? '#ffffff' : '#111827')
-                const appButtonText = readThemeColor('--app-button-text', isDark ? '#111827' : '#ffffff')
-                const appBorder = readThemeColor('--app-border', isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.16)')
-                const appSecondaryBg = readThemeColor('--app-secondary-bg', isDark ? '#2C2C2E' : '#f3f4f6')
+                const appBg = normalizeColor(readThemeColor('--app-bg', isDark ? '#1c1c1e' : '#ffffff'), isDark ? '#1c1c1e' : '#ffffff')
+                const appFg = normalizeColor(readThemeColor('--app-fg', isDark ? '#ffffff' : '#111827'), isDark ? '#ffffff' : '#111827')
+                const appHint = normalizeColor(readThemeColor('--app-hint', isDark ? '#8e8e93' : '#6b7280'), isDark ? '#8e8e93' : '#6b7280')
+                const appLink = normalizeColor(readThemeColor('--app-link', isDark ? '#ffffff' : '#111827'), isDark ? '#ffffff' : '#111827')
+                const appButtonText = normalizeColor(readThemeColor('--app-button-text', isDark ? '#111827' : '#ffffff'), isDark ? '#111827' : '#ffffff')
+                const appSecondaryBg = normalizeColor(readThemeColor('--app-secondary-bg', isDark ? '#2C2C2E' : '#f3f4f6'), isDark ? '#2C2C2E' : '#f3f4f6')
                 const surfaceColor = mixColors(appBg, appFg, isDark ? 0.14 : 0.05, isDark ? '#1c1c1e' : '#ffffff')
                 const accentSurfaceColor = mixColors(appBg, appFg, isDark ? 0.22 : 0.1, isDark ? '#1c1c1e' : '#ffffff')
                 const mutedSurfaceColor = mixColors(appBg, appFg, isDark ? 0.09 : 0.03, isDark ? '#1c1c1e' : '#ffffff')
@@ -329,15 +272,7 @@ function MermaidBlock(props: { code: string }) {
                 if (!active) {
                     return
                 }
-                const styledSvg = injectMermaidContrastStyles(renderedSvg, {
-                    nodeTextColor: primaryTextColor,
-                    noteTextColor,
-                    edgeLabelTextColor,
-                    nodeFillColor: surfaceColor,
-                    noteFillColor: noteSurfaceColor,
-                    edgeLabelFillColor: appBg,
-                })
-                setSvg(styledSvg)
+                setSvg(renderedSvg)
                 if (bindFunctions) {
                     requestAnimationFrame(() => {
                         if (containerRef.current) {

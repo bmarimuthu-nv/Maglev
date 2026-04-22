@@ -93,10 +93,7 @@ export default defineConfig({
                 ]
             },
             injectManifest: {
-                // Keep hashed assets offline-capable, but always fetch the HTML shell fresh.
-                // Otherwise an older cached index.html can reference asset hashes that no
-                // longer exist after rebuilds, which surfaces as preload failures.
-                globPatterns: ['**/*.{js,css,ico,png,svg,woff,woff2}']
+                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
             },
             devOptions: {
                 enabled: true,
@@ -113,6 +110,7 @@ export default defineConfig({
     build: {
         outDir: 'dist',
         emptyOutDir: true,
+        cssCodeSplit: false,
         rollupOptions: {
             output: {
                 manualChunks(id) {

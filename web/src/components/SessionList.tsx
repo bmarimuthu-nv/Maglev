@@ -565,6 +565,30 @@ function formatRelativeTime(value: number, t: (key: string, params?: Record<stri
     return new Date(ms).toLocaleDateString()
 }
 
+export function buildCloneRequest(
+    session: SessionSummary,
+    startupCommand?: string
+): {
+    directory: string
+    name: string
+    pinned: boolean | undefined
+    autoRespawn: boolean | undefined
+    startupCommand: string | undefined
+} | null {
+    const directory = session.metadata?.path?.trim()
+    if (!directory) {
+        return null
+    }
+
+    return {
+        directory,
+        name: `${getSessionTitle(session)} (clone)`,
+        pinned: session.metadata?.pinned,
+        autoRespawn: session.metadata?.autoRespawn,
+        startupCommand: startupCommand?.trim() || undefined
+    }
+}
+
 function SessionItem(props: {
     session: SessionSummary
     sessions: SessionSummary[]
@@ -618,16 +642,18 @@ function SessionItem(props: {
     )
 
     const handleClone = useCallback(async (startupCommand?: string) => {
-        if (!api || !s.metadata?.path) return
+        if (!api) return
+        const request = buildCloneRequest(s, startupCommand)
+        if (!request) return
         try {
             const result = await api.spawnHubSession(
-                s.metadata.path,
-                `${getSessionTitle(s)} (clone)`,
+                request.directory,
+                request.name,
                 undefined,
                 undefined,
-                s.metadata.pinned,
-                s.metadata.autoRespawn,
-                startupCommand ?? s.metadata.startupCommand ?? undefined,
+                request.pinned,
+                request.autoRespawn,
+                request.startupCommand,
                 undefined,
                 undefined
             )
