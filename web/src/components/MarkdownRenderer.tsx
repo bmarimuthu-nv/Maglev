@@ -215,7 +215,7 @@ function MermaidBlock(props: { code: string }) {
                 mermaid.initialize({
                     startOnLoad: false,
                     securityLevel: 'strict',
-                    theme: 'base',
+                    theme: isDark ? 'dark' : 'default',
                     themeVariables: {
                         background: appBg,
                         fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -312,7 +312,7 @@ function MermaidBlock(props: { code: string }) {
                 <div
                     ref={containerRef}
                     data-testid="mermaid-diagram"
-                    className="overflow-x-auto px-4 py-4 [&>svg]:mx-auto [&>svg]:h-auto [&>svg]:max-w-full"
+                    className="overflow-x-auto px-4 py-4 [&>svg]:mx-auto [&>svg]:h-auto [&>svg]:max-w-full [&_.nodeLabel]:!text-[var(--app-fg)] [&_.edgeLabel]:!text-[var(--app-fg)] [&_.label]:!text-[var(--app-fg)]"
                     dangerouslySetInnerHTML={{ __html: svg }}
                 />
             ) : (
