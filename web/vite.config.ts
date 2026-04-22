@@ -36,6 +36,14 @@ export default defineConfig({
     define: {
         __APP_VERSION__: JSON.stringify(require('../cli/package.json').version),
     },
+    experimental: {
+        renderBuiltUrl(_filename, { hostType }) {
+            if (hostType === 'js') {
+                return { relative: true }
+            }
+            return undefined
+        }
+    },
     server: {
         host: true,
         allowedHosts: ['maglevdev.weishu.me'],
@@ -55,6 +63,7 @@ export default defineConfig({
         VitePWA({
             registerType: 'autoUpdate',
             includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'mask-icon.svg'],
+            useCredentials: true,
             strategies: 'injectManifest',
             srcDir: 'src',
             filename: 'sw.ts',

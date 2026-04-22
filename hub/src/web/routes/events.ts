@@ -82,6 +82,8 @@ export function createEventsRoutes(
             }
             sseTickets.delete(ticketParam)
             namespace = ticketData.namespace
+            c.set('userId', ticketData.userId)
+            c.set('namespace', ticketData.namespace)
         } else {
             namespace = c.get('namespace')
         }

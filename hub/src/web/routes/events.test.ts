@@ -22,6 +22,45 @@ function createApp() {
     return app
 }
 
+function createStreamingApp() {
+    const app = new Hono<WebAppEnv>()
+
+    app.use('/api/*', async (c, next) => {
+        c.set('userId', 1)
+        c.set('namespace', 'test-ns')
+        await next()
+    })
+
+    const sseManager = {
+        subscribe: () => undefined,
+        unsubscribe: () => undefined
+    }
+
+    const syncEngine = {
+        resolveSessionAccess: (_sessionId: string, namespace: string) => ({
+            ok: namespace === 'test-ns',
+            sessionId: 'session-1',
+            session: {
+                id: 'session-1',
+                namespace: 'test-ns',
+                active: true
+            }
+        }),
+        getMachine: () => undefined
+    }
+
+    app.route(
+        '/api',
+        createEventsRoutes(
+            () => sseManager as any,
+            () => syncEngine as any,
+            () => null
+        )
+    )
+
+    return app
+}
+
 describe('SSE ticket endpoint', () => {
     it('POST /api/events/ticket returns a ticket string', async () => {
         const app = createApp()
@@ -73,5 +112,15 @@ describe('SSE ticket endpoint', () => {
         const app = createApp()
         const res = await app.request('/api/events?ticket=bogus-ticket-value')
         expect(res.status).toBe(401)
+    })
+
+    it('GET /api/events with ticket auth and sessionId uses the ticket namespace for session access', async () => {
+        const app = createStreamingApp()
+
+        const ticketRes = await app.request('/api/events/ticket', { method: 'POST' })
+        const { ticket } = await ticketRes.json() as { ticket: string }
+
+        const eventsRes = await app.request(`/api/events?ticket=${encodeURIComponent(ticket)}&sessionId=session-1`)
+        expect(eventsRes.status).toBe(200)
     })
 })
