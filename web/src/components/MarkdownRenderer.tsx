@@ -207,7 +207,37 @@ function MermaidBlock(props: { code: string }) {
                 if (!active) {
                     return
                 }
-                setSvg(renderedSvg)
+                // Fix text contrast: custom CSS classes in user diagrams
+                // may set light node backgrounds while the dark theme
+                // renders all text as white. Post-process the SVG to
+                // find classes that set a light fill and inject dark
+                // text color overrides for them.
+                const lightClassPattern = /\.([\w-]+)\s*>\s*\*\s*\{[^}]*fill\s*:\s*(#[\da-fA-F]{3,8})\s*!important/g
+                const lightClasses: string[] = []
+                let classMatch: RegExpExecArray | null
+                while ((classMatch = lightClassPattern.exec(renderedSvg)) !== null) {
+                    const fillColor = classMatch[2]
+                    const parsed = parseHexColor(fillColor)
+                    if (parsed && relativeLuminance(fillColor) > 0.4) {
+                        lightClasses.push(classMatch[1])
+                    }
+                }
+
+                let fixedSvg = renderedSvg
+                if (isDark && lightClasses.length > 0) {
+                    const selectors = lightClasses.flatMap((cls) => [
+                        `.${cls} .nodeLabel`,
+                        `.${cls} .label text`,
+                        `.${cls} .label span`,
+                        `.${cls} span`,
+                    ])
+                    const contrastFix = `${selectors.join(', ')} { fill: #111827 !important; color: #111827 !important; }`
+                    fixedSvg = renderedSvg.replace(
+                        /<style>([\s\S]*?)<\/style>/,
+                        (_, styles: string) => `<style>${styles}${contrastFix}</style>`
+                    )
+                }
+                setSvg(fixedSvg)
                 if (bindFunctions) {
                     requestAnimationFrame(() => {
                         if (containerRef.current) {
@@ -247,7 +277,7 @@ function MermaidBlock(props: { code: string }) {
                 <div
                     ref={containerRef}
                     data-testid="mermaid-diagram"
-                    className="overflow-x-auto px-4 py-4 [&>svg]:mx-auto [&>svg]:h-auto [&>svg]:max-w-full [&_.nodeLabel]:!text-[var(--app-fg)] [&_.edgeLabel]:!text-[var(--app-fg)] [&_.label]:!text-[var(--app-fg)]"
+                    className="overflow-x-auto px-4 py-4 [&>svg]:mx-auto [&>svg]:h-auto [&>svg]:max-w-full"
                     dangerouslySetInnerHTML={{ __html: svg }}
                 />
             ) : (

@@ -51,16 +51,12 @@ describe('MarkdownRenderer', () => {
         expect(screen.getByText('Diagram')).toBeInTheDocument()
     })
 
-    it('configures Mermaid with distinct node fill and text colors', async () => {
+    it('configures Mermaid with a built-in theme and font override', async () => {
         render(<MarkdownRenderer content={`\`\`\`mermaid\ngraph TD\nA-->B\n\`\`\``} />)
 
         await waitFor(() => expect(mermaidInitialize).toHaveBeenCalled())
         const initConfig = mermaidInitialize.mock.calls.at(-1)?.[0]
-        expect(initConfig?.themeVariables?.primaryColor).toBeTruthy()
-        expect(initConfig?.themeVariables?.primaryTextColor).toBeTruthy()
-        expect(initConfig?.themeVariables?.nodeTextColor).toBeTruthy()
-        expect(initConfig?.themeVariables?.primaryColor).not.toBe(initConfig?.themeVariables?.primaryTextColor)
-        expect(initConfig?.themeVariables?.nodeTextColor).toBe(initConfig?.themeVariables?.primaryTextColor)
-        expect(initConfig?.themeVariables?.noteBkgColor).not.toBe(initConfig?.themeVariables?.noteTextColor)
+        expect(initConfig?.theme).toMatch(/^(dark|default)$/)
+        expect(initConfig?.themeVariables?.fontFamily).toBeTruthy()
     })
 })
