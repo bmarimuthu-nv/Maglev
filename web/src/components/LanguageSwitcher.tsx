@@ -90,7 +90,7 @@ export function LanguageSwitcher() {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-center h-8 w-8 rounded-md text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+        className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] shadow-[var(--app-panel-shadow)] transition-[transform,color,background-color] duration-150 hover:-translate-y-px hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
         title={t('language.title')}
         aria-label={t('language.title')}
         aria-expanded={isOpen}
@@ -101,7 +101,7 @@ export function LanguageSwitcher() {
 
       {isOpen && (
         <div
-          className="absolute right-0 top-full mt-1 min-w-[140px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg overflow-hidden z-50"
+          className="absolute right-0 top-full z-50 mt-2 min-w-[160px] overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] shadow-[var(--app-panel-shadow)]"
           role="listbox"
           aria-label={t('language.title')}
         >

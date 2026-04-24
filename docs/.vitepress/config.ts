@@ -21,6 +21,7 @@ export default defineConfig({
       { text: 'Quick Start', link: '/guide/quick-start' },
       { text: 'Installation', link: '/guide/installation' },
       { text: 'PWA', link: '/guide/pwa' },
+      { text: 'UI Spec', link: '/guide/ui-spec' },
       { text: 'How it Works', link: '/guide/how-it-works' },
       { text: 'Cursor Agent', link: '/guide/cursor' },
       { text: 'Voice Assistant', link: '/guide/voice-assistant' },

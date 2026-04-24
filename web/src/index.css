@@ -1,92 +1,137 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
 @config "../tailwind.config.ts";
 
 :root {
-    --app-bg: var(--tg-theme-bg-color, #ffffff);
-    --app-fg: var(--tg-theme-text-color, #111827);
-    --app-hint: var(--tg-theme-hint-color, #6b7280);
-    --app-link: var(--tg-theme-link-color, #111827);
-    --app-button: var(--tg-theme-button-color, #111827);
-    --app-button-text: var(--tg-theme-button-text-color, #ffffff);
-    --app-banner-bg: var(--tg-theme-button-color, #111827);
-    --app-banner-text: var(--tg-theme-button-text-color, #ffffff);
-    --app-secondary-bg: var(--tg-theme-secondary-bg-color, #f3f4f6);
+    --app-font-sans: "Nunito", sans-serif;
+    --app-font-mono: "Space Mono", monospace;
+
+    --mg-bg: #f7f1e8;
+    --mg-surface: rgba(255, 251, 246, 0.94);
+    --mg-surface-raised: #fffdfa;
+    --mg-surface-muted: rgba(116, 91, 70, 0.08);
+    --mg-text: #261d16;
+    --mg-text-muted: #6f6156;
+    --mg-text-soft: #918276;
+    --mg-border: rgba(72, 49, 31, 0.14);
+    --mg-border-strong: rgba(72, 49, 31, 0.22);
+    --mg-accent: #e47353;
+    --mg-accent-hover: #d96747;
+    --mg-accent-contrast: #fff8f4;
+    --mg-success: #228b5d;
+    --mg-warning: #b7791f;
+    --mg-danger: #c75146;
+    --mg-focus: rgba(228, 115, 83, 0.24);
+
+    --app-bg: var(--mg-bg);
+    --app-fg: var(--mg-text);
+    --app-hint: var(--mg-text-muted);
+    --app-link: var(--mg-accent);
+    --app-button: var(--mg-accent);
+    --app-button-hover: var(--mg-accent-hover);
+    --app-button-text: var(--mg-accent-contrast);
+    --app-button-shadow: rgba(228, 115, 83, 0.42);
+    --app-banner-bg: #2b221b;
+    --app-banner-text: #fff7f1;
+    --app-secondary-bg: var(--mg-surface);
+    --app-surface-raised: var(--mg-surface-raised);
 
     /* Theme-aware colors (light mode defaults) */
-    --app-border: rgba(0, 0, 0, 0.1);
-    --app-divider: rgba(0, 0, 0, 0.08);
-    --app-subtle-bg: rgba(0, 0, 0, 0.05);
-    --app-code-bg: #f6f8fa;
-    --app-inline-code-bg: rgba(0, 0, 0, 0.08);
+    --app-border: var(--mg-border);
+    --app-divider: rgba(72, 49, 31, 0.08);
+    --app-subtle-bg: var(--mg-surface-muted);
+    --app-code-bg: #fbf7f2;
+    --app-inline-code-bg: rgba(91, 68, 48, 0.09);
+    --app-panel-shadow: 0 28px 80px -42px rgba(56, 35, 18, 0.38);
 
     /* Diff colors (light) - from maglev-app */
-    --app-diff-added-bg: #e6ffed;
-    --app-diff-added-text: #24292e;
-    --app-diff-removed-bg: #ffeef0;
-    --app-diff-removed-text: #24292e;
+    --app-diff-added-bg: #ebfbf2;
+    --app-diff-added-text: #1d3d30;
+    --app-diff-removed-bg: #fff0ee;
+    --app-diff-removed-text: #4d2a26;
 
     /* Git status colors (light) */
-    --app-git-staged-color: #34C759;
-    --app-git-unstaged-color: #FF9500;
-    --app-git-deleted-color: #FF3B30;
+    --app-git-staged-color: #228b5d;
+    --app-git-unstaged-color: #d48a1f;
+    --app-git-deleted-color: #cc584d;
     --app-git-renamed-color: #2563eb;
-    --app-git-untracked-color: #8E8E93;
+    --app-git-untracked-color: #85786f;
 
     /* Badge colors (light) */
-    --app-badge-warning-bg: rgba(245, 158, 11, 0.2);
-    --app-badge-warning-text: #b45309;
-    --app-badge-warning-border: rgba(245, 158, 11, 0.3);
-    --app-badge-success-bg: rgba(34, 197, 94, 0.2);
-    --app-badge-success-text: #15803d;
-    --app-badge-success-border: rgba(34, 197, 94, 0.3);
-    --app-badge-error-bg: rgba(239, 68, 68, 0.18);
-    --app-badge-error-text: #b91c1c;
-    --app-badge-error-border: rgba(239, 68, 68, 0.3);
+    --app-badge-warning-bg: rgba(212, 138, 31, 0.16);
+    --app-badge-warning-text: #9a6113;
+    --app-badge-warning-border: rgba(212, 138, 31, 0.26);
+    --app-badge-success-bg: rgba(34, 139, 93, 0.14);
+    --app-badge-success-text: #1e7a52;
+    --app-badge-success-border: rgba(34, 139, 93, 0.24);
+    --app-badge-error-bg: rgba(199, 81, 70, 0.15);
+    --app-badge-error-text: #b5473d;
+    --app-badge-error-border: rgba(199, 81, 70, 0.26);
 
     --app-font-scale: 1;
 }
 
 [data-theme="dark"] {
-    /* Primary colors - override fallbacks for non-Telegram browsers */
-    --app-bg: var(--tg-theme-bg-color, #1c1c1e);
-    --app-fg: var(--tg-theme-text-color, #ffffff);
-    --app-hint: var(--tg-theme-hint-color, #8e8e93);
-    --app-link: var(--tg-theme-link-color, #ffffff);
-    --app-button: var(--tg-theme-button-color, #ffffff);
-    --app-button-text: var(--tg-theme-button-text-color, #111827);
-    --app-banner-bg: var(--tg-theme-button-color, #3A3A3C);
-    --app-banner-text: var(--tg-theme-button-text-color, #ffffff);
-    --app-secondary-bg: var(--tg-theme-secondary-bg-color, #2C2C2E);
+    --mg-bg: #141925;
+    --mg-surface: rgba(27, 34, 47, 0.94);
+    --mg-surface-raised: #1d2534;
+    --mg-surface-muted: rgba(255, 244, 236, 0.06);
+    --mg-text: #f5efe6;
+    --mg-text-muted: #b9ab9d;
+    --mg-text-soft: #93877c;
+    --mg-border: rgba(255, 243, 232, 0.1);
+    --mg-border-strong: rgba(255, 243, 232, 0.18);
+    --mg-accent: #ff8e70;
+    --mg-accent-hover: #ff9c82;
+    --mg-accent-contrast: #24150f;
+    --mg-success: #4dc487;
+    --mg-warning: #f4bd5a;
+    --mg-danger: #f28f86;
+    --mg-focus: rgba(255, 142, 112, 0.28);
 
-    --app-border: rgba(255, 255, 255, 0.1);
-    --app-divider: rgba(255, 255, 255, 0.08);
-    --app-subtle-bg: rgba(255, 255, 255, 0.05);
-    --app-code-bg: #282c34;
-    --app-inline-code-bg: rgba(255, 255, 255, 0.1);
+    --app-bg: var(--mg-bg);
+    --app-fg: var(--mg-text);
+    --app-hint: var(--mg-text-muted);
+    --app-link: var(--mg-accent);
+    --app-button: var(--mg-accent);
+    --app-button-hover: var(--mg-accent-hover);
+    --app-button-text: var(--mg-accent-contrast);
+    --app-button-shadow: rgba(255, 142, 112, 0.38);
+    --app-banner-bg: #241d18;
+    --app-banner-text: #fff5ed;
+    --app-secondary-bg: var(--mg-surface);
+    --app-surface-raised: var(--mg-surface-raised);
+
+    --app-border: var(--mg-border);
+    --app-divider: rgba(255, 243, 232, 0.08);
+    --app-subtle-bg: var(--mg-surface-muted);
+    --app-code-bg: #161d2b;
+    --app-inline-code-bg: rgba(255, 243, 232, 0.08);
+    --app-panel-shadow: 0 32px 92px -48px rgba(0, 0, 0, 0.72);
 
     /* Diff colors (dark) - from maglev-app */
-    --app-diff-added-bg: #0d2e1f;
-    --app-diff-added-text: #c9d1d9;
-    --app-diff-removed-bg: #3f1b23;
-    --app-diff-removed-text: #c9d1d9;
+    --app-diff-added-bg: #133025;
+    --app-diff-added-text: #d8efe5;
+    --app-diff-removed-bg: #44252a;
+    --app-diff-removed-text: #f4dddb;
 
     /* Git status colors (dark) */
-    --app-git-staged-color: #4ade80;
-    --app-git-unstaged-color: #f59e0b;
-    --app-git-deleted-color: #f87171;
+    --app-git-staged-color: #4dc487;
+    --app-git-unstaged-color: #f4bd5a;
+    --app-git-deleted-color: #f28f86;
     --app-git-renamed-color: #60a5fa;
-    --app-git-untracked-color: #9ca3af;
+    --app-git-untracked-color: #a79d96;
 
     /* Badge colors (dark) */
-    --app-badge-warning-bg: rgba(251, 191, 36, 0.2);
-    --app-badge-warning-text: #fbbf24;
-    --app-badge-warning-border: rgba(251, 191, 36, 0.3);
-    --app-badge-success-bg: rgba(74, 222, 128, 0.2);
-    --app-badge-success-text: #4ade80;
-    --app-badge-success-border: rgba(74, 222, 128, 0.3);
-    --app-badge-error-bg: rgba(248, 113, 113, 0.2);
-    --app-badge-error-text: #fca5a5;
-    --app-badge-error-border: rgba(248, 113, 113, 0.35);
+    --app-badge-warning-bg: rgba(244, 189, 90, 0.18);
+    --app-badge-warning-text: #f3c875;
+    --app-badge-warning-border: rgba(244, 189, 90, 0.28);
+    --app-badge-success-bg: rgba(77, 196, 135, 0.16);
+    --app-badge-success-text: #7fdaad;
+    --app-badge-success-border: rgba(77, 196, 135, 0.28);
+    --app-badge-error-bg: rgba(242, 143, 134, 0.16);
+    --app-badge-error-text: #f3b0a9;
+    --app-badge-error-border: rgba(242, 143, 134, 0.3);
 }
 
 html {
@@ -108,6 +153,23 @@ body {
     font-size: 1rem;
     background: var(--app-bg);
     color: var(--app-fg);
+    font-family: var(--app-font-sans);
+    background-image:
+        radial-gradient(circle at top left, rgba(228, 115, 83, 0.12), transparent 30%),
+        radial-gradient(circle at top right, rgba(144, 200, 172, 0.12), transparent 26%);
+}
+
+button,
+input,
+textarea,
+select {
+    font-family: inherit;
+}
+
+code,
+pre,
+.font-mono {
+    font-family: var(--app-font-mono);
 }
 
 #root {

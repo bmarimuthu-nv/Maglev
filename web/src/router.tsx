@@ -16,6 +16,7 @@ import { App } from '@/App'
 import { SessionList } from '@/components/SessionList'
 import { NewSession } from '@/components/NewSession'
 import { LoadingState } from '@/components/LoadingState'
+import { MaglevMark } from '@/components/MaglevBrand'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -281,23 +282,31 @@ function SessionsPage() {
     const renderSidebarContent = (mode: 'desktop' | 'mobile') => (
         <>
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                <div className="flex w-full items-center justify-between gap-3 px-3 py-2">
-                    <div className="relative min-w-0">
-                        <button
-                            type="button"
-                            onClick={() => setHubMenuOpen((value) => !value)}
-                            className="flex min-w-0 items-center gap-2 rounded-full px-2 py-1 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
-                        >
-                            <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-[var(--app-fg)]">
-                                    {hubLabel}
+                <div className="flex w-full items-start justify-between gap-3 px-3 py-3">
+                    <div className="relative min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-3 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2.5 shadow-[var(--app-panel-shadow)]">
+                            <MaglevMark size="sm" className="h-11 w-11 rounded-[18px] shrink-0" />
+                            <div className="min-w-0 flex-1">
+                                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--app-hint)]">
+                                    Maglev Hub
                                 </div>
-                                <div className="text-xs text-[var(--app-hint)]">
-                                    {t('sessions.count', { n: sessions.length, m: projectCount })}
-                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setHubMenuOpen((value) => !value)}
+                                    className="mt-1 flex min-w-0 items-center gap-2 rounded-full text-left transition-colors hover:text-[var(--app-link)]"
+                                >
+                                    <div className="min-w-0">
+                                        <div className="truncate text-sm font-semibold text-[var(--app-fg)]">
+                                            {hubLabel}
+                                        </div>
+                                        <div className="text-xs text-[var(--app-hint)]">
+                                            {t('sessions.count', { n: sessions.length, m: projectCount })}
+                                        </div>
+                                    </div>
+                                    <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform ${hubMenuOpen ? 'rotate-180' : ''}`} />
+                                </button>
                             </div>
-                            <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform ${hubMenuOpen ? 'rotate-180' : ''}`} />
-                        </button>
+                        </div>
                         {hubMenuOpen ? renderHubMenu() : null}
                     </div>
                     <div className="flex items-center gap-2">
@@ -328,10 +337,13 @@ function SessionsPage() {
                                 setMobileSidebarOpen(false)
                                 navigate({ to: '/sessions/new' })
                             }}
-                            className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
+                            className={mode === 'desktop'
+                                ? 'hidden lg:inline-flex h-10 items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-button)] px-3.5 text-sm font-semibold text-[var(--app-button-text)] shadow-[0_18px_36px_-22px_var(--app-button-shadow)] transition-[transform,background-color] duration-150 hover:-translate-y-px hover:bg-[var(--app-button-hover)]'
+                                : 'session-list-new-button rounded-full p-1.5 text-[var(--app-link)] transition-colors'}
                             title={t('sessions.new')}
                         >
                             <PlusIcon className="h-5 w-5" />
+                            {mode === 'desktop' ? <span className="hidden lg:inline">New</span> : null}
                         </button>
                     </div>
                 </div>
@@ -412,17 +424,21 @@ function SessionsPage() {
                         >
                             <PanelLeftIcon className="h-5 w-5" />
                         </button>
-                        <div className="relative min-w-0">
-                            <button
-                                type="button"
-                                onClick={() => setHubMenuOpen((value) => !value)}
-                                className="flex min-w-0 items-center gap-2 rounded-full px-2 py-1 text-sm font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)]"
-                            >
-                                <span className="truncate">{hubLabel}</span>
-                                <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform ${hubMenuOpen ? 'rotate-180' : ''}`} />
-                            </button>
-                            {hubMenuOpen ? renderHubMenu('right') : null}
+                        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+                            <MaglevMark size="sm" className="h-8 w-8 rounded-[14px] shrink-0" />
+                            <div className="relative min-w-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setHubMenuOpen((value) => !value)}
+                                    className="flex min-w-0 items-center gap-2 rounded-full px-2 py-1 text-sm font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                >
+                                    <span className="truncate">{hubLabel}</span>
+                                    <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform ${hubMenuOpen ? 'rotate-180' : ''}`} />
+                                </button>
+                                {hubMenuOpen ? renderHubMenu('right') : null}
+                            </div>
                         </div>
+                        <div className="w-9 shrink-0" />
                     </div>
                 ) : null}
                 {effectiveSidebarCollapsed && !isFileExplorerRoute ? (

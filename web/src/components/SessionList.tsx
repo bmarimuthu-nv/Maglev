@@ -75,10 +75,10 @@ type ViewportMetrics = {
     height: number
 }
 
-const HEADER_HEIGHT_ESTIMATE = 48
-const SUBGROUP_HEIGHT_ESTIMATE = 34
-const ROW_HEIGHT_ESTIMATE = 112
-const PAIRED_ROW_HEIGHT_ESTIMATE = 176
+const HEADER_HEIGHT_ESTIMATE = 92
+const SUBGROUP_HEIGHT_ESTIMATE = 40
+const ROW_HEIGHT_ESTIMATE = 144
+const PAIRED_ROW_HEIGHT_ESTIMATE = 228
 const VIRTUAL_OVERSCAN_PX = 500
 
 type SessionSubgroup = {
@@ -222,6 +222,27 @@ function GripVerticalIcon(props: { className?: string }) {
     )
 }
 
+function MoreIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="12" cy="12" r="1" />
+            <circle cx="19" cy="12" r="1" />
+            <circle cx="5" cy="12" r="1" />
+        </svg>
+    )
+}
+
 function getSessionTitle(session: SessionSummary): string {
     if (session.metadata?.name) {
         return session.metadata.name
@@ -251,6 +272,14 @@ function getTerminalSupervisionTone(session: SessionSummary): string {
         return 'bg-sky-500/8'
     }
     return ''
+}
+
+function getCompactPathLabel(path?: string | null): string | null {
+    if (!path) return null
+    const parts = path.split(/[\\/]+/).filter(Boolean)
+    if (parts.length === 0) return path
+    if (parts.length === 1) return parts[0]
+    return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 
 export function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
@@ -682,72 +711,146 @@ function SessionItem(props: {
     })
 
     const sessionName = getSessionTitle(s)
+    const relativeTime = formatRelativeTime(s.updatedAt, t)
+    const compactPath = getCompactPathLabel(s.metadata?.path)
+    const branch = s.metadata?.worktree?.branch?.trim()
+    const agentLabel = getAgentLabel(s)
+    const contextLine = branch
+        ? `Branch ${branch}`
+        : compactPath ?? agentLabel
+    const supportingLine = branch && compactPath && compactPath !== branch
+        ? compactPath
+        : branch
+          ? agentLabel
+          : null
     const statusDotClass = s.active
         ? (s.thinking ? 'bg-[#007AFF]' : 'bg-[var(--app-badge-success-text)]')
         : 'bg-[var(--app-hint)]'
+    const statePills = [
+        pairLink
+            ? {
+                key: 'pair',
+                label: `${pairLink.role}${pairLink.state !== 'active' ? ` ${pairLink.state}` : ''}`,
+                className: 'border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-fg)]'
+            }
+            : null,
+        supervision
+            ? {
+                key: 'supervision',
+                label: `${supervision.role}${supervision.state === 'paused' ? ' paused' : ''}`,
+                className: 'border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-fg)]'
+            }
+            : null,
+        !s.active
+            ? {
+                key: 'inactive',
+                label: 'Inactive',
+                className: 'border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'
+            }
+            : null,
+        s.thinking
+            ? {
+                key: 'thinking',
+                label: t('session.item.thinking'),
+                className: 'border-transparent bg-[color:rgba(0,122,255,0.12)] text-[#007AFF]'
+            }
+            : null,
+        !branch && agentLabel
+            ? {
+                key: 'agent',
+                label: agentLabel,
+                className: 'border-[var(--app-border)] bg-transparent text-[var(--app-hint)]'
+            }
+            : null
+    ].filter((value): value is { key: string; label: string; className: string } => value !== null).slice(0, 2)
+
+    const openMenuAtTarget = useCallback((target: HTMLElement) => {
+        const rect = target.getBoundingClientRect()
+        setMenuAnchorPoint({ x: rect.right - 8, y: rect.bottom + 4 })
+        setMenuAnchorMode('context')
+        setMenuOpen(true)
+    }, [])
+
     return (
         <>
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item flex w-full flex-col gap-1.5 px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                className={`flex w-full flex-col gap-3 rounded-[24px] border px-4 py-3.5 text-left shadow-[0_18px_44px_-34px_rgba(48,33,24,0.28)] transition-[transform,background-color,border-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${
+                    selected
+                        ? 'border-[var(--app-link)] bg-[color:rgba(228,115,83,0.10)] shadow-[0_24px_56px_-34px_rgba(228,115,83,0.34)]'
+                        : 'border-[var(--app-border)] bg-[var(--app-surface-raised)] hover:-translate-y-px hover:border-[var(--mg-border-strong)] hover:bg-[var(--app-secondary-bg)]'
+                }`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
             >
-                <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                        <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                            <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--app-subtle-bg)]" aria-hidden="true">
                             <span
-                                className={`h-2 w-2 rounded-full ${statusDotClass}`}
+                                    className={`h-2.5 w-2.5 rounded-full ${statusDotClass}`}
                             />
                         </span>
-                        <div className="truncate text-base font-medium">
-                            {sessionName}
+                            <div className="min-w-0 flex-1">
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <div className="truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]">
+                                        {sessionName}
+                                    </div>
+                                    {s.metadata?.pinned ? (
+                                        <span className="shrink-0 text-[var(--app-link)]" title="Pinned shell">
+                                            <PinIcon />
+                                        </span>
+                                    ) : null}
+                                </div>
+                                <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-[var(--app-hint)]">
+                                    <span className="truncate font-medium text-[var(--app-fg)]/82">
+                                        {contextLine}
+                                    </span>
+                                    {supportingLine ? (
+                                        <>
+                                            <span className="shrink-0 text-[var(--app-hint)]/60">•</span>
+                                            <span className="truncate">{supportingLine}</span>
+                                        </>
+                                    ) : null}
+                                </div>
+                            </div>
                         </div>
-                        {s.metadata?.pinned ? (
-                            <span className="text-[var(--app-link)]" title="Pinned shell">
-                                <PinIcon />
-                            </span>
-                        ) : null}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0 text-xs">
-                        {s.thinking ? (
-                            <span className="text-[#007AFF] animate-pulse">
-                                {t('session.item.thinking')}
-                            </span>
-                        ) : null}
-                        <span className="text-[var(--app-hint)]">
-                            {formatRelativeTime(s.updatedAt, t)}
-                        </span>
+                    <div className="flex shrink-0 items-start gap-2">
+                        <div className="rounded-full border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--app-hint)]">
+                            {relativeTime}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                openMenuAtTarget(event.currentTarget)
+                            }}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onTouchStart={(event) => event.stopPropagation()}
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent text-[var(--app-hint)] transition-colors hover:border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                            aria-label={t('session.more')}
+                        >
+                            <MoreIcon className="h-4 w-4" />
+                        </button>
                     </div>
                 </div>
-                {showPath ? (
-                    <div className="truncate text-xs text-[var(--app-hint)]">
-                        {s.metadata?.path ?? s.id}
+                {showPath && s.metadata?.path ? (
+                    <div className="truncate rounded-2xl bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
+                        {s.metadata.path}
                     </div>
                 ) : null}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--app-hint)]">
-                    <span className="inline-flex items-center gap-2">
-                        <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
-                            ❖
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                    {statePills.map((pill) => (
+                        <span
+                            key={pill.key}
+                            className={`rounded-full border px-2.5 py-1 font-semibold ${pill.className}`}
+                        >
+                            {pill.label}
                         </span>
-                        {getAgentLabel(s)}
-                    </span>
-                    {pairLink ? (
-                        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] uppercase tracking-wide">
-                            {pairLink.role}
-                            {pairLink.state !== 'active' ? ` ${pairLink.state}` : ''}
-                        </span>
-                    ) : null}
-                    {supervision ? (
-                        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] uppercase tracking-wide">
-                            {supervision.role}
-                            {supervision.state === 'paused' ? ' paused' : ''}
-                        </span>
-                    ) : null}
-                    {s.metadata?.worktree?.branch ? (
-                        <span>{t('session.item.worktree')}: {s.metadata.worktree.branch}</span>
-                    ) : null}
+                    ))}
                 </div>
             </button>
 
@@ -1446,9 +1549,9 @@ export function SessionList(props: {
                 && dropIndicator.insertIndex === groupRenderStates.length
                 && groupIndex === groupRenderStates.length - 1
             const dropClass = isDropBefore
-                ? 'shadow-[inset_0_2px_0_0_#007AFF]'
+                ? 'shadow-[inset_0_2px_0_0_var(--app-link)]'
                 : isDropAfter
-                    ? 'shadow-[inset_0_-2px_0_0_#007AFF]'
+                    ? 'shadow-[inset_0_-2px_0_0_var(--app-link)]'
                     : ''
             return (
                 <div
@@ -1457,38 +1560,47 @@ export function SessionList(props: {
                     onDragEnd={handleDragEnd}
                     onDragOver={(e) => handleGroupDragOver(groupIndex, e)}
                     onDrop={(e) => handleGroupDrop(groupRenderStates.map((groupState) => groupState.group), e)}
-                    className={`group/drag flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-3 py-2 ${dropClass}`}
+                    className={`group/drag px-3 pt-3 ${dropClass}`}
                 >
-                    {renderDragHandle('header')}
-                    <button
-                        type="button"
-                        onClick={() => toggleGroup(group.directory, isCollapsed)}
-                        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
-                    >
-                        <ChevronIcon
-                            className="h-4 w-4 text-[var(--app-hint)]"
-                            collapsed={isCollapsed}
-                        />
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <span className="font-medium text-base break-words" title={group.directory}>
-                                {group.displayName}
+                    <div className="flex items-start gap-2 rounded-[28px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-3 shadow-[0_22px_52px_-42px_rgba(48,33,24,0.35)]">
+                        {renderDragHandle('header')}
+                        <button
+                            type="button"
+                            onClick={() => toggleGroup(group.directory, isCollapsed)}
+                            className="flex min-w-0 flex-1 items-start gap-3 rounded-2xl px-1 py-0.5 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                        >
+                            <span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--app-surface-raised)]">
+                                <ChevronIcon
+                                    className="h-4 w-4 text-[var(--app-hint)]"
+                                    collapsed={isCollapsed}
+                                />
                             </span>
-                            <span className="shrink-0 text-xs text-[var(--app-hint)]">
-                                ({group.sessions.length})
-                            </span>
-                        </div>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setClearGroupTarget(group)}
-                        disabled={!api || clearGroupMutation.isPending}
-                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                        title={t('session.group.clearAll')}
-                    >
-                        {clearGroupMutation.isPending && clearGroupTarget?.directory === group.directory
-                            ? t('dialog.clearGroup.confirming')
-                            : t('session.group.clearAll')}
-                    </button>
+                            <div className="min-w-0 flex-1">
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <span className="truncate text-base font-semibold text-[var(--app-fg)]" title={group.directory}>
+                                        {group.displayName}
+                                    </span>
+                                    <span className="shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2 py-0.5 text-[11px] font-semibold text-[var(--app-hint)]">
+                                        {group.sessions.length}
+                                    </span>
+                                </div>
+                                <div className="mt-1 text-xs text-[var(--app-hint)]">
+                                    {group.hasActiveSession ? 'Active workspace sessions' : 'Recent workspace sessions'}
+                                </div>
+                            </div>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setClearGroupTarget(group)}
+                            disabled={!api || clearGroupMutation.isPending}
+                            className="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={t('session.group.clearAll')}
+                        >
+                            {clearGroupMutation.isPending && clearGroupTarget?.directory === group.directory
+                                ? t('dialog.clearGroup.confirming')
+                                : t('session.group.clearAll')}
+                        </button>
+                    </div>
                 </div>
             )
         }
@@ -1503,9 +1615,9 @@ export function SessionList(props: {
                 && dropIndicator.insertIndex === item.groupState.subgroups.length
                 && subgroupIndex === item.groupState.subgroups.length - 1
             const dropClass = isDropBefore
-                ? 'shadow-[inset_0_2px_0_0_#007AFF]'
+                ? 'shadow-[inset_0_2px_0_0_var(--app-link)]'
                 : isDropAfter
-                    ? 'shadow-[inset_0_-2px_0_0_#007AFF]'
+                    ? 'shadow-[inset_0_-2px_0_0_var(--app-link)]'
                     : ''
             return (
                 <div
@@ -1514,15 +1626,17 @@ export function SessionList(props: {
                     onDragEnd={handleDragEnd}
                     onDragOver={(e) => handleSubgroupDragOver(item.groupState.group.directory, subgroupIndex, e)}
                     onDrop={(e) => handleSubgroupDrop(item.groupState.group.directory, item.groupState.subgroups, e)}
-                    className={`group/drag flex items-center gap-2 border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)]/55 px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--app-hint)] ${dropClass}`}
+                    className={`group/drag px-5 pt-2 ${dropClass}`}
                 >
-                    {renderDragHandle('header')}
-                    <span className="font-medium">{item.subgroup.label}</span>
-                    {item.subgroup.hint ? (
-                        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 normal-case tracking-normal text-[10px] text-[var(--app-fg)]">
-                            {item.subgroup.hint}
-                        </span>
-                    ) : null}
+                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-[var(--app-hint)]">
+                        {renderDragHandle('header')}
+                        <span className="font-semibold">{item.subgroup.label}</span>
+                        {item.subgroup.hint ? (
+                            <span className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2 py-0.5 normal-case tracking-normal text-[10px] text-[var(--app-fg)]">
+                                {item.subgroup.hint}
+                            </span>
+                        ) : null}
+                    </div>
                 </div>
             )
         }
@@ -1539,9 +1653,9 @@ export function SessionList(props: {
             && dropIndicator.insertIndex === item.subgroup.rows.length
             && subgroupRowIndex === item.subgroup.rows.length - 1
         const dropClass = isDropBefore
-            ? 'shadow-[inset_0_2px_0_0_#007AFF]'
+            ? 'shadow-[inset_0_2px_0_0_var(--app-link)]'
             : isDropAfter
-                ? 'shadow-[inset_0_-2px_0_0_#007AFF]'
+                ? 'shadow-[inset_0_-2px_0_0_var(--app-link)]'
                 : ''
 
         return (
@@ -1551,14 +1665,14 @@ export function SessionList(props: {
                 onDragEnd={handleDragEnd}
                 onDragOver={(e) => handleRowDragOver(groupState.group.directory, item.subgroup.key, subgroupRowIndex, e)}
                 onDrop={(e) => handleRowDrop(groupState.group.directory, item.subgroup.key, item.subgroup.rows, e)}
-                className={`group/drag flex items-stretch border-b border-[var(--app-divider)] ${dropClass}`}
+                className={`group/drag flex items-stretch px-3 pb-2 ${dropClass}`}
             >
                 {renderDragHandle('row')}
-                <div className={`flex-1 min-w-0 ${row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''} ${row.isChild ? 'pl-5 border-l-2 border-l-[var(--app-hint)]/20' : ''}`}>
+                <div className={`flex-1 min-w-0 ${row.paired ? 'overflow-hidden rounded-[28px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)]/75 shadow-[0_22px_52px_-42px_rgba(48,33,24,0.3)]' : ''} ${row.isChild ? 'pl-5' : ''}`}>
                     {row.sessions.map((session, index) => (
                         <div
                             key={session.id}
-                            className={`${getTerminalSupervisionTone(session)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''}`}
+                            className={`${getTerminalSupervisionTone(session)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''} ${row.isChild ? 'relative before:absolute before:bottom-4 before:left-[-14px] before:top-4 before:w-[2px] before:rounded-full before:bg-[var(--app-border)]' : ''}`}
                         >
                             <SessionItem
                                 session={session}
@@ -1579,18 +1693,26 @@ export function SessionList(props: {
     return (
         <div className="mx-auto w-full max-w-content flex flex-col">
             {renderHeader ? (
-                <div className="flex items-center justify-between px-3 py-1">
-                    <div className="text-xs text-[var(--app-hint)]">
-                        {t('sessions.count', { n: props.sessions.length, m: groups.length })}
+                <div className="px-3 py-2">
+                    <div className="flex items-center justify-between rounded-[24px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-4 py-3 shadow-[0_18px_44px_-36px_rgba(48,33,24,0.3)]">
+                        <div>
+                            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--app-hint)]">
+                                Workspace overview
+                            </div>
+                            <div className="mt-1 text-sm text-[var(--app-fg)]">
+                                {t('sessions.count', { n: props.sessions.length, m: groups.length })}
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={props.onNewSession}
+                            className="inline-flex items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-button)] px-3.5 py-2 text-sm font-semibold text-[var(--app-button-text)] shadow-[0_18px_36px_-22px_var(--app-button-shadow)] transition-[transform,background-color] duration-150 hover:-translate-y-px hover:bg-[var(--app-button-hover)]"
+                            title={t('sessions.new')}
+                        >
+                            <PlusIcon className="h-4 w-4" />
+                            <span>New</span>
+                        </button>
                     </div>
-                    <button
-                        type="button"
-                        onClick={props.onNewSession}
-                        className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
-                        title={t('sessions.new')}
-                    >
-                        <PlusIcon className="h-5 w-5" />
-                    </button>
                 </div>
             ) : null}
 
