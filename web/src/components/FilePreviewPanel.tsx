@@ -8,7 +8,6 @@ import { queryKeys } from '@/lib/query-keys'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
 import { isBinaryContent } from '@/lib/file-utils'
 import type { FileReviewThread } from '@/types/api'
-import { useShikiHighlighter, useShikiLines, resolveLanguageFromPath } from '@/lib/shiki'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { SourceReviewFileCard } from '@/components/review/SourceReviewFileCard'
 
@@ -90,10 +89,7 @@ export function FilePreviewPanel(props: {
     const fileHash = fileQuery.data?.success ? (fileQuery.data.hash ?? null) : null
     const binary = fileQuery.data?.success ? (!decoded.ok || isBinaryContent(content)) : false
     const markdown = isMarkdownFile(filePath)
-    const language = useMemo(() => resolveLanguageFromPath(filePath), [filePath])
-    const highlighted = useShikiHighlighter(content, markdown ? undefined : language)
     const sourceLines = useMemo(() => normalizeSourceLines(content), [content])
-    const highlightedSourceLines = useShikiLines(sourceLines.join('\n'), language)
     const fileName = filePath.split('/').pop() ?? filePath
     const buildPreviewLink = useCallback((line: number) => `${window.location.href.split('#')[0]}#L${line}`, [])
 
@@ -197,7 +193,6 @@ export function FilePreviewPanel(props: {
     const isDirty = isEditing && draft !== content
     const isRefreshing = (fileQuery.isFetching && !fileQuery.isLoading) || (reviewThreadsQuery.isFetching && !reviewThreadsQuery.isLoading)
     const reviewThreads = reviewThreadsQuery.data?.success ? (reviewThreadsQuery.data.threads ?? []) : []
-    const reviewStoreScope = reviewThreadsQuery.data?.success ? reviewThreadsQuery.data.storageScope : undefined
     const lineThreads = useMemo(() => {
         const map = new Map<number, FileReviewThread[]>()
         for (const thread of reviewThreads) {
@@ -305,7 +300,7 @@ export function FilePreviewPanel(props: {
                     <div className="mt-4 flex flex-wrap items-center gap-2">
                         <div className="flex shrink-0 items-center rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1 text-[11px]">
                             {([
-                                ['read', 'Read'],
+                                ['read', 'Code'],
                                 ['review', 'Review'],
                                 ['edit', 'Edit']
                             ] as const).map(([value, label]) => (
@@ -398,14 +393,11 @@ export function FilePreviewPanel(props: {
                 </div>
             ) : panelMode === 'review' && !binary ? (
                 <div className="flex flex-wrap items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-surface-raised)] px-4 py-2 text-[11px]">
-                    <span className="rounded-full border border-[var(--app-border)] px-2.5 py-1 text-[var(--app-fg)]">
-                        Review mode
+                    <span className="rounded-full bg-[var(--review-accent-bg)] px-2.5 py-1 font-semibold text-[var(--review-accent)]">
+                        Review annotations
                     </span>
-                    <span className="text-[var(--app-hint)]">
-                        {reviewStoreScope === 'git'
-                            ? 'Threads are stored in git metadata for this repo/worktree.'
-                            : 'Threads are stored in a local workspace review folder.'}
-                    </span>
+                    <span className="text-[var(--app-hint)]">{reviewThreads.length} total threads</span>
+                    <span className="text-[var(--app-hint)]">{unresolvedCount} unresolved</span>
                     {reviewSaving ? <span className="text-[var(--app-hint)]">Saving…</span> : null}
                     {reviewThreadsQuery.isLoading ? <span className="text-[var(--app-hint)]">Loading threads…</span> : null}
                     {reviewError ? <span className="text-red-500">{reviewError}</span> : null}
@@ -442,27 +434,28 @@ export function FilePreviewPanel(props: {
                         spellCheck={false}
                     />
                 ) : panelMode === 'review' ? (
-                    <SourceReviewFileCard
-                        filePath={filePath}
-                        sourceLines={sourceLines}
-                        highlightedSourceLines={highlightedSourceLines}
-                        reviewSaving={reviewSaving}
-                        reviewThreads={reviewThreads}
-                        lineThreads={lineThreads}
-                        orphanedThreads={orphanedThreads}
-                        composerLine={composerLine}
-                        composerText={composerText}
-                        collapsedResolvedThreadIds={collapsedResolvedThreadIds}
-                        onComposerLineChange={setComposerLine}
-                        onComposerTextChange={setComposerText}
-                        onCreateThread={(lineNumber) => {
-                            void handleCreateThread(lineNumber)
-                        }}
-                        onToggleResolvedCollapse={toggleCollapsedThread}
-                        onResolveThread={handleResolveThread}
-                        onDeleteThread={handleDeleteThread}
-                        onReplyToThread={handleReplyToThread}
-                    />
+                    <div className="p-4">
+                        <SourceReviewFileCard
+                            filePath={filePath}
+                            sourceLines={sourceLines}
+                            reviewSaving={reviewSaving}
+                            reviewThreads={reviewThreads}
+                            lineThreads={lineThreads}
+                            orphanedThreads={orphanedThreads}
+                            composerLine={composerLine}
+                            composerText={composerText}
+                            collapsedResolvedThreadIds={collapsedResolvedThreadIds}
+                            onComposerLineChange={setComposerLine}
+                            onComposerTextChange={setComposerText}
+                            onCreateThread={(lineNumber) => {
+                                void handleCreateThread(lineNumber)
+                            }}
+                            onToggleResolvedCollapse={toggleCollapsedThread}
+                            onResolveThread={handleResolveThread}
+                            onDeleteThread={handleDeleteThread}
+                            onReplyToThread={handleReplyToThread}
+                        />
+                    </div>
                 ) : markdown && viewMode === 'rendered' ? (
                     <div className="p-4">
                         <MarkdownRenderer content={content} />

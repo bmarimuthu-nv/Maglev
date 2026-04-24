@@ -24,20 +24,40 @@ export function ReviewThreadCard(props: {
     metaLabel?: string | null
 }) {
     const [reply, setReply] = useState('')
+    const rootComment = props.thread.comments[0]
+    const replies = props.thread.comments.slice(1)
 
     return (
-        <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
-            <div className="flex items-center justify-between gap-3">
-                <div className="text-xs font-medium uppercase tracking-wide text-[var(--app-hint)]">
-                    {props.thread.status === 'resolved' ? 'Resolved thread' : 'Open thread'}
-                    {props.metaLabel ? ` • ${props.metaLabel}` : ''}
+        <div className="rounded-2xl border border-[var(--review-thread-border)] bg-[var(--review-thread-bg)] shadow-[0_18px_34px_-28px_rgba(64,42,22,0.42)]">
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--code-border)] px-4 py-3">
+                <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className={`rounded-full px-2.5 py-1 font-semibold ${
+                            props.thread.status === 'resolved'
+                                ? 'border border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'
+                                : 'bg-[var(--review-accent-bg)] text-[var(--review-accent)]'
+                        }`}>
+                            {props.thread.status === 'resolved' ? 'Resolved' : 'Open'}
+                        </span>
+                        {props.metaLabel ? (
+                            <span className="rounded-full border border-[var(--app-border)] bg-transparent px-2.5 py-1 font-medium text-[var(--app-hint)]">
+                                {props.metaLabel}
+                            </span>
+                        ) : null}
+                    </div>
+                    {rootComment ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--app-hint)]">
+                            <span className="font-semibold text-[var(--app-fg)]">{rootComment.author}</span>
+                            <span>{new Date(rootComment.createdAt).toLocaleString()}</span>
+                        </div>
+                    ) : null}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                     {props.thread.status === 'resolved' ? (
                         <button
                             type="button"
                             onClick={props.onToggleResolved}
-                            className="rounded border border-[var(--app-border)] px-2 py-1 text-xs hover:bg-[var(--app-subtle-bg)]"
+                            className="rounded-full border border-[var(--app-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)]"
                         >
                             {props.collapsed ? 'Expand' : 'Collapse'}
                         </button>
@@ -46,7 +66,7 @@ export function ReviewThreadCard(props: {
                         type="button"
                         disabled={props.disabled}
                         onClick={props.onResolve}
-                        className="rounded border border-[var(--app-border)] px-2 py-1 text-xs hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-full border border-[var(--app-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {props.thread.status === 'resolved' ? 'Reopen' : 'Resolve'}
                     </button>
@@ -54,7 +74,7 @@ export function ReviewThreadCard(props: {
                         type="button"
                         disabled={props.disabled}
                         onClick={props.onDelete}
-                        className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-full border border-red-300/70 px-2.5 py-1 text-[11px] font-medium text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         Delete
                     </button>
@@ -63,25 +83,36 @@ export function ReviewThreadCard(props: {
 
             {props.collapsed ? null : (
                 <>
-                    <div className="mt-3 space-y-3">
-                        {props.thread.comments.map((comment) => (
-                            <div key={comment.id} className="rounded-md bg-[var(--app-subtle-bg)] px-3 py-2">
-                                <div className="flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
-                                    <span>{comment.author}</span>
-                                    <span>{new Date(comment.createdAt).toLocaleString()}</span>
-                                </div>
-                                <div className="mt-1 whitespace-pre-wrap text-sm text-[var(--app-fg)]">{comment.body}</div>
+                    <div className="px-4 py-4">
+                        {rootComment ? (
+                            <div className="whitespace-pre-wrap text-sm leading-6 text-[var(--app-fg)]">
+                                {rootComment.body}
                             </div>
-                        ))}
+                        ) : null}
+
+                        {replies.length > 0 ? (
+                            <div className="mt-4 space-y-3 border-t border-[var(--code-border)] pt-4">
+                                {replies.map((comment) => (
+                                    <div key={comment.id} className="rounded-xl border border-[var(--code-border)] bg-[var(--app-surface-raised)] px-3 py-2.5">
+                                        <div className="flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
+                                            <span className="font-medium text-[var(--app-fg)]">{comment.author}</span>
+                                            <span>{new Date(comment.createdAt).toLocaleString()}</span>
+                                        </div>
+                                        <div className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--app-fg)]">{comment.body}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
                     </div>
-                    <div className="mt-3">
+
+                    <div className="border-t border-[var(--code-border)] bg-[var(--app-surface-raised)] px-4 py-3">
                         <textarea
                             value={reply}
                             onChange={(event) => setReply(event.target.value)}
                             placeholder="Reply to thread"
-                            className="min-h-20 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                            className="min-h-20 w-full rounded-xl border border-[var(--code-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--review-accent)]"
                         />
-                        <div className="mt-2 flex justify-end">
+                        <div className="mt-3 flex justify-end">
                             <button
                                 type="button"
                                 disabled={props.disabled || !reply.trim()}
@@ -93,7 +124,7 @@ export function ReviewThreadCard(props: {
                                     props.onReply(next)
                                     setReply('')
                                 }}
-                                className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                                className="rounded-full bg-[var(--app-button)] px-3.5 py-2 text-sm font-semibold text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 Reply
                             </button>

@@ -22,6 +22,7 @@ export default defineConfig({
       { text: 'Installation', link: '/guide/installation' },
       { text: 'PWA', link: '/guide/pwa' },
       { text: 'UI Spec', link: '/guide/ui-spec' },
+      { text: 'File Surface Plan', link: '/guide/file-surface-redesign-plan' },
       { text: 'How it Works', link: '/guide/how-it-works' },
       { text: 'Cursor Agent', link: '/guide/cursor' },
       { text: 'Voice Assistant', link: '/guide/voice-assistant' },

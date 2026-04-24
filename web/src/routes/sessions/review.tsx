@@ -294,17 +294,17 @@ function ReviewFileCard(props: ReviewFileCardProps) {
     }, [props.file.filePath, paged])
 
     return (
-        <div className={`overflow-hidden rounded-lg border bg-[var(--app-code-bg)] shadow-sm ${
+        <div className={`overflow-hidden rounded-[22px] border bg-[var(--code-bg)] shadow-[0_18px_44px_-34px_rgba(22,14,8,0.42)] ${
             props.selected
-                ? 'border-[var(--app-link)] ring-1 ring-[var(--app-link)]/25'
-                : 'border-[var(--app-border)]'
+                ? 'border-[var(--review-accent)] ring-1 ring-[var(--review-accent)]/20'
+                : 'border-[var(--code-border)]'
         }`}>
-            <div className="flex items-start justify-between gap-3 border-b border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-4 py-3">
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--code-border)] bg-[var(--app-secondary-bg)] px-4 py-3">
                 <div className="min-w-0 flex flex-1 items-start gap-3">
                     <button
                         type="button"
                         onClick={props.onToggleExpanded}
-                        className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                        className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--code-border)] bg-[var(--app-bg)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
                         aria-label={props.expanded ? 'Collapse file diff' : 'Expand file diff'}
                     >
                         <span
@@ -343,10 +343,10 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                 <div className="px-4 py-4 text-sm text-red-600">{props.queryState.data.error}</div>
             ) : !props.file.lines.length ? (
                 <div className="px-4 py-4 text-sm text-[var(--app-hint)]">No diff for this file.</div>
-            ) : (
+                    ) : (
                 <div className="divide-y divide-[var(--app-divider)]">
                     {paged ? (
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--app-divider)] bg-[var(--app-bg)] px-4 py-2 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--code-border)] bg-[var(--app-surface-raised)] px-4 py-2 text-xs">
                             <span className="text-[var(--app-hint)]">
                                 Large diff. Showing page {pageIndex + 1} of {pageCount}.
                             </span>
@@ -355,7 +355,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                     type="button"
                                     onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
                                     disabled={pageIndex === 0}
-                                    className="rounded-full border border-[var(--app-border)] px-3 py-1 font-medium text-[var(--app-fg)] disabled:opacity-50"
+                                    className="rounded-full border border-[var(--code-border)] px-3 py-1 font-medium text-[var(--app-fg)] disabled:opacity-50"
                                 >
                                     Previous
                                 </button>
@@ -363,7 +363,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                     type="button"
                                     onClick={() => setPageIndex((current) => Math.min(pageCount - 1, current + 1))}
                                     disabled={pageIndex >= pageCount - 1}
-                                    className="rounded-full border border-[var(--app-border)] px-3 py-1 font-medium text-[var(--app-fg)] disabled:opacity-50"
+                                    className="rounded-full border border-[var(--code-border)] px-3 py-1 font-medium text-[var(--app-fg)] disabled:opacity-50"
                                 >
                                     Next
                                 </button>
@@ -373,7 +373,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
 
                     {visibleHunks.map((hunk, hunkIndex) => (
                         <div key={`${props.file.filePath}-${hunk.header}-${hunkIndex}`}>
-                            <div className="border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)]/70 px-4 py-2 font-mono text-xs text-[var(--app-hint)]">
+                            <div className="border-b border-[var(--code-border)] bg-[var(--app-secondary-bg)]/70 px-4 py-2 font-mono text-xs text-[var(--app-hint)]">
                                 {hunk.header}
                             </div>
                             <div>
@@ -388,10 +388,10 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                     const changeMark = line.kind === 'add' ? '+' : line.kind === 'delete' ? '-' : ' '
 
                                     return (
-                                        <div key={`${props.file.filePath}-${hunkIndex}-${lineIndex}`} className={highlighted ? 'bg-[var(--app-link)]/10' : ''}>
-                                            <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12px] leading-[1.45] hover:bg-[var(--app-subtle-bg)] ${
+                                        <div key={`${props.file.filePath}-${hunkIndex}-${lineIndex}`} className={highlighted ? 'border-l-2 border-l-[var(--review-accent)]/60' : ''}>
+                                            <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12px] leading-[1.45] ${
                                                 line.kind === 'add' ? 'bg-emerald-500/10' : line.kind === 'delete' ? 'bg-red-500/10' : ''
-                                            }`}>
+                                            } ${highlighted ? 'bg-[var(--code-line-selected)]' : 'hover:bg-[var(--code-line-hover)]'}`}>
                                                 <button
                                                     type="button"
                                                     disabled={!anchor}
@@ -400,14 +400,18 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                             props.setComposerAnchorKey(anchorKey)
                                                         }
                                                     }}
-                                                    className="mx-auto mt-1.5 h-5 w-5 rounded border border-transparent text-[10px] text-[var(--app-hint)] hover:border-[var(--app-border)] hover:bg-[var(--app-bg)] disabled:opacity-30"
+                                                    className={`mx-auto mt-1.5 h-5 w-5 rounded-full border text-[10px] transition-colors disabled:opacity-30 ${
+                                                        lineThreads.length > 0
+                                                            ? 'border-[var(--review-thread-border)] bg-[var(--review-accent-bg)] text-[var(--review-accent)]'
+                                                            : 'border-transparent text-[var(--app-hint)] hover:border-[var(--code-border)] hover:bg-[var(--app-bg)]'
+                                                    }`}
                                                 >
                                                     +
                                                 </button>
-                                                <div className="px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)]">
+                                                <div className="border-r border-[var(--code-border)] bg-[var(--code-gutter-bg)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)]">
                                                     {'oldLine' in line ? line.oldLine : ''}
                                                 </div>
-                                                <div className="px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)]">
+                                                <div className="border-r border-[var(--code-border)] bg-[var(--code-gutter-bg)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)]">
                                                     {'newLine' in line ? line.newLine : ''}
                                                 </div>
                                                 <div className={`px-1 py-1.5 text-center select-none ${
@@ -419,7 +423,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                 }`}>
                                                     {changeMark}
                                                 </div>
-                                                <div className={`shiki min-w-0 whitespace-pre-wrap break-words px-3 py-1.5 text-[var(--app-fg)] ${
+                                                <div className={`shiki min-w-0 whitespace-pre-wrap break-words bg-[var(--code-bg)] px-3 py-1.5 text-[var(--app-fg)] ${
                                                     hasSyntax
                                                         ? ''
                                                         : line.kind === 'add' ? 'text-emerald-700' : line.kind === 'delete' ? 'text-red-700' : 'text-[var(--app-fg)]'
@@ -428,12 +432,12 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                 </div>
                                             </div>
                                             {showComposer && anchor ? (
-                                                <div className="border-t border-[var(--app-divider)] bg-[var(--app-bg)] px-4 py-3">
+                                                <div className="border-t border-[var(--code-border)] bg-[var(--app-surface-raised)] px-4 py-3">
                                                     <textarea
                                                         value={props.composerText}
                                                         onChange={(event) => props.setComposerText(event.target.value)}
                                                         placeholder="Add review comment"
-                                                        className="min-h-24 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                                        className="min-h-24 w-full rounded-xl border border-[var(--code-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--review-accent)]"
                                                     />
                                                     <div className="mt-2 flex justify-end gap-2">
                                                         <button
@@ -442,7 +446,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                                 props.setComposerAnchorKey(null)
                                                                 props.setComposerText('')
                                                             }}
-                                                            className="rounded-md border border-[var(--app-border)] px-3 py-2 text-sm"
+                                                            className="rounded-full border border-[var(--app-border)] px-3.5 py-2 text-sm"
                                                         >
                                                             Cancel
                                                         </button>
@@ -452,7 +456,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                             onClick={() => {
                                                                 void props.onCreateThread(props.file.filePath, line)
                                                             }}
-                                                            className="rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className="rounded-full bg-[var(--app-button)] px-3.5 py-2 text-sm font-semibold text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             Save comment
                                                         </button>
@@ -460,7 +464,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                 </div>
                                             ) : null}
                                             {lineThreads.length > 0 ? (
-                                                <div className="space-y-2 border-t border-[var(--app-divider)] bg-[var(--app-secondary-bg)] px-4 py-3">
+                                                <div className="space-y-2 border-t border-[var(--code-border)] bg-[var(--app-secondary-bg)] px-4 py-3">
                                                     {lineThreads.map((thread) => (
                                                         <ReviewThreadCard
                                                             key={thread.id}
@@ -510,7 +514,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                     ))}
 
                     {props.orphanedThreads.length > 0 ? (
-                        <div className="border-t border-[var(--app-divider)] bg-[var(--app-bg)] px-4 py-4">
+                        <div className="border-t border-[var(--code-border)] bg-[var(--app-surface-raised)] px-4 py-4">
                             <div className="mb-2 text-sm font-medium">Orphaned threads</div>
                             <div className="space-y-2">
                                 {props.orphanedThreads.map((thread) => (
