@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '@/api/client'
 import { FileIcon } from '@/components/FileIcon'
 import { useSessionDirectory } from '@/hooks/queries/useSessionDirectory'
@@ -73,6 +73,47 @@ function DirectoryErrorRow(props: { depth: number; message: string }) {
     )
 }
 
+function DirectoryFileRow(props: {
+    filePath: string
+    fileName: string
+    childIndent: number
+    isActive: boolean
+    onOpenFile: (path: string) => void
+}) {
+    const activeButtonRef = useRef<HTMLButtonElement | null>(null)
+
+    useEffect(() => {
+        if (props.isActive) {
+            activeButtonRef.current?.scrollIntoView({ block: 'nearest' })
+        }
+    }, [props.isActive])
+
+    return (
+        <button
+            ref={activeButtonRef}
+            type="button"
+            onClick={() => props.onOpenFile(props.filePath)}
+            className={`relative flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors ${
+                props.isActive
+                    ? 'bg-[color:rgba(228,115,83,0.10)] text-[var(--app-fg)] shadow-[0_12px_28px_-24px_rgba(228,115,83,0.5)]'
+                    : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+            }`}
+            style={{ paddingLeft: props.childIndent }}
+        >
+            {props.isActive ? (
+                <span className="absolute bottom-2 left-0 top-2 w-[3px] rounded-full bg-[var(--app-link)]" aria-hidden="true" />
+            ) : null}
+            <span className="h-4 w-4" />
+            <FileIcon fileName={props.fileName} size={22} />
+            <div className="min-w-0 flex-1">
+                <div className={`truncate text-sm font-medium ${props.isActive ? 'text-[var(--app-fg)]' : ''}`}>
+                    {props.fileName}
+                </div>
+            </div>
+        </button>
+    )
+}
+
 function DirectoryNode(props: {
     api: ApiClient | null
     sessionId: string
@@ -80,6 +121,7 @@ function DirectoryNode(props: {
     label: string
     depth: number
     onOpenFile: (path: string) => void
+    activePath?: string | null
     expanded: Set<string>
     onToggle: (path: string) => void
 }) {
@@ -94,19 +136,34 @@ function DirectoryNode(props: {
 
     const indent = 12 + props.depth * 14
     const childIndent = 12 + childDepth * 14
+    const hasActiveDescendant = Boolean(props.activePath && (
+        props.path === ''
+            ? true
+            : props.activePath === props.path || props.activePath.startsWith(`${props.path}/`)
+    ))
 
     return (
         <div>
             <button
                 type="button"
                 onClick={() => props.onToggle(props.path)}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] transition-colors"
+                className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors ${
+                    hasActiveDescendant
+                        ? 'bg-[color:rgba(228,115,83,0.08)] text-[var(--app-fg)]'
+                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                }`}
                 style={{ paddingLeft: indent }}
             >
-                <ChevronIcon collapsed={!isExpanded} className="text-[var(--app-hint)]" />
-                <FolderIcon className="text-[var(--app-link)]" />
+                <ChevronIcon collapsed={!isExpanded} className={hasActiveDescendant ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'} />
+                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                    hasActiveDescendant ? 'bg-[color:rgba(228,115,83,0.14)] text-[var(--app-link)]' : 'bg-[var(--app-subtle-bg)] text-[var(--app-link)]'
+                }`}>
+                    <FolderIcon className="h-[18px] w-[18px]" />
+                </span>
                 <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{props.label}</div>
+                    <div className={`truncate text-sm font-medium ${hasActiveDescendant ? 'text-[var(--app-fg)]' : ''}`}>
+                        {props.label}
+                    </div>
                 </div>
             </button>
 
@@ -128,6 +185,7 @@ function DirectoryNode(props: {
                                     label={entry.name}
                                     depth={childDepth}
                                     onOpenFile={props.onOpenFile}
+                                    activePath={props.activePath}
                                     expanded={props.expanded}
                                     onToggle={props.onToggle}
                                 />
@@ -136,20 +194,16 @@ function DirectoryNode(props: {
 
                         {files.map((entry) => {
                             const filePath = props.path ? `${props.path}/${entry.name}` : entry.name
+                            const isActive = props.activePath === filePath
                             return (
-                                <button
+                                <DirectoryFileRow
                                     key={filePath}
-                                    type="button"
-                                    onClick={() => props.onOpenFile(filePath)}
-                                    className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                    style={{ paddingLeft: childIndent }}
-                                >
-                                    <span className="h-4 w-4" />
-                                    <FileIcon fileName={entry.name} size={22} />
-                                    <div className="min-w-0 flex-1">
-                                        <div className="truncate font-medium">{entry.name}</div>
-                                    </div>
-                                </button>
+                                    filePath={filePath}
+                                    fileName={entry.name}
+                                    childIndent={childIndent}
+                                    isActive={isActive}
+                                    onOpenFile={props.onOpenFile}
+                                />
                             )
                         })}
 
@@ -173,8 +227,35 @@ export function DirectoryTree(props: {
     sessionId: string
     rootLabel: string
     onOpenFile: (path: string) => void
+    activePath?: string | null
 }) {
     const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']))
+
+    useEffect(() => {
+        if (!props.activePath) {
+            return
+        }
+
+        const parts = props.activePath.split('/').filter(Boolean)
+        const ancestors = new Set<string>([''])
+        let current = ''
+        for (const part of parts.slice(0, -1)) {
+            current = current ? `${current}/${part}` : part
+            ancestors.add(current)
+        }
+
+        setExpanded((prev) => {
+            let changed = false
+            const next = new Set(prev)
+            for (const ancestor of ancestors) {
+                if (!next.has(ancestor)) {
+                    next.add(ancestor)
+                    changed = true
+                }
+            }
+            return changed ? next : prev
+        })
+    }, [props.activePath])
 
     const handleToggle = useCallback((path: string) => {
         setExpanded((prev) => {
@@ -189,7 +270,7 @@ export function DirectoryTree(props: {
     }, [])
 
     return (
-        <div className="border-t border-[var(--app-divider)]">
+        <div className="rounded-[24px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-2 shadow-[0_18px_40px_-34px_rgba(48,33,24,0.35)]">
             <DirectoryNode
                 api={props.api}
                 sessionId={props.sessionId}
@@ -197,10 +278,10 @@ export function DirectoryTree(props: {
                 label={props.rootLabel}
                 depth={0}
                 onOpenFile={props.onOpenFile}
+                activePath={props.activePath}
                 expanded={expanded}
                 onToggle={handleToggle}
             />
         </div>
     )
 }
-

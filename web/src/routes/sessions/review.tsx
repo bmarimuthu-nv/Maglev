@@ -67,6 +67,9 @@ type ParsedDiffHunk = {
     lines: ParsedDiffLine[]
 }
 
+const REVIEW_PAGE_LINE_LIMIT = 400
+const REVIEW_PAGED_LINE_THRESHOLD = 600
+
 type ReviewSidebarFile = {
     kind: 'file'
     key: string
@@ -224,6 +227,7 @@ function buildReviewSidebarEntries(files: ParsedFileDiff[]): ReviewSidebarEntry[
 type ReviewFileCardProps = {
     file: ParsedFileDiff
     selected: boolean
+    expanded: boolean
     queryState: {
         isLoading: boolean
         data?: { success: boolean; error?: string } | undefined
@@ -237,19 +241,57 @@ type ReviewFileCardProps = {
     setComposerAnchorKey: (value: string | null) => void
     setComposerText: (value: string) => void
     setCollapsedResolvedThreadIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
+    onToggleExpanded: () => void
     onCreateThread: (filePath: string, line: ParsedDiffLine) => Promise<void>
     onUpdateThread: (threadId: string, mutator: (thread: ReviewThread) => ReviewThread | null) => Promise<void>
 }
 
 function ReviewFileCard(props: ReviewFileCardProps) {
     const hunks = useMemo(() => groupDiffHunks(props.file.lines), [props.file.lines])
+    const [pageIndex, setPageIndex] = useState(0)
+    const totalRenderableLines = useMemo(
+        () => hunks.reduce((count, hunk) => count + hunk.lines.length, 0),
+        [hunks]
+    )
+    const paged = totalRenderableLines > REVIEW_PAGED_LINE_THRESHOLD
+    const pageCount = Math.max(1, Math.ceil(totalRenderableLines / REVIEW_PAGE_LINE_LIMIT))
+    const visibleHunks = useMemo(() => {
+        if (!paged) {
+            return hunks
+        }
+
+        const start = pageIndex * REVIEW_PAGE_LINE_LIMIT
+        const end = start + REVIEW_PAGE_LINE_LIMIT
+        let offset = 0
+
+        return hunks.flatMap((hunk) => {
+            const hunkStart = offset
+            const hunkEnd = offset + hunk.lines.length
+            offset = hunkEnd
+
+            if (hunkEnd <= start || hunkStart >= end) {
+                return []
+            }
+
+            const sliceStart = Math.max(0, start - hunkStart)
+            const sliceEnd = Math.min(hunk.lines.length, end - hunkStart)
+            return [{
+                ...hunk,
+                lines: hunk.lines.slice(sliceStart, sliceEnd)
+            }]
+        })
+    }, [hunks, pageIndex, paged])
     const language = useMemo(() => resolveLanguageFromPath(props.file.filePath), [props.file.filePath])
     const sourceCodeBlock = useMemo(
-        () => props.file.lines.filter((line) => line.kind !== 'hunk').map((line) => line.text).join('\n'),
-        [props.file.lines]
+        () => visibleHunks.flatMap((hunk) => hunk.lines).map((line) => line.text).join('\n'),
+        [visibleHunks]
     )
     const highlightedLines = useShikiLines(sourceCodeBlock, language) ?? []
     let syntaxLineIdx = 0
+
+    useEffect(() => {
+        setPageIndex(0)
+    }, [props.file.filePath, paged])
 
     return (
         <div className={`overflow-hidden rounded-lg border bg-[var(--app-code-bg)] shadow-sm ${
@@ -258,8 +300,27 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                 : 'border-[var(--app-border)]'
         }`}>
             <div className="flex items-start justify-between gap-3 border-b border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-4 py-3">
-                <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-[var(--app-fg)]">{props.file.filePath}</div>
+                <div className="min-w-0 flex flex-1 items-start gap-3">
+                    <button
+                        type="button"
+                        onClick={props.onToggleExpanded}
+                        className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                        aria-label={props.expanded ? 'Collapse file diff' : 'Expand file diff'}
+                    >
+                        <span
+                            className={`transition-transform duration-150 ${props.expanded ? 'rotate-90' : ''}`}
+                            aria-hidden="true"
+                        >
+                            ▸
+                        </span>
+                    </button>
+                    <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-[var(--app-fg)]">{props.file.filePath}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--app-hint)]">
+                            <span>{totalRenderableLines} lines</span>
+                            {paged ? <span>{pageCount} pages</span> : null}
+                        </div>
+                    </div>
                     {props.file.oldPath ? (
                         <div className="truncate text-xs text-[var(--app-hint)]">renamed from {props.file.oldPath}</div>
                     ) : null}
@@ -270,7 +331,11 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                 </div>
             </div>
 
-            {props.queryState.isLoading ? (
+            {!props.expanded ? (
+                <div className="px-4 py-4 text-sm text-[var(--app-hint)]">
+                    Diff collapsed. Expand to load and review this file.
+                </div>
+            ) : props.queryState.isLoading ? (
                 <div className="px-4 py-6">
                     <LoadingState label="Loading patch…" className="text-sm" />
                 </div>
@@ -280,7 +345,33 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                 <div className="px-4 py-4 text-sm text-[var(--app-hint)]">No diff for this file.</div>
             ) : (
                 <div className="divide-y divide-[var(--app-divider)]">
-                    {hunks.map((hunk, hunkIndex) => (
+                    {paged ? (
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--app-divider)] bg-[var(--app-bg)] px-4 py-2 text-xs">
+                            <span className="text-[var(--app-hint)]">
+                                Large diff. Showing page {pageIndex + 1} of {pageCount}.
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
+                                    disabled={pageIndex === 0}
+                                    className="rounded-full border border-[var(--app-border)] px-3 py-1 font-medium text-[var(--app-fg)] disabled:opacity-50"
+                                >
+                                    Previous
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPageIndex((current) => Math.min(pageCount - 1, current + 1))}
+                                    disabled={pageIndex >= pageCount - 1}
+                                    className="rounded-full border border-[var(--app-border)] px-3 py-1 font-medium text-[var(--app-fg)] disabled:opacity-50"
+                                >
+                                    Next
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
+
+                    {visibleHunks.map((hunk, hunkIndex) => (
                         <div key={`${props.file.filePath}-${hunk.header}-${hunkIndex}`}>
                             <div className="border-b border-[var(--app-divider)] bg-[var(--app-secondary-bg)]/70 px-4 py-2 font-mono text-xs text-[var(--app-hint)]">
                                 {hunk.header}
@@ -487,6 +578,8 @@ export default function ReviewPage() {
     const [composerAnchorKey, setComposerAnchorKey] = useState<string | null>(null)
     const [composerText, setComposerText] = useState('')
     const [collapsedResolvedThreadIds, setCollapsedResolvedThreadIds] = useState<Record<string, boolean>>({})
+    const [expandedFilePaths, setExpandedFilePaths] = useState<Set<string>>(() => new Set())
+    const initializedExpandedRef = useRef(false)
 
     const summaryQuery = useQuery({
         queryKey: ['review-summary', scopeKey, sessionId, mode, reviewBaseMode],
@@ -514,7 +607,7 @@ export default function ReviewPage() {
                 }
                 return await api.getReviewFile(sessionId, file.filePath, mode, reviewBaseMode)
             },
-            enabled: Boolean(api && session?.active)
+            enabled: Boolean(api && session?.active && expandedFilePaths.has(file.filePath))
         }))
     })
 
@@ -574,6 +667,35 @@ export default function ReviewPage() {
             })
         }
     }, [diffFiles, mode, navigate, selectedPathFromSearch, sessionId])
+
+    useEffect(() => {
+        const knownPaths = new Set(diffFiles.map((file) => file.filePath))
+        setExpandedFilePaths((previous) => {
+            const next = new Set(Array.from(previous).filter((path) => knownPaths.has(path)))
+            if (!initializedExpandedRef.current) {
+                const initialPath = selectedPathFromSearch || diffFiles[0]?.filePath
+                if (initialPath) {
+                    next.add(initialPath)
+                }
+                initializedExpandedRef.current = true
+            }
+            return next
+        })
+    }, [diffFiles, selectedPathFromSearch])
+
+    useEffect(() => {
+        if (!selectedPathFromSearch) {
+            return
+        }
+        setExpandedFilePaths((previous) => {
+            if (previous.has(selectedPathFromSearch)) {
+                return previous
+            }
+            const next = new Set(previous)
+            next.add(selectedPathFromSearch)
+            return next
+        })
+    }, [selectedPathFromSearch])
 
     const parsedFileDiffs = useMemo<ParsedFileDiff[]>(() => diffFiles.map((file, index) => {
         const query = patchQueries[index]
@@ -739,6 +861,7 @@ export default function ReviewPage() {
 
     const subtitle = session?.metadata?.path ?? sessionId
     const reviewBaseLabel = reviewBaseModeOptions.find((option) => option.value === reviewBaseMode)?.label ?? reviewBaseMode
+    const expandedCount = expandedFilePaths.size
 
     if (!session) {
         return <div className="flex h-full items-center justify-center"><LoadingState label="Loading review…" className="text-sm" /></div>
@@ -814,6 +937,20 @@ export default function ReviewPage() {
                     >
                         Open review file
                     </button>
+                    <button
+                        type="button"
+                        onClick={() => setExpandedFilePaths(new Set(diffFiles.map((file) => file.filePath)))}
+                        className="rounded-full border border-[var(--app-border)] px-3 py-1 text-[var(--app-fg)]"
+                    >
+                        Expand all
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setExpandedFilePaths(new Set())}
+                        className="rounded-full border border-[var(--app-border)] px-3 py-1 text-[var(--app-fg)]"
+                    >
+                        Collapse all
+                    </button>
                     <span className="text-[var(--app-hint)]">
                         {summary?.currentBranch ? `HEAD: ${summary.currentBranch}` : 'No branch info'}
                     </span>
@@ -836,7 +973,10 @@ export default function ReviewPage() {
 
             <div className="min-h-0 flex flex-1 overflow-hidden">
                 <div className="w-[320px] shrink-0 border-r border-[var(--app-border)] bg-[var(--app-secondary-bg)]">
-                    <div className="border-b border-[var(--app-border)] px-3 py-2 text-sm font-medium">Changed files</div>
+                    <div className="flex items-center justify-between gap-2 border-b border-[var(--app-border)] px-3 py-2">
+                        <div className="text-sm font-medium">Changed files</div>
+                        <div className="text-[11px] text-[var(--app-hint)]">{expandedCount}/{diffFiles.length} open</div>
+                    </div>
                     <div className="h-full overflow-y-auto">
                         {summaryQuery.isLoading ? (
                             <div className="px-3 py-4 text-sm text-[var(--app-hint)]">Loading diff…</div>
@@ -859,6 +999,11 @@ export default function ReviewPage() {
                                             key={entry.key}
                                             type="button"
                                             onClick={() => {
+                                                setExpandedFilePaths((previous) => {
+                                                    const next = new Set(previous)
+                                                    next.add(entry.filePath)
+                                                    return next
+                                                })
                                                 void navigate({
                                                     to: '/sessions/$sessionId/review',
                                                     params: { sessionId },
@@ -909,6 +1054,7 @@ export default function ReviewPage() {
                                         <ReviewFileCard
                                             file={file}
                                             selected={isSelected}
+                                            expanded={expandedFilePaths.has(file.filePath)}
                                             queryState={patchQuery}
                                             highlightedThreadId={highlightedThreadId}
                                             composerAnchorKey={composerAnchorKey}
@@ -919,6 +1065,17 @@ export default function ReviewPage() {
                                             setComposerAnchorKey={setComposerAnchorKey}
                                             setComposerText={setComposerText}
                                             setCollapsedResolvedThreadIds={setCollapsedResolvedThreadIds}
+                                            onToggleExpanded={() => {
+                                                setExpandedFilePaths((previous) => {
+                                                    const next = new Set(previous)
+                                                    if (next.has(file.filePath)) {
+                                                        next.delete(file.filePath)
+                                                    } else {
+                                                        next.add(file.filePath)
+                                                    }
+                                                    return next
+                                                })
+                                            }}
                                             onCreateThread={handleCreateThread}
                                             onUpdateThread={updateThread}
                                         />

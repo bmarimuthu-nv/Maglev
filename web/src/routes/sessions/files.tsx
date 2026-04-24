@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import type { FileReadResponse, FileSearchItem } from '@/types/api'
@@ -30,6 +30,8 @@ type ExplorerHistoryEntry = {
     path?: string
     line?: number
 }
+
+type ExplorerRailView = 'files' | 'open' | 'recent'
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -129,10 +131,73 @@ function CloseIcon(props: { className?: string }) {
     )
 }
 
+function ClockIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 3" />
+        </svg>
+    )
+}
+
+function PanelIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M9 4v16" />
+        </svg>
+    )
+}
+
+function getFileName(path: string): string {
+    return path.split('/').pop() || path
+}
+
+function getCompactParentPath(path: string): string {
+    const parent = path.split('/').slice(0, -1).join('/')
+    if (!parent) {
+        return 'project root'
+    }
+    const parts = parent.split('/').filter(Boolean)
+    if (parts.length <= 2) {
+        return parent
+    }
+    return `${parts.slice(-2).join('/')}`
+}
+
 function SearchResultRow(props: {
-    file: FileSearchItem
+    file: {
+        fileName: string
+        fullPath: string
+        filePath?: string
+        fileType: 'file' | 'folder' | 'directory'
+    }
     onOpen: () => void
     showDivider: boolean
+    active?: boolean
+    metaLabel?: string | null
 }) {
     const subtitle = props.file.filePath || 'project root'
     const icon = props.file.fileType === 'file'
@@ -143,14 +208,100 @@ function SearchResultRow(props: {
         <button
             type="button"
             onClick={props.onOpen}
-            className={`flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] transition-colors ${props.showDivider ? 'border-b border-[var(--app-divider)]' : ''}`}
+            className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors ${
+                props.active
+                    ? 'bg-[color:rgba(228,115,83,0.10)] shadow-[0_14px_28px_-24px_rgba(228,115,83,0.5)]'
+                    : 'hover:bg-[var(--app-subtle-bg)]'
+            } ${props.showDivider ? 'border-b border-[var(--app-divider)]/70' : ''}`}
         >
             {icon}
             <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{props.file.fileName}</div>
+                <div className="truncate text-sm font-medium text-[var(--app-fg)]">{props.file.fileName}</div>
                 <div className="truncate text-xs text-[var(--app-hint)]">{subtitle}</div>
             </div>
+            {props.metaLabel ? (
+                <span className="shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2 py-0.5 text-[10px] font-semibold text-[var(--app-hint)]">
+                    {props.metaLabel}
+                </span>
+            ) : null}
         </button>
+    )
+}
+
+function RailSwitch(props: {
+    value: ExplorerRailView
+    onChange: (next: ExplorerRailView) => void
+}) {
+    const options: Array<{ value: ExplorerRailView; label: string; icon: ReactNode }> = [
+        { value: 'files', label: 'Files', icon: <FolderIcon className="h-4 w-4" /> },
+        { value: 'open', label: 'Open', icon: <PanelIcon className="h-4 w-4" /> },
+        { value: 'recent', label: 'Recent', icon: <ClockIcon className="h-4 w-4" /> }
+    ]
+
+    return (
+        <div className="grid grid-cols-3 gap-1 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1">
+            {options.map((option) => {
+                const active = option.value === props.value
+                return (
+                    <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => props.onChange(option.value)}
+                        className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
+                            active
+                                ? 'bg-[var(--app-button)] text-[var(--app-button-text)] shadow-[0_14px_28px_-22px_var(--app-button-shadow)]'
+                                : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                        }`}
+                    >
+                        {option.icon}
+                        <span>{option.label}</span>
+                    </button>
+                )
+            })}
+        </div>
+    )
+}
+
+function EmptyRailState(props: {
+    title: string
+    body: string
+}) {
+    return (
+        <div className="rounded-[24px] border border-dashed border-[var(--app-border)] bg-[var(--app-surface-raised)] px-4 py-8 text-center">
+            <div className="text-sm font-semibold text-[var(--app-fg)]">{props.title}</div>
+            <div className="mt-1 text-xs text-[var(--app-hint)]">{props.body}</div>
+        </div>
+    )
+}
+
+function ExplorerBreadcrumbs(props: { path: string }) {
+    const parts = props.path.split('/').filter(Boolean)
+
+    return (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--app-hint)]">
+            {parts.map((part, index) => (
+                <div key={`${part}-${index}`} className="inline-flex items-center gap-1.5">
+                    {index > 0 ? <span className="text-[var(--app-hint)]/60">/</span> : null}
+                    <span className={index === parts.length - 1 ? 'font-semibold text-[var(--app-fg)]/80' : ''}>
+                        {part}
+                    </span>
+                </div>
+            ))}
+            {parts.length === 0 ? <span>project root</span> : null}
+        </div>
+    )
+}
+
+function DocumentEmptyState() {
+    return (
+        <div className="flex h-full min-h-[320px] items-center justify-center rounded-[28px] border border-dashed border-[var(--app-border)] bg-[var(--app-surface-raised)] px-8 text-center">
+            <div>
+                <div className="text-base font-semibold text-[var(--app-fg)]">Open a file to start reading</div>
+                <div className="mt-2 text-sm text-[var(--app-hint)]">
+                    Use the left rail to browse, search, revisit recent files, or reopen one of your active tabs.
+                </div>
+            </div>
+        </div>
     )
 }
 
@@ -200,7 +351,9 @@ export default function FilesPage() {
     const search = useSearch({ from: '/sessions/$sessionId/files' })
     const { session } = useSession(api, sessionId)
     const explorerHistoryRef = useRef<ExplorerHistoryEntry[]>([])
+    const [railView, setRailView] = useState<ExplorerRailView>('files')
     const [searchQuery, setSearchQuery] = useState('')
+    const [recentPaths, setRecentPaths] = useState<string[]>([])
     const [openTabs, setOpenTabs] = useState<ExplorerTab[]>([])
     const [activeTabId, setActiveTabId] = useState<string | null>(null)
     const [isSaving, setIsSaving] = useState(false)
@@ -240,6 +393,7 @@ export default function FilesPage() {
     )
 
     const subtitle = session?.metadata?.path ?? sessionId
+    const workspaceBranch = session?.metadata?.worktree?.branch?.trim() || null
     const rootLabel = useMemo(() => {
         const base = session?.metadata?.path ?? sessionId
         const parts = base.split(/[/\\]/).filter(Boolean)
@@ -250,6 +404,18 @@ export default function FilesPage() {
         () => openTabs.find((tab) => tab.id === activeTabId) ?? null,
         [openTabs, activeTabId]
     )
+    const activePath = activeTab?.path ?? (searchPath || null)
+    const recentFileItems = useMemo(
+        () => recentPaths.map((path) => ({
+            path,
+            fileName: getFileName(path),
+            parentPath: getCompactParentPath(path)
+        })),
+        [recentPaths]
+    )
+    const rememberRecentPath = useCallback((path: string) => {
+        setRecentPaths((previous) => [path, ...previous.filter((entry) => entry !== path)].slice(0, 12))
+    }, [])
 
     const activeFileQuery = useActiveTabFile(api, scopeKey, sessionId, activeTab)
     const activeFileResult = activeFileQuery.data ?? null
@@ -266,7 +432,8 @@ export default function FilesPage() {
             return [...previous, createEmptyTab(searchPath)]
         })
         setActiveTabId(getTabId(searchPath))
-    }, [searchPath])
+        rememberRecentPath(searchPath)
+    }, [rememberRecentPath, searchPath])
 
     useEffect(() => {
         if (!activeTab || !activeFileResult?.success) {
@@ -334,8 +501,9 @@ export default function FilesPage() {
             return [...previous, createEmptyTab(path)]
         })
         setActiveTabId(getTabId(path))
+        rememberRecentPath(path)
         syncSearch(path, line ?? undefined)
-    }, [syncSearch])
+    }, [rememberRecentPath, syncSearch])
 
     const handleOpenFile = useCallback((path: string) => {
         openFileTab(path)
@@ -367,8 +535,11 @@ export default function FilesPage() {
     const handleSelectTab = useCallback((tabId: string) => {
         const next = openTabs.find((tab) => tab.id === tabId)
         setActiveTabId(tabId)
+        if (next?.path) {
+            rememberRecentPath(next.path)
+        }
         syncSearch(next?.path ?? null, highlightedLine ?? null)
-    }, [openTabs, syncSearch, highlightedLine])
+    }, [highlightedLine, openTabs, rememberRecentPath, syncSearch])
 
     const handleCloseTab = useCallback((tabId: string) => {
         setOpenTabs((previous) => {
@@ -474,24 +645,36 @@ export default function FilesPage() {
     const isDirty = Boolean(activeTab && activeTab.isEditing && activeTab.draftContent !== activeTab.loadedContent)
 
     return (
-        <div className="flex h-full flex-col">
-            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                <div className="flex w-full items-center gap-2 p-3 border-b border-[var(--app-border)]">
+        <div className="flex h-full flex-col bg-[var(--app-bg)]">
+            <div className="px-3 pb-3 pt-[env(safe-area-inset-top)] md:px-4 md:pb-4">
+                <div className="flex flex-wrap items-center gap-3 rounded-[28px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-4 py-3 shadow-[0_24px_56px_-40px_rgba(48,33,24,0.35)]">
                     <button
                         type="button"
                         onClick={handleExplorerBack}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                        className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
                     >
                         <BackIcon />
                     </button>
                     <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold">Explorer</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <div className="truncate text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--app-hint)]">
+                                File workspace
+                            </div>
+                            {workspaceBranch ? (
+                                <span className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2 py-0.5 text-[10px] font-semibold text-[var(--app-hint)]">
+                                    Branch {workspaceBranch}
+                                </span>
+                            ) : null}
+                        </div>
+                        <div className="mt-1 truncate text-base font-semibold text-[var(--app-fg)]">
+                            {rootLabel}
+                        </div>
                         <div className="truncate text-xs text-[var(--app-hint)]">{session?.metadata?.path ?? subtitle}</div>
                     </div>
                     <button
                         type="button"
                         onClick={handleRefresh}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                        className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
                         title="Refresh"
                     >
                         <RefreshIcon />
@@ -500,173 +683,248 @@ export default function FilesPage() {
             </div>
 
             {!session?.active ? (
-                <div className="border-b border-[var(--app-divider)] bg-amber-500/10 px-3 py-2 text-sm text-[var(--app-hint)]">
-                    Session is inactive. Explorer may be unavailable until the session is resumed.
+                <div className="px-3 pb-3 md:px-4">
+                    <div className="rounded-[22px] border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-sm text-[var(--app-hint)]">
+                        Session is inactive. Explorer may be unavailable until the session is resumed.
+                    </div>
                 </div>
             ) : null}
 
-            <div className="min-h-0 flex-1 overflow-x-auto">
-                <div className="flex h-full min-h-0 min-w-[980px] flex-row">
-                    <div className="flex w-[360px] shrink-0 flex-col border-r border-[var(--app-divider)] bg-[var(--app-bg)]">
-                    <div className="p-3 border-b border-[var(--app-border)]">
-                        <div className="flex items-center gap-2 rounded-md bg-[var(--app-subtle-bg)] px-3 py-2">
-                            <SearchIcon className="text-[var(--app-hint)]" />
-                            <input
-                                value={searchQuery}
-                                onChange={(event) => setSearchQuery(event.target.value)}
-                                placeholder="Go to file"
-                                className="w-full bg-transparent text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none"
-                                autoCapitalize="none"
-                                autoCorrect="off"
-                            />
+            <div className="min-h-0 flex-1 overflow-hidden px-3 pb-3 md:px-4 md:pb-4">
+                <div className="flex h-full min-h-0 flex-col gap-3 lg:flex-row">
+                    <aside className="flex min-h-0 w-full shrink-0 flex-col gap-3 lg:w-[320px] xl:w-[360px]">
+                        <div className="rounded-[28px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-4 shadow-[0_20px_48px_-38px_rgba(48,33,24,0.35)]">
+                            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--app-hint)]">
+                                Navigation
+                            </div>
+                            <div className="mt-2 flex items-center gap-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2.5">
+                                <SearchIcon className="text-[var(--app-hint)]" />
+                                <input
+                                    value={searchQuery}
+                                    onChange={(event) => setSearchQuery(event.target.value)}
+                                    placeholder="Go to file"
+                                    className="w-full bg-transparent text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none"
+                                    autoCapitalize="none"
+                                    autoCorrect="off"
+                                />
+                            </div>
+                            <div className="mt-3">
+                                <RailSwitch value={railView} onChange={setRailView} />
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="min-h-0 flex-1 overflow-y-auto">
-                        {searchQuery ? (
-                            searchInventory.isLoading ? (
-                                <div className="p-6 text-sm text-[var(--app-hint)]">Loading files…</div>
-                            ) : searchInventory.error ? (
-                                <div className="p-6 text-sm text-[var(--app-hint)]">{searchInventory.error}</div>
-                            ) : rankedSearchResults.length === 0 ? (
-                                <div className="p-6 text-sm text-[var(--app-hint)]">No files match your search.</div>
-                            ) : (
-                                <div className="border-t border-[var(--app-divider)]">
-                                    {rankedSearchResults.map((file, index) => (
+                        <div className="min-h-0 flex-1 overflow-y-auto rounded-[30px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-3 shadow-[0_24px_56px_-42px_rgba(48,33,24,0.35)]">
+                            {searchQuery ? (
+                                searchInventory.isLoading ? (
+                                    <EmptyRailState title="Searching files" body="Scanning the session workspace for matching files and folders." />
+                                ) : searchInventory.error ? (
+                                    <EmptyRailState title="Search unavailable" body={searchInventory.error} />
+                                ) : rankedSearchResults.length === 0 ? (
+                                    <EmptyRailState title="No matches found" body="Try a shorter file name, a different path fragment, or switch back to the tree." />
+                                ) : (
+                                    <div className="space-y-1">
+                                        {rankedSearchResults.map((file, index) => (
+                                            <SearchResultRow
+                                                key={`${file.fullPath}-${index}`}
+                                                file={file}
+                                                active={file.fullPath === activePath}
+                                                onOpen={() => openFileTab(file.fullPath)}
+                                                showDivider={index < rankedSearchResults.length - 1}
+                                            />
+                                        ))}
+                                    </div>
+                                )
+                            ) : railView === 'files' ? (
+                                <DirectoryTree
+                                    api={api}
+                                    sessionId={sessionId}
+                                    rootLabel={rootLabel}
+                                    activePath={activePath}
+                                    onOpenFile={(path) => handleOpenFile(path)}
+                                />
+                            ) : railView === 'open' ? (
+                                openTabs.length ? (
+                                    <div className="space-y-1">
+                                        {openTabs.map((tab, index) => (
+                                            <SearchResultRow
+                                                key={tab.id}
+                                                file={{
+                                                    fileName: tab.fileName,
+                                                    fullPath: tab.path,
+                                                    filePath: getCompactParentPath(tab.path),
+                                                    fileType: 'file'
+                                                }}
+                                                active={tab.id === activeTabId}
+                                                metaLabel={tab.isEditing ? 'Editing' : null}
+                                                onOpen={() => handleSelectTab(tab.id)}
+                                                showDivider={index < openTabs.length - 1}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <EmptyRailState title="No open files yet" body="Files you open stay here for quick switching while you work." />
+                                )
+                            ) : recentFileItems.length ? (
+                                <div className="space-y-1">
+                                    {recentFileItems.map((file, index) => (
                                         <SearchResultRow
-                                            key={`${file.fullPath}-${index}`}
-                                            file={file}
-                                            onOpen={() => openFileTab(file.fullPath)}
-                                            showDivider={index < rankedSearchResults.length - 1}
+                                            key={file.path}
+                                            file={{
+                                                fileName: file.fileName,
+                                                fullPath: file.path,
+                                                filePath: file.parentPath,
+                                                fileType: 'file'
+                                            }}
+                                            active={file.path === activePath}
+                                            onOpen={() => openFileTab(file.path)}
+                                            showDivider={index < recentFileItems.length - 1}
                                         />
                                     ))}
                                 </div>
-                            )
-                        ) : (
-                            <DirectoryTree
-                                api={api}
-                                sessionId={sessionId}
-                                rootLabel={rootLabel}
-                                onOpenFile={(path) => handleOpenFile(path)}
-                            />
-                        )}
-                    </div>
-                    </div>
-
-                    <div className="min-h-0 min-w-0 flex-1 bg-[var(--app-bg)]">
-                        <div className="flex h-full min-h-0 flex-col">
-                        <div className="border-b border-[var(--app-divider)] bg-[var(--app-bg)]">
-                            <div className="flex min-h-[44px] items-end gap-1 overflow-x-auto px-2 pt-2">
-                                {openTabs.map((tab) => (
-                                    <div
-                                        key={tab.id}
-                                        className={`flex max-w-[240px] items-center gap-2 rounded-t-md border border-b-0 px-3 py-2 text-sm ${tab.id === activeTabId ? 'border-[var(--app-divider)] bg-[var(--app-secondary-bg)]' : 'border-transparent bg-[var(--app-subtle-bg)]'}`}
-                                    >
-                                        <button
-                                            type="button"
-                                            onClick={() => handleSelectTab(tab.id)}
-                                            className="min-w-0 truncate text-left"
-                                        >
-                                            {tab.fileName}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleCloseTab(tab.id)}
-                                            className="shrink-0 rounded p-0.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                                        >
-                                            <CloseIcon />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
+                            ) : (
+                                <EmptyRailState title="No recent files yet" body="Recent files will appear here once you start navigating the workspace." />
+                            )}
                         </div>
+                    </aside>
 
-                        {activeTab ? (
-                            <>
-                                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] px-3 py-2">
-                                    <FileIcon fileName={activeTab.fileName} size={20} />
-                                    <div className="min-w-0 flex-1">
-                                        <div className="truncate text-sm font-medium">{activeTab.fileName}</div>
-                                        <div className="truncate text-xs text-[var(--app-hint)]">{activeTab.path}</div>
-                                    </div>
-                                    {activeTab.isEditing ? (
-                                        <>
-                                            <button
-                                                type="button"
-                                                onClick={handleDiscard}
-                                                disabled={isSaving}
-                                                className="rounded px-3 py-1 text-xs font-semibold bg-[var(--app-subtle-bg)] text-[var(--app-hint)] disabled:opacity-50"
-                                            >
-                                                Discard
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => { void handleSave() }}
-                                                disabled={!isDirty || isSaving}
-                                                className="rounded px-3 py-1 text-xs font-semibold bg-[var(--app-button)] text-[var(--app-button-text)] disabled:opacity-50"
-                                            >
-                                                {isSaving ? 'Saving…' : 'Save'}
-                                            </button>
-                                        </>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            onClick={handleStartEdit}
-                                            disabled={activeTab.binary || Boolean(activeTab.loadError)}
-                                            className="rounded px-3 py-1 text-xs font-semibold bg-[var(--app-subtle-bg)] text-[var(--app-fg)] disabled:opacity-50"
-                                        >
-                                            Edit
-                                        </button>
-                                    )}
-                                </div>
-
-                                <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                                    {activeFileQuery.isLoading ? (
-                                        <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-4 text-sm text-[var(--app-hint)]">
-                                            Loading file…
-                                        </div>
-                                    ) : activeTab.loadError ? (
-                                        <div className="rounded-md bg-red-500/10 p-3 text-sm text-red-600">
-                                            {activeTab.loadError}
-                                        </div>
-                                    ) : activeTab.binary ? (
-                                        <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-4 text-sm text-[var(--app-hint)]">
-                                            This looks like a binary file. It cannot be displayed.
-                                        </div>
-                                    ) : activeTab.isEditing ? (
-                                        <div className="space-y-2">
-                                            <textarea
-                                                value={activeTab.draftContent}
-                                                onChange={(event) => handleDraftChange(event.target.value)}
-                                                spellCheck={false}
-                                                className="min-h-[60vh] w-full rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 font-mono text-xs text-[var(--app-fg)] outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                                            />
-                                            <div className="flex items-center justify-between text-xs text-[var(--app-hint)]">
-                                                <span>{isDirty ? 'Unsaved changes' : 'No changes'}</span>
-                                                <span>{activeTab.draftContent.split('\n').length} lines</span>
+                    <section className="min-h-0 min-w-0 flex-1">
+                        <div className="flex h-full min-h-0 flex-col rounded-[32px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] shadow-[0_28px_64px_-46px_rgba(48,33,24,0.38)]">
+                            {activeTab ? (
+                                <>
+                                    <div className="border-b border-[var(--app-border)] px-4 py-4">
+                                        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                            <div className="min-w-0 flex-1">
+                                                <ExplorerBreadcrumbs path={activeTab.path} />
+                                                <div className="mt-3 flex items-start gap-3">
+                                                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--app-surface-raised)]">
+                                                        <FileIcon fileName={activeTab.fileName} size={22} />
+                                                    </span>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <div className="truncate text-lg font-semibold text-[var(--app-fg)]">
+                                                                {activeTab.fileName}
+                                                            </div>
+                                                            {activeTab.isEditing ? (
+                                                                <span className="rounded-full border border-[var(--app-border)] bg-[color:rgba(228,115,83,0.10)] px-2 py-0.5 text-[10px] font-semibold text-[var(--app-link)]">
+                                                                    Editing
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                        <div className="mt-1 truncate text-sm text-[var(--app-hint)]">{activeTab.path}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                {activeTab.isEditing ? (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleDiscard}
+                                                            disabled={isSaving}
+                                                            className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3.5 py-2 text-xs font-semibold text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
+                                                        >
+                                                            Discard
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { void handleSave() }}
+                                                            disabled={!isDirty || isSaving}
+                                                            className="rounded-full border border-[var(--app-border)] bg-[var(--app-button)] px-3.5 py-2 text-xs font-semibold text-[var(--app-button-text)] shadow-[0_16px_30px_-20px_var(--app-button-shadow)] transition-[transform,background-color] hover:-translate-y-px hover:bg-[var(--app-button-hover)] disabled:opacity-50"
+                                                        >
+                                                            {isSaving ? 'Saving…' : 'Save'}
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleStartEdit}
+                                                        disabled={activeTab.binary || Boolean(activeTab.loadError)}
+                                                        className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3.5 py-2 text-xs font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
+                                                    >
+                                                        Edit file
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
-                                    ) : activeContent ? (
-                                        <CodeLinesView
-                                            content={activeContent}
-                                            filePath={activeTab.path}
-                                            highlightedLine={highlightedLine}
-                                            buildLink={activeDeepLink}
-                                        />
-                                    ) : (
-                                        <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-4 text-sm text-[var(--app-hint)]">
-                                            File is empty.
-                                        </div>
-                                    )}
+
+                                        {openTabs.length ? (
+                                            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                                                {openTabs.map((tab) => (
+                                                    <div
+                                                        key={tab.id}
+                                                        className={`inline-flex max-w-[240px] items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                                                            tab.id === activeTabId
+                                                                ? 'border-[var(--app-link)] bg-[color:rgba(228,115,83,0.10)] text-[var(--app-fg)]'
+                                                                : 'border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                                                        }`}
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleSelectTab(tab.id)}
+                                                            className="min-w-0 truncate text-left"
+                                                        >
+                                                            {tab.fileName}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleCloseTab(tab.id)}
+                                                            className="shrink-0 rounded-full p-1 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                                                        >
+                                                            <CloseIcon />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </div>
+
+                                    <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                                        {activeFileQuery.isLoading ? (
+                                            <div className="rounded-[28px] border border-[var(--app-border)] bg-[var(--app-code-bg)] px-5 py-6 text-sm text-[var(--app-hint)]">
+                                                Loading file content…
+                                            </div>
+                                        ) : activeTab.loadError ? (
+                                            <div className="rounded-[28px] border border-red-300/30 bg-red-500/10 px-5 py-4 text-sm text-red-600">
+                                                {activeTab.loadError}
+                                            </div>
+                                        ) : activeTab.binary ? (
+                                            <div className="rounded-[28px] border border-[var(--app-border)] bg-[var(--app-code-bg)] px-5 py-6 text-sm text-[var(--app-hint)]">
+                                                This looks like a binary file, so Maglev keeps the document surface read-only here.
+                                            </div>
+                                        ) : activeTab.isEditing ? (
+                                            <div className="space-y-3">
+                                                <textarea
+                                                    value={activeTab.draftContent}
+                                                    onChange={(event) => handleDraftChange(event.target.value)}
+                                                    spellCheck={false}
+                                                    className="min-h-[60vh] w-full rounded-[28px] border border-[var(--app-border)] bg-[var(--app-code-bg)] p-4 font-mono text-xs text-[var(--app-fg)] outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                                />
+                                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--app-hint)]">
+                                                    <span>{isDirty ? 'Unsaved changes' : 'No changes yet'}</span>
+                                                    <span>{activeTab.draftContent.split('\n').length} lines</span>
+                                                </div>
+                                            </div>
+                                        ) : activeContent ? (
+                                            <CodeLinesView
+                                                content={activeContent}
+                                                filePath={activeTab.path}
+                                                highlightedLine={highlightedLine}
+                                                buildLink={activeDeepLink}
+                                            />
+                                        ) : (
+                                            <div className="rounded-[28px] border border-[var(--app-border)] bg-[var(--app-code-bg)] px-5 py-6 text-sm text-[var(--app-hint)]">
+                                                File is empty.
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="p-4">
+                                    <DocumentEmptyState />
                                 </div>
-                            </>
-                        ) : (
-                            <div className="flex flex-1 items-center justify-center p-6 text-sm text-[var(--app-hint)]">
-                                Select a file from the explorer to open it here.
-                            </div>
-                        )}
+                            )}
                         </div>
-                    </div>
+                    </section>
                 </div>
             </div>
         </div>
