@@ -4,10 +4,12 @@ import { doctorCommand } from './doctor'
 import { hubCommand } from './hub'
 import { serverCommand } from './server'
 import { shellCommand } from './shell'
+import { supervisorCommand } from './supervisor'
 import type { CommandContext, CommandDefinition } from './types'
 
 const COMMANDS: CommandDefinition[] = [
     shellCommand,
+    supervisorCommand,
     hubCommand,
     serverCommand,
     authCommand,

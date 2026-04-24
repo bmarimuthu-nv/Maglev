@@ -42,6 +42,11 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { TerminalStateCache } from './terminalStateCache'
+import {
+    clearTerminalSupervisionBridge,
+    resolveTerminalSupervisionBridgeLocation,
+    writeTerminalSupervisionBridge
+} from '../supervision/bridge'
 
 export type { Session, SyncEvent } from '@maglev/protocol/types'
 export type { Machine } from './machineCache'
@@ -799,6 +804,8 @@ export class SyncEngine {
                 events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
             }
         }))
+
+        await this.syncTerminalSupervisionBridge(supervisor.id, namespace)
     }
 
     async setTerminalSupervisionPaused(sessionId: string, paused: boolean, namespace: string): Promise<void> {
@@ -828,6 +835,8 @@ export class SyncEngine {
                 event
             )
         )
+
+        await this.syncTerminalSupervisionBridge(session.id, namespace)
     }
 
     async detachTerminalSupervision(sessionId: string, namespace: string): Promise<void> {
@@ -836,6 +845,14 @@ export class SyncEngine {
         if (!pairing) {
             return
         }
+
+        const supervisor = pairing.role === 'supervisor'
+            ? session
+            : this.getSessionByNamespace(pairing.peerSessionId, namespace) ?? null
+        const supervisorWorkspacePath = supervisor?.metadata?.path?.trim() || null
+        const supervisorBridgeLocation = supervisor && supervisorWorkspacePath
+            ? await resolveTerminalSupervisionBridgeLocation(supervisorWorkspacePath, supervisor.id)
+            : null
 
         const peer = this.getSessionByNamespace(pairing.peerSessionId, namespace)
         await this.sessionCache.updateSessionMetadataFields(session.id, (metadata) => {
@@ -850,6 +867,9 @@ export class SyncEngine {
         }
         this.recentHumanTerminalActivityBySessionId.delete(session.id)
         this.recentHumanTerminalActivityBySessionId.delete(pairing.peerSessionId)
+        if (supervisorBridgeLocation) {
+            await clearTerminalSupervisionBridge(supervisorBridgeLocation)
+        }
     }
 
     noteHumanTerminalInput(sessionId: string): void {
@@ -935,6 +955,38 @@ export class SyncEngine {
 
     getTerminalSnapshot(sessionId: string, terminalId: string) {
         return this.terminalStateCache.getSnapshot(sessionId, terminalId)
+    }
+
+    async syncTerminalSupervisionBridge(sessionId: string, namespace: string): Promise<void> {
+        const session = this.getSessionByNamespace(sessionId, namespace)
+        const pairing = session?.metadata?.terminalSupervision
+        if (!session || !pairing) {
+            return
+        }
+
+        const peer = this.getSessionByNamespace(pairing.peerSessionId, namespace)
+        if (!peer?.metadata?.terminalSupervision) {
+            return
+        }
+
+        const supervisor = pairing.role === 'supervisor' ? session : peer
+        const worker = pairing.role === 'worker' ? session : peer
+        const supervisorWorkspacePath = supervisor.metadata?.path?.trim()
+        if (!supervisorWorkspacePath) {
+            return
+        }
+
+        const location = await resolveTerminalSupervisionBridgeLocation(supervisorWorkspacePath, supervisor.id)
+        const workerTerminalId = worker.metadata?.shellTerminalId ?? null
+        const snapshot = workerTerminalId ? this.terminalStateCache.getSnapshot(worker.id, workerTerminalId) : null
+
+        await writeTerminalSupervisionBridge(location, {
+            supervisorSessionId: supervisor.id,
+            workerSessionId: worker.id,
+            supervisionState: supervisor.metadata?.terminalSupervision?.state ?? 'active',
+            workerTerminalId,
+            snapshot
+        })
     }
 
     private getRequiredSession(sessionId: string, namespace: string): Session {

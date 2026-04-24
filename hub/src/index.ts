@@ -220,7 +220,10 @@ async function main() {
         onSessionAlive: (payload) => syncEngine?.handleSessionAlive(payload),
         onSessionEnd: (payload) => syncEngine?.handleSessionEnd(payload),
         onMachineAlive: (payload) => syncEngine?.handleMachineAlive(payload),
-        onSessionTerminalInput: (payload) => syncEngine?.noteHumanTerminalInput(payload.sessionId)
+        onSessionTerminalInput: (payload) => syncEngine?.noteHumanTerminalInput(payload.sessionId),
+        onTerminalSnapshotUpdated: (payload) => {
+            void syncEngine?.syncTerminalSupervisionBridge(payload.sessionId, payload.namespace)
+        }
     })
 
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager, {

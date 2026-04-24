@@ -7,6 +7,7 @@ import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 import { configuration } from '../../configuration'
+import { resolveTerminalSupervisionBridgeLocation } from '../../supervision/bridge'
 
 const updateSessionSchema = z.object({
     name: z.string().trim().min(1).max(255).optional(),
@@ -139,7 +140,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ type: 'success', sessionId: result.sessionId })
     })
 
-    app.get('/sessions/:id/terminal-supervision/target', (c) => {
+    app.get('/sessions/:id/terminal-supervision/target', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {
             return engine
@@ -152,9 +153,14 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         try {
             const target = engine.getTerminalSupervisionTarget(sessionResult.sessionId, c.get('namespace'))
+            const supervisorPath = target.supervisor.metadata?.path?.trim()
+            const bridge = supervisorPath
+                ? await resolveTerminalSupervisionBridgeLocation(supervisorPath, target.supervisor.id)
+                : null
             return c.json({
                 worker: toSessionSummary(target.worker),
                 supervisor: toSessionSummary(target.supervisor),
+                bridge,
                 snapshot: target.snapshot,
                 events: target.events
             })

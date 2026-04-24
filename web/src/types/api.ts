@@ -94,6 +94,15 @@ export type SessionResponse = { session: Session }
 export type TerminalSupervisionTargetResponse = {
     worker: SessionSummary
     supervisor: SessionSummary
+    bridge?: {
+        workspaceRoot: string
+        bridgeDir: string
+        transcriptFilePath: string
+        helperScriptPath: string
+        stateFilePath: string
+        readmePath: string
+        storageScope: 'git-excluded' | 'workspace'
+    } | null
     snapshot: {
         outputBuffer: string
         status: 'ready' | 'exited'

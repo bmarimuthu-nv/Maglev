@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import { toSessionSummary } from '@maglev/protocol'
 import type { SyncEvent } from '@maglev/protocol/types'
+import { mkdtemp, readFile, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import type { EventPublisher } from './eventPublisher'
@@ -174,6 +177,71 @@ describe('session model', () => {
             })
         } finally {
             engine.stop()
+        }
+    })
+
+    it('mirrors worker terminal state into the supervisor bridge workspace and clears it on detach', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'maglev-supervision-session-'))
+        const workerPath = join(root, 'worker')
+        const supervisorPath = join(root, 'supervisor')
+        const store = new Store(':memory:')
+        const io = new FakeIo()
+        const engine = new SyncEngine(
+            store,
+            io as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            { terminalSupervisionHumanOverrideMs: 5_000 }
+        )
+
+        try {
+            const worker = engine.getOrCreateSession(
+                'worker-session-bridge',
+                {
+                    path: workerPath,
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:worker',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session-bridge',
+                {
+                    path: supervisorPath,
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:supervisor',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+
+            await engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')
+            ;(engine as any).terminalStateCache.noteOutput(worker.id, 'terminal:worker', 'worker ready\n')
+            await engine.syncTerminalSupervisionBridge(worker.id, 'default')
+
+            const bridgeDir = join(supervisorPath, '.maglev-supervision', supervisor.id)
+            expect(await readFile(join(bridgeDir, 'worker-terminal.log'), 'utf8')).toBe('worker ready\n')
+
+            const state = JSON.parse(await readFile(join(bridgeDir, 'worker-terminal.json'), 'utf8')) as Record<string, unknown>
+            expect(state.supervisorSessionId).toBe(supervisor.id)
+            expect(state.workerSessionId).toBe(worker.id)
+            expect(state.supervisionState).toBe('active')
+            expect(await readFile(join(bridgeDir, 'send-to-worker.sh'), 'utf8')).toContain(`--session "${supervisor.id}"`)
+
+            await engine.setTerminalSupervisionPaused(supervisor.id, true, 'default')
+            const pausedState = JSON.parse(await readFile(join(bridgeDir, 'worker-terminal.json'), 'utf8')) as Record<string, unknown>
+            expect(pausedState.supervisionState).toBe('paused')
+
+            await engine.detachTerminalSupervision(supervisor.id, 'default')
+            expect(await readFile(join(bridgeDir, 'worker-terminal.log'), 'utf8').catch(() => null)).toBeNull()
+        } finally {
+            engine.stop()
+            await rm(root, { recursive: true, force: true })
         }
     })
 

@@ -6,11 +6,13 @@ import TerminalPage from './terminal'
 
 const writeMock = vi.fn()
 const closeSessionMock = vi.fn()
+const getTerminalSupervisionTargetMock = vi.fn()
 const AUTO_SCROLL_KEY = 'maglev-auto-scroll'
 const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
 const PENDING_TERMINAL_FOCUS_KEY = 'maglev:pending-terminal-focus-session-id'
 const useSessionFileSearchMock = vi.fn()
 let mockSessions: Array<{ id: string; active: boolean; metadata?: Record<string, unknown> }> = []
+let mockSessionMetadata: Record<string, unknown> = { path: '/tmp/project' }
 let allowMockTerminalTextareaFocus = true
 let mockTerminalTextarea: HTMLTextAreaElement | null = null
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame
@@ -24,7 +26,8 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
         api: {
-            closeSession: closeSessionMock
+            closeSession: closeSessionMock,
+            getTerminalSupervisionTarget: getTerminalSupervisionTargetMock
         },
         token: 'test-token',
         baseUrl: 'http://localhost:3000'
@@ -40,7 +43,7 @@ vi.mock('@/hooks/queries/useSession', () => ({
         session: {
             id: sessionId,
             active: true,
-            metadata: { path: '/tmp/project' }
+            metadata: mockSessionMetadata
         }
     })
 }))
@@ -134,28 +137,52 @@ function setDefaultFileSearchMock() {
     }))
 }
 
+function setDefaultSupervisionTargetMock() {
+    getTerminalSupervisionTargetMock.mockResolvedValue({
+        worker: {
+            id: 'worker-1',
+            active: true,
+            metadata: { path: '/tmp/worker' }
+        },
+        supervisor: {
+            id: 'session-1',
+            active: true,
+            metadata: { path: '/tmp/project' }
+        },
+        bridge: null,
+        snapshot: null,
+        events: []
+    })
+}
+
+function setMatchMediaMock() {
+    Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: vi.fn().mockReturnValue({
+            matches: false,
+            media: '',
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn()
+        })
+    })
+}
+
 describe('TerminalPage paste behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mockSessions = []
+        mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = true
         mockTerminalTextarea = null
         closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
-        Object.defineProperty(window, 'matchMedia', {
-            configurable: true,
-            writable: true,
-            value: vi.fn().mockReturnValue({
-                matches: false,
-                media: '',
-                onchange: null,
-                addListener: vi.fn(),
-                removeListener: vi.fn(),
-                addEventListener: vi.fn(),
-                removeEventListener: vi.fn(),
-                dispatchEvent: vi.fn()
-            })
-        })
+        setDefaultSupervisionTargetMock()
+        setMatchMediaMock()
     })
 
     it('does not open manual paste dialog when clipboard text is empty', async () => {
@@ -198,25 +225,14 @@ describe('TerminalPage auto-scroll wheel detection', () => {
         cleanup()
         vi.clearAllMocks()
         mockSessions = []
+        mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = true
         mockTerminalTextarea = null
         closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
         localStorage.removeItem(AUTO_SCROLL_KEY)
-        Object.defineProperty(window, 'matchMedia', {
-            configurable: true,
-            writable: true,
-            value: vi.fn().mockReturnValue({
-                matches: false,
-                media: '',
-                onchange: null,
-                addListener: vi.fn(),
-                removeListener: vi.fn(),
-                addEventListener: vi.fn(),
-                removeEventListener: vi.fn(),
-                dispatchEvent: vi.fn()
-            })
-        })
+        setDefaultSupervisionTargetMock()
+        setMatchMediaMock()
     })
 
     afterEach(() => {
@@ -293,23 +309,12 @@ describe('TerminalPage open file dialog', () => {
         cleanup()
         vi.clearAllMocks()
         mockSessions = []
+        mockSessionMetadata = { path: '/tmp/project' }
         closeSessionMock.mockResolvedValue(undefined)
         localStorage.removeItem(RECENT_OPEN_FILES_KEY)
         setDefaultFileSearchMock()
-        Object.defineProperty(window, 'matchMedia', {
-            configurable: true,
-            writable: true,
-            value: vi.fn().mockReturnValue({
-                matches: false,
-                media: '',
-                onchange: null,
-                addListener: vi.fn(),
-                removeListener: vi.fn(),
-                addEventListener: vi.fn(),
-                removeEventListener: vi.fn(),
-                dispatchEvent: vi.fn()
-            })
-        })
+        setDefaultSupervisionTargetMock()
+        setMatchMediaMock()
     })
 
     afterEach(() => {
@@ -415,24 +420,13 @@ describe('TerminalPage split close behavior', () => {
                 metadata: { parentSessionId: 'session-1' }
             }
         ]
+        mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = true
         mockTerminalTextarea = null
         closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
-        Object.defineProperty(window, 'matchMedia', {
-            configurable: true,
-            writable: true,
-            value: vi.fn().mockReturnValue({
-                matches: false,
-                media: '',
-                onchange: null,
-                addListener: vi.fn(),
-                removeListener: vi.fn(),
-                addEventListener: vi.fn(),
-                removeEventListener: vi.fn(),
-                dispatchEvent: vi.fn()
-            })
-        })
+        setDefaultSupervisionTargetMock()
+        setMatchMediaMock()
     })
 
     afterEach(() => {
@@ -460,10 +454,12 @@ describe('TerminalPage new session focus handoff', () => {
         vi.clearAllMocks()
         vi.useFakeTimers()
         mockSessions = []
+        mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = false
         mockTerminalTextarea = null
         closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
+        setDefaultSupervisionTargetMock()
         sessionStorage.setItem(PENDING_TERMINAL_FOCUS_KEY, 'session-1')
         globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => window.setTimeout(() => {
             callback(performance.now())
@@ -471,20 +467,7 @@ describe('TerminalPage new session focus handoff', () => {
         globalThis.cancelAnimationFrame = ((handle: number) => {
             window.clearTimeout(handle)
         }) as typeof cancelAnimationFrame
-        Object.defineProperty(window, 'matchMedia', {
-            configurable: true,
-            writable: true,
-            value: vi.fn().mockReturnValue({
-                matches: false,
-                media: '',
-                onchange: null,
-                addListener: vi.fn(),
-                removeListener: vi.fn(),
-                addEventListener: vi.fn(),
-                removeEventListener: vi.fn(),
-                dispatchEvent: vi.fn()
-            })
-        })
+        setMatchMediaMock()
     })
 
     afterEach(() => {
@@ -508,5 +491,82 @@ describe('TerminalPage new session focus handoff', () => {
         expect(mockTerminalTextarea).not.toBeNull()
         expect(sessionStorage.getItem(PENDING_TERMINAL_FOCUS_KEY)).toBeNull()
         expect(document.activeElement).toBe(mockTerminalTextarea)
+    })
+})
+
+describe('TerminalPage supervisor bridge help', () => {
+    beforeEach(() => {
+        cleanup()
+        vi.clearAllMocks()
+        mockSessions = []
+        mockSessionMetadata = {
+            path: '/tmp/project',
+            terminalSupervision: {
+                role: 'supervisor',
+                peerSessionId: 'worker-1',
+                state: 'active'
+            }
+        }
+        closeSessionMock.mockResolvedValue(undefined)
+        setDefaultFileSearchMock()
+        globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => window.setTimeout(() => {
+            callback(performance.now())
+        }, 16)) as typeof requestAnimationFrame
+        globalThis.cancelAnimationFrame = ((handle: number) => {
+            window.clearTimeout(handle)
+        }) as typeof cancelAnimationFrame
+        getTerminalSupervisionTargetMock.mockResolvedValue({
+            worker: {
+                id: 'worker-1',
+                active: true,
+                metadata: { path: '/tmp/worker' }
+            },
+            supervisor: {
+                id: 'session-1',
+                active: true,
+                metadata: { path: '/tmp/project' }
+            },
+            bridge: {
+                workspaceRoot: '/tmp/project',
+                bridgeDir: '/tmp/project/.maglev-supervision/session-1',
+                transcriptFilePath: '/tmp/project/.maglev-supervision/session-1/worker-terminal.log',
+                helperScriptPath: '/tmp/project/.maglev-supervision/session-1/send-to-worker.sh',
+                stateFilePath: '/tmp/project/.maglev-supervision/session-1/worker-terminal.json',
+                readmePath: '/tmp/project/.maglev-supervision/session-1/README.txt',
+                storageScope: 'workspace'
+            },
+            snapshot: {
+                outputBuffer: 'worker ready\n',
+                status: 'ready',
+                updatedAt: Date.now(),
+                exitInfo: null
+            },
+            events: []
+        })
+        setMatchMediaMock()
+    })
+
+    afterEach(() => {
+        cleanup()
+        globalThis.requestAnimationFrame = originalRequestAnimationFrame
+        globalThis.cancelAnimationFrame = originalCancelAnimationFrame
+    })
+
+    it('shows the compact supervisor command and opens bridge help in a dialog', async () => {
+        renderWithProviders()
+
+        expect(await screen.findByText(/Session session-1: maglev supervisor send --session session-1 -- <command \.\.\.>/i)).toBeInTheDocument()
+        expect(screen.queryByText('Supervisor bridge')).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Supervisor bridge help' }))
+
+        expect(await screen.findByText('Supervisor bridge help')).toBeInTheDocument()
+        expect(screen.getByText('Session session-1')).toBeInTheDocument()
+        expect(screen.getByText(/maglev supervisor send --session session-1 -- git status/i)).toBeInTheDocument()
+        expect(screen.getByText(/run the tests and summarize the failure/i)).toBeInTheDocument()
+        expect(await screen.findByText('/tmp/project/.maglev-supervision/session-1/worker-terminal.log')).toBeInTheDocument()
+        expect(screen.getByText('/tmp/project/.maglev-supervision/session-1/worker-terminal.json')).toBeInTheDocument()
+        expect(screen.getByText('/tmp/project/.maglev-supervision/session-1/send-to-worker.sh')).toBeInTheDocument()
+        expect(screen.getByText(/not by editing a bridge file directly/i)).toBeInTheDocument()
     })
 })

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
-import type { FileSearchItem } from '@/types/api'
+import type { FileSearchItem, TerminalSupervisionTargetResponse } from '@/types/api'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useSession } from '@/hooks/queries/useSession'
@@ -167,6 +167,26 @@ function ConnectionIndicator(props: { status: 'idle' | 'connecting' | 'connected
         <div className="flex items-center" aria-label={label} title={label} role="status">
             <span className={`h-2.5 w-2.5 rounded-full ${colorClass}`} />
         </div>
+    )
+}
+
+function InfoIcon() {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
+        </svg>
     )
 }
 
@@ -358,6 +378,7 @@ export default function TerminalPage() {
     const [tmuxCopyModeActive, setTmuxCopyModeActive] = useState(false)
     const [keyboardVisible, setKeyboardVisible] = useState(false)
     const [pasteDialogOpen, setPasteDialogOpen] = useState(false)
+    const [supervisorBridgeHelpOpen, setSupervisorBridgeHelpOpen] = useState(false)
     const [manualPasteText, setManualPasteText] = useState('')
     const [textDialogOpen, setTextDialogOpen] = useState(false)
     const [terminalTextSnapshot, setTerminalTextSnapshot] = useState('')
@@ -425,8 +446,12 @@ export default function TerminalPage() {
     const openFileShortcut = useMemo(() => getOpenFileShortcut(), [])
     const [isRespawningPinnedShell, setIsRespawningPinnedShell] = useState(false)
     const [pinnedShellRespawnError, setPinnedShellRespawnError] = useState<string | null>(null)
+    const [supervisionTarget, setSupervisionTarget] = useState<TerminalSupervisionTargetResponse | null>(null)
+    const [supervisionTargetLoading, setSupervisionTargetLoading] = useState(false)
+    const [supervisionTargetError, setSupervisionTargetError] = useState<string | null>(null)
     const respawnAttemptedRef = useRef(false)
     const pendingNewSessionFocusRef = useRef(false)
+    const isSupervisorSession = session?.metadata?.terminalSupervision?.role === 'supervisor'
 
     const getTerminalTextarea = useCallback((): HTMLTextAreaElement | null => {
         const terminal = terminalRef.current
@@ -731,6 +756,41 @@ export default function TerminalPage() {
         setIsRespawningPinnedShell(false)
         setPinnedShellRespawnError(null)
     }, [sessionId])
+
+    useEffect(() => {
+        if (!api || !sessionId || !isSupervisorSession) {
+            setSupervisionTarget(null)
+            setSupervisionTargetLoading(false)
+            setSupervisionTargetError(null)
+            return
+        }
+
+        let cancelled = false
+        setSupervisionTargetLoading(true)
+        setSupervisionTargetError(null)
+
+        void api.getTerminalSupervisionTarget(sessionId)
+            .then((target) => {
+                if (!cancelled) {
+                    setSupervisionTarget(target)
+                }
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    setSupervisionTarget(null)
+                    setSupervisionTargetError(error instanceof Error ? error.message : 'Failed to load supervisor bridge')
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setSupervisionTargetLoading(false)
+                }
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [api, isSupervisorSession, sessionId])
 
     const quickInputDisabled = !session?.active || terminalState.status !== 'connected'
     const writePlainInput = useCallback((text: string) => {
@@ -1340,6 +1400,10 @@ export default function TerminalPage() {
 
     const subtitle = session.metadata?.path ?? sessionId
     const status = terminalState.status
+    const bridge = supervisionTarget?.bridge ?? null
+    const directCommand = `maglev supervisor send --session ${sessionId} -- <command ...>`
+    const helperCommand = bridge ? `${bridge.helperScriptPath} <command ...>` : null
+    const sessionLabel = `Session ${sessionId}`
 
     return (
         <div className="relative flex h-full flex-col">
@@ -1361,6 +1425,24 @@ export default function TerminalPage() {
                             <ConnectionIndicator status={status} />
                         </div>
                     </div>
+                    {isSupervisorSession ? (
+                        <div className="-mx-3 mt-3 overflow-x-auto px-3">
+                            <div className="flex min-w-max items-center gap-2">
+                                <code className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-1 text-xs font-medium text-[var(--app-fg)]">
+                                    {sessionLabel}: {directCommand}
+                                </code>
+                                <button
+                                    type="button"
+                                    onClick={() => setSupervisorBridgeHelpOpen(true)}
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                                    aria-label="Supervisor bridge help"
+                                    title="Supervisor bridge help"
+                                >
+                                    <InfoIcon />
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
                     <div className="-mx-3 mt-3 overflow-x-auto px-3">
                         <div className="flex min-w-max items-center gap-2">
                             <button
@@ -1614,6 +1696,75 @@ export default function TerminalPage() {
                     </div>
                 </div>
             ) : null}
+
+            <Dialog
+                open={supervisorBridgeHelpOpen}
+                onOpenChange={setSupervisorBridgeHelpOpen}
+            >
+                <DialogContent className="max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Supervisor bridge help</DialogTitle>
+                        <DialogDescription>
+                            Use the supervisor command or helper script to send input to the worker. Read worker output and state from the bridge files.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 text-sm text-[var(--app-fg)]">
+                        <div className="space-y-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">Direct command</div>
+                            <div className="text-xs text-[var(--app-hint)]">{sessionLabel}</div>
+                            <code className="block break-all rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                                {directCommand}
+                            </code>
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">Examples</div>
+                            <div className="space-y-2">
+                                <code className="block break-all rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                                    maglev supervisor send --session {sessionId} -- git status
+                                </code>
+                                <code className="block break-all rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                                    maglev supervisor send --session {sessionId} -- "run the tests and summarize the failure"
+                                </code>
+                                {helperCommand ? (
+                                    <code className="block break-all rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                                        {helperCommand}
+                                    </code>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        {supervisionTargetError ? (
+                            <div className="rounded-lg border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] px-3 py-2 text-sm text-[var(--app-badge-error-text)]">
+                                {supervisionTargetError}
+                            </div>
+                        ) : bridge ? (
+                            <div className="space-y-2">
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">Read from bridge</div>
+                                <div className="grid gap-2">
+                                    <div className="rounded-lg border border-[var(--app-border)] px-3 py-2">
+                                        <div className="text-xs font-medium text-[var(--app-fg)]">Worker transcript</div>
+                                        <code className="mt-1 block break-all text-xs text-[var(--app-hint)]">{bridge.transcriptFilePath}</code>
+                                    </div>
+                                    <div className="rounded-lg border border-[var(--app-border)] px-3 py-2">
+                                        <div className="text-xs font-medium text-[var(--app-fg)]">Worker state</div>
+                                        <code className="mt-1 block break-all text-xs text-[var(--app-hint)]">{bridge.stateFilePath}</code>
+                                    </div>
+                                    <div className="rounded-lg border border-[var(--app-border)] px-3 py-2">
+                                        <div className="text-xs font-medium text-[var(--app-fg)]">Helper script</div>
+                                        <code className="mt-1 block break-all text-xs text-[var(--app-hint)]">{bridge.helperScriptPath}</code>
+                                    </div>
+                                </div>
+                                <div className="rounded-lg border border-dashed border-[var(--app-border)] px-3 py-2 text-xs text-[var(--app-hint)]">
+                                    Read <code>worker-terminal.log</code> and <code>worker-terminal.json</code>. Write back with <code>send-to-worker.sh</code> or <code>maglev supervisor send</code>, not by editing a bridge file directly.
+                                </div>
+                            </div>
+                        ) : supervisionTargetLoading ? (
+                            <div className="text-sm text-[var(--app-hint)]">Loading bridge details…</div>
+                        ) : null}
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <Dialog
                 open={openFileDialogOpen}

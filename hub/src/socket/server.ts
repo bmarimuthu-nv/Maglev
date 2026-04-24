@@ -41,6 +41,7 @@ export type SocketServerDeps = {
     onSessionEnd?: (payload: { sid: string; time: number }) => void
     onMachineAlive?: (payload: { machineId: string; time: number }) => void
     onSessionTerminalInput?: (payload: { sessionId: string; terminalId: string; actor: 'human' }) => void
+    onTerminalSnapshotUpdated?: (payload: { sessionId: string; terminalId: string; namespace: string }) => void
 }
 
 export function createSocketServer(deps: SocketServerDeps): {
@@ -120,7 +121,8 @@ export function createSocketServer(deps: SocketServerDeps): {
         onSessionAlive: deps.onSessionAlive,
         onSessionEnd: deps.onSessionEnd,
         onMachineAlive: deps.onMachineAlive,
-        onWebappEvent: deps.onWebappEvent
+        onWebappEvent: deps.onWebappEvent,
+        onTerminalSnapshotUpdated: deps.onTerminalSnapshotUpdated
     }))
 
     terminalNs.use(async (socket, next) => {
