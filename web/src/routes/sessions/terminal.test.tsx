@@ -7,6 +7,7 @@ import TerminalPage from './terminal'
 const writeMock = vi.fn()
 const closeSessionMock = vi.fn()
 const getTerminalSupervisionTargetMock = vi.fn()
+let mockTerminalSocketState: { status: 'idle' | 'connecting' | 'connected' | 'error'; error?: string } = { status: 'connected' }
 const AUTO_SCROLL_KEY = 'maglev-auto-scroll'
 const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
 const PENDING_TERMINAL_FOCUS_KEY = 'maglev:pending-terminal-focus-session-id'
@@ -63,7 +64,9 @@ vi.mock('@/hooks/queries/useSessionFileSearch', () => ({
 
 vi.mock('@/hooks/useTerminalSocket', () => ({
     useTerminalSocket: () => ({
-        state: { status: 'connected' as const },
+        state: mockTerminalSocketState.status === 'error'
+            ? { status: 'error' as const, error: mockTerminalSocketState.error ?? 'error' }
+            : { status: mockTerminalSocketState.status },
         connect: vi.fn(),
         write: writeMock,
         resize: vi.fn(),
@@ -175,6 +178,7 @@ function setMatchMediaMock() {
 describe('TerminalPage paste behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mockTerminalSocketState = { status: 'connected' }
         mockSessions = []
         mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = true
@@ -224,6 +228,7 @@ describe('TerminalPage auto-scroll wheel detection', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        mockTerminalSocketState = { status: 'connected' }
         mockSessions = []
         mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = true
@@ -308,6 +313,7 @@ describe('TerminalPage open file dialog', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        mockTerminalSocketState = { status: 'connected' }
         mockSessions = []
         mockSessionMetadata = { path: '/tmp/project' }
         closeSessionMock.mockResolvedValue(undefined)
@@ -413,6 +419,7 @@ describe('TerminalPage split close behavior', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        mockTerminalSocketState = { status: 'connected' }
         mockSessions = [
             {
                 id: 'split-session-1',
@@ -453,6 +460,7 @@ describe('TerminalPage new session focus handoff', () => {
         cleanup()
         vi.clearAllMocks()
         vi.useFakeTimers()
+        mockTerminalSocketState = { status: 'connected' }
         mockSessions = []
         mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = false
@@ -492,12 +500,41 @@ describe('TerminalPage new session focus handoff', () => {
         expect(sessionStorage.getItem(PENDING_TERMINAL_FOCUS_KEY)).toBeNull()
         expect(document.activeElement).toBe(mockTerminalTextarea)
     })
+
+    it('shows startup progress while waiting for shell terminal metadata', () => {
+        mockSessionMetadata = {
+            path: '/tmp/project',
+            flavor: 'shell'
+        }
+        mockTerminalSocketState = { status: 'idle' }
+
+        renderWithProviders()
+
+        expect(screen.getByText('Preparing terminal…')).toBeInTheDocument()
+        expect(screen.getByText('The shell session exists, but the terminal backend is not ready yet.')).toBeInTheDocument()
+    })
+
+    it('shows startup progress while attaching to a fresh terminal', () => {
+        mockSessionMetadata = {
+            path: '/tmp/project',
+            flavor: 'shell',
+            shellTerminalId: 'term-1',
+            shellTerminalState: 'ready'
+        }
+        mockTerminalSocketState = { status: 'connecting' }
+
+        renderWithProviders()
+
+        expect(screen.getByText('Connecting to terminal…')).toBeInTheDocument()
+        expect(screen.getByText('Attaching this page to the new terminal backend.')).toBeInTheDocument()
+    })
 })
 
 describe('TerminalPage supervisor bridge help', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        mockTerminalSocketState = { status: 'connected' }
         mockSessions = []
         mockSessionMetadata = {
             path: '/tmp/project',

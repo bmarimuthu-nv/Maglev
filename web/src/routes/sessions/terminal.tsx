@@ -38,10 +38,23 @@ const SPLIT_TERMINAL_MAX_WIDTH = 900
 const FILE_PREVIEW_WIDTH_KEY = 'maglev:filePreviewWidth'
 const FILE_PREVIEW_DEFAULT_WIDTH = 480
 const FILE_PREVIEW_MIN_WIDTH = 280
-const FILE_PREVIEW_MAX_WIDTH = 800
 const RECENT_OPEN_FILES_LIMIT = 20
 const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
 const STICKY_FILE_PREVIEW_KEY = 'maglev:sticky-file-preview'
+
+type StartupState =
+    | 'creating-session'
+    | 'waiting-for-terminal-metadata'
+    | 'attaching-terminal'
+    | 'focusing-terminal'
+    | 'failed'
+
+function getFilePreviewMaxWidth(): number {
+    if (typeof window === 'undefined') {
+        return 1200
+    }
+    return Math.max(720, Math.floor(window.innerWidth * 0.72))
+}
 
 function loadRecentOpenFiles(): FileSearchItem[] {
     if (typeof window === 'undefined') {
@@ -403,7 +416,8 @@ export default function TerminalPage() {
     const [previewPanelWidth, setPreviewPanelWidth] = useState(() => {
         try {
             const saved = localStorage.getItem(FILE_PREVIEW_WIDTH_KEY)
-            return saved ? Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(FILE_PREVIEW_MAX_WIDTH, Number(saved))) : FILE_PREVIEW_DEFAULT_WIDTH
+            const maxWidth = getFilePreviewMaxWidth()
+            return saved ? Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(maxWidth, Number(saved))) : FILE_PREVIEW_DEFAULT_WIDTH
         } catch { return FILE_PREVIEW_DEFAULT_WIDTH }
     })
     const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
@@ -450,7 +464,7 @@ export default function TerminalPage() {
     const [supervisionTargetLoading, setSupervisionTargetLoading] = useState(false)
     const [supervisionTargetError, setSupervisionTargetError] = useState<string | null>(null)
     const respawnAttemptedRef = useRef(false)
-    const pendingNewSessionFocusRef = useRef(false)
+    const [pendingNewSessionFocus, setPendingNewSessionFocus] = useState(() => hasPendingTerminalFocus(sessionId))
     const isSupervisorSession = session?.metadata?.terminalSupervision?.role === 'supervisor'
 
     const getTerminalTextarea = useCallback((): HTMLTextAreaElement | null => {
@@ -667,7 +681,7 @@ export default function TerminalPage() {
     }, [baseUrl, previewFilePath, sessionId])
 
     useEffect(() => {
-        pendingNewSessionFocusRef.current = hasPendingTerminalFocus(sessionId)
+        setPendingNewSessionFocus(hasPendingTerminalFocus(sessionId))
     }, [sessionId])
 
     useEffect(() => {
@@ -709,7 +723,7 @@ export default function TerminalPage() {
     }, [focusTerminalIfAllowed, terminalState.status])
 
     useEffect(() => {
-        if (!pendingNewSessionFocusRef.current || terminalState.status !== 'connected') {
+        if (!pendingNewSessionFocus || terminalState.status !== 'connected') {
             return
         }
         if (!session?.active) {
@@ -726,7 +740,7 @@ export default function TerminalPage() {
                 return
             }
             if (focusTerminalIfAllowed()) {
-                pendingNewSessionFocusRef.current = false
+                setPendingNewSessionFocus(false)
                 clearPendingTerminalFocus(sessionId)
                 return
             }
@@ -749,7 +763,7 @@ export default function TerminalPage() {
             cancelAnimationFrame(frameId)
             window.clearTimeout(timeoutId)
         }
-    }, [focusTerminalIfAllowed, session?.active, sessionId, terminalState.status])
+    }, [focusTerminalIfAllowed, pendingNewSessionFocus, session?.active, sessionId, terminalState.status])
 
     useEffect(() => {
         respawnAttemptedRef.current = false
@@ -1112,7 +1126,7 @@ export default function TerminalPage() {
 
         const onMove = (e: globalThis.PointerEvent) => {
             const delta = startX - e.clientX
-            const next = Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(FILE_PREVIEW_MAX_WIDTH, startWidth + delta))
+            const next = Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(getFilePreviewMaxWidth(), startWidth + delta))
             setPreviewPanelWidth(next)
             try { localStorage.setItem(FILE_PREVIEW_WIDTH_KEY, String(next)) } catch { /* ignore */ }
         }
@@ -1125,6 +1139,21 @@ export default function TerminalPage() {
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
     }, [previewPanelWidth])
+
+    useEffect(() => {
+        const syncPreviewWidth = () => {
+            setPreviewPanelWidth((current) => {
+                const next = Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(getFilePreviewMaxWidth(), current))
+                if (next !== current) {
+                    try { localStorage.setItem(FILE_PREVIEW_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+                }
+                return next
+            })
+        }
+
+        window.addEventListener('resize', syncPreviewWidth)
+        return () => window.removeEventListener('resize', syncPreviewWidth)
+    }, [])
 
     const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         event.preventDefault()
@@ -1390,10 +1419,53 @@ export default function TerminalPage() {
         [focusTerminalIfAllowed, quickInputDisabled]
     )
 
+    const isNewShellStartup = isShellSession && pendingNewSessionFocus
+    const startupState: StartupState | null = (() => {
+        if (!isNewShellStartup) {
+            return null
+        }
+        if (sessionLoading || !session) {
+            return 'creating-session'
+        }
+        if (!session.metadata?.shellTerminalId || session.metadata?.shellTerminalState !== 'ready') {
+            return 'waiting-for-terminal-metadata'
+        }
+        if (terminalState.status === 'error' && !canTakeOver) {
+            return 'failed'
+        }
+        if (terminalState.status !== 'connected') {
+            return 'attaching-terminal'
+        }
+        if (pendingNewSessionFocus) {
+            return 'focusing-terminal'
+        }
+        return null
+    })()
+
+    const startupTitle = startupState === 'creating-session'
+        ? 'Starting shell…'
+        : startupState === 'waiting-for-terminal-metadata'
+            ? 'Preparing terminal…'
+            : startupState === 'attaching-terminal'
+                ? 'Connecting to terminal…'
+                : startupState === 'focusing-terminal'
+                    ? 'Focusing terminal…'
+                    : 'Terminal startup failed'
+
+    const startupDescription = startupState === 'creating-session'
+        ? 'Creating the session record and waiting for the shell to appear.'
+        : startupState === 'waiting-for-terminal-metadata'
+            ? 'The shell session exists, but the terminal backend is not ready yet.'
+            : startupState === 'attaching-terminal'
+                ? 'Attaching this page to the new terminal backend.'
+                : startupState === 'focusing-terminal'
+                    ? 'The terminal is connected. Handing keyboard focus over now.'
+                    : (errorMessage ?? 'The new shell did not become interactive.')
+
     if (!session) {
         return (
             <div className="flex h-full items-center justify-center">
-                <LoadingState label="Loading session…" className="text-sm" />
+                <LoadingState label={pendingNewSessionFocus ? 'Starting shell…' : 'Loading session…'} className="text-sm" />
             </div>
         )
     }
@@ -1578,6 +1650,19 @@ export default function TerminalPage() {
                     <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
                         Terminal exited{exitInfo.code !== null ? ` with code ${exitInfo.code}` : ''}
                         {exitInfo.signal ? ` (${exitInfo.signal})` : ''}.
+                    </div>
+                </div>
+            ) : null}
+
+            {startupState ? (
+                <div className="w-full px-3 pt-3">
+                    <div className={`rounded-md border p-3 text-xs ${
+                        startupState === 'failed'
+                            ? 'border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] text-[var(--app-badge-error-text)]'
+                            : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'
+                    }`}>
+                        <div className="font-medium text-[var(--app-fg)]">{startupTitle}</div>
+                        <div className="mt-1">{startupDescription}</div>
                     </div>
                 </div>
             ) : null}
