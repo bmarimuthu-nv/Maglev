@@ -184,6 +184,18 @@ describe('getSessionSubgroups', () => {
         expect(subgroups[0]?.label).toBe('Folder')
         expect(subgroups[0]?.rows.map((row) => row.sessions[0].id)).toEqual(['a', 'b'])
     })
+
+    it('shows the plain git branch as subgroup hint when no worktree metadata exists', () => {
+        const rows = getSessionRows([
+            makeSession({ id: 'a', metadata: { path: '/repo', branch: 'feature/plain-repo' } }),
+        ])
+
+        const subgroups = getSessionSubgroups('/repo', rows)
+
+        expect(subgroups).toHaveLength(1)
+        expect(subgroups[0]?.label).toBe('Folder')
+        expect(subgroups[0]?.hint).toBe('feature/plain-repo')
+    })
 })
 
 describe('reconcileOrder', () => {

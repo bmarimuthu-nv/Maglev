@@ -3,8 +3,10 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
 import { useSession } from '@/hooks/queries/useSession'
+import { useSessions } from '@/hooks/queries/useSessions'
 import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
 import { LoadingState } from '@/components/LoadingState'
+import { SplitTerminalPanel } from '@/components/SplitTerminalPanel'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { ReviewThreadCard } from '@/components/review/ReviewThreadCard'
@@ -12,6 +14,11 @@ import { decodeBase64, encodeBase64 } from '@/lib/utils'
 import { REVIEW_FILE_PATH, createEmptyReviewFile, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
 import { resolveLanguageFromPath, useShikiLines } from '@/lib/shiki'
+
+const REVIEW_SPLIT_TERMINAL_WIDTH_KEY = 'maglev:reviewSplitTerminalWidth'
+const REVIEW_SPLIT_TERMINAL_DEFAULT_WIDTH = 560
+const REVIEW_SPLIT_TERMINAL_MIN_WIDTH = 320
+const REVIEW_SPLIT_TERMINAL_MAX_WIDTH = 1200
 
 function BackIcon() {
     return (
@@ -26,6 +33,15 @@ function RefreshIcon() {
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 12a9 9 0 1 1-3-6.7" />
             <polyline points="21 3 21 9 15 9" />
+        </svg>
+    )
+}
+
+function TerminalIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m4 17 6-6-6-6" />
+            <path d="M12 19h8" />
         </svg>
     )
 }
@@ -373,7 +389,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
 
                     {visibleHunks.map((hunk, hunkIndex) => (
                         <div key={`${props.file.filePath}-${hunk.header}-${hunkIndex}`}>
-                            <div className="border-b border-[var(--code-border)] bg-[var(--app-secondary-bg)]/70 px-4 py-2 font-mono text-xs text-[var(--app-hint)]">
+                        <div className="border-b border-[var(--code-border)] bg-[var(--app-secondary-bg)]/70 px-4 py-2 font-mono text-[11.5px] font-normal text-[var(--app-hint)]">
                                 {hunk.header}
                             </div>
                             <div>
@@ -389,7 +405,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
 
                                     return (
                                         <div key={`${props.file.filePath}-${hunkIndex}-${lineIndex}`} className={highlighted ? 'border-l-2 border-l-[var(--review-accent)]/60' : ''}>
-                                            <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12px] leading-[1.45] ${
+                                            <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12px] font-normal leading-[1.56] antialiased ${
                                                 line.kind === 'add' ? 'bg-emerald-500/10' : line.kind === 'delete' ? 'bg-red-500/10' : ''
                                             } ${highlighted ? 'bg-[var(--code-line-selected)]' : 'hover:bg-[var(--code-line-hover)]'}`}>
                                                 <button
@@ -566,6 +582,7 @@ export default function ReviewPage() {
     const { sessionId } = useParams({ from: '/sessions/$sessionId/review' })
     const search = useSearch({ from: '/sessions/$sessionId/review' })
     const { session } = useSession(api, sessionId)
+    const { sessions: allSessions } = useSessions(api)
     const { copy, copied } = useCopyToClipboard()
     const { reviewBaseMode } = useReviewBaseMode()
     const reviewBaseModeOptions = getReviewBaseModeOptions()
@@ -583,6 +600,16 @@ export default function ReviewPage() {
     const [composerText, setComposerText] = useState('')
     const [collapsedResolvedThreadIds, setCollapsedResolvedThreadIds] = useState<Record<string, boolean>>({})
     const [expandedFilePaths, setExpandedFilePaths] = useState<Set<string>>(() => new Set())
+    const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
+    const [closingSplitSessionId, setClosingSplitSessionId] = useState<string | null>(null)
+    const [splitPanelWidth, setSplitPanelWidth] = useState(() => {
+        try {
+            const saved = localStorage.getItem(REVIEW_SPLIT_TERMINAL_WIDTH_KEY)
+            return saved ? Math.max(REVIEW_SPLIT_TERMINAL_MIN_WIDTH, Math.min(REVIEW_SPLIT_TERMINAL_MAX_WIDTH, Number(saved))) : REVIEW_SPLIT_TERMINAL_DEFAULT_WIDTH
+        } catch {
+            return REVIEW_SPLIT_TERMINAL_DEFAULT_WIDTH
+        }
+    })
     const initializedExpandedRef = useRef(false)
 
     const summaryQuery = useQuery({
@@ -867,6 +894,88 @@ export default function ReviewPage() {
     const reviewBaseLabel = reviewBaseModeOptions.find((option) => option.value === reviewBaseMode)?.label ?? reviewBaseMode
     const expandedCount = expandedFilePaths.size
 
+    useEffect(() => {
+        if (splitSessionId || !session?.id) {
+            return
+        }
+        const child = allSessions.find(
+            (candidate) => candidate.active && candidate.metadata?.parentSessionId === session.id && candidate.id !== closingSplitSessionId
+        )
+        if (child) {
+            setSplitSessionId(child.id)
+        }
+    }, [allSessions, closingSplitSessionId, session?.id, splitSessionId])
+
+    useEffect(() => {
+        if (!closingSplitSessionId) {
+            return
+        }
+        const stillPresent = allSessions.some((candidate) => candidate.id === closingSplitSessionId)
+        if (!stillPresent) {
+            setClosingSplitSessionId(null)
+        }
+    }, [allSessions, closingSplitSessionId])
+
+    const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault()
+        const startX = event.clientX
+        const startWidth = splitPanelWidth
+
+        const onMove = (e: globalThis.PointerEvent) => {
+            const delta = startX - e.clientX
+            const next = Math.max(REVIEW_SPLIT_TERMINAL_MIN_WIDTH, Math.min(REVIEW_SPLIT_TERMINAL_MAX_WIDTH, startWidth + delta))
+            setSplitPanelWidth(next)
+            try { localStorage.setItem(REVIEW_SPLIT_TERMINAL_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+        }
+
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+    }, [splitPanelWidth])
+
+    const handleOpenSplitTerminal = useCallback(async () => {
+        if (!api || !session?.metadata?.path) {
+            return
+        }
+        try {
+            const result = await api.spawnHubSession(
+                session.metadata.path,
+                `${session.metadata.name ?? 'review'} (terminal)`,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                sessionId
+            )
+            if (result.type === 'success') {
+                setSplitSessionId(result.sessionId)
+            }
+        } catch {
+            // ignore
+        }
+    }, [api, session?.metadata?.name, session?.metadata?.path, sessionId])
+
+    const handleCloseSplit = useCallback(async () => {
+        if (!api || !splitSessionId || closingSplitSessionId === splitSessionId) {
+            return
+        }
+
+        setClosingSplitSessionId(splitSessionId)
+        try {
+            await api.closeSession(splitSessionId)
+            setSplitSessionId((current) => current === splitSessionId ? null : current)
+        } catch {
+            setClosingSplitSessionId(null)
+        }
+    }, [api, closingSplitSessionId, splitSessionId])
+
     if (!session) {
         return <div className="flex h-full items-center justify-center"><LoadingState label="Loading review…" className="text-sm" /></div>
     }
@@ -896,6 +1005,26 @@ export default function ReviewPage() {
                         title="Refresh"
                     >
                         <RefreshIcon />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (splitSessionId) {
+                                void handleCloseSplit()
+                            } else {
+                                void handleOpenSplitTerminal()
+                            }
+                        }}
+                        disabled={splitSessionId !== null && closingSplitSessionId === splitSessionId}
+                        className={`inline-flex h-8 items-center justify-center gap-2 rounded-full border px-3 text-xs font-medium transition-colors ${
+                            splitSessionId
+                                ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-button-text)]'
+                                : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                        } disabled:cursor-not-allowed disabled:opacity-60`}
+                        title={splitSessionId ? 'Close review terminal' : 'Open terminal in this workspace'}
+                    >
+                        <TerminalIcon />
+                        <span>{splitSessionId ? (closingSplitSessionId === splitSessionId ? 'Closing…' : 'Close terminal') : 'Terminal'}</span>
                     </button>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -992,7 +1121,7 @@ export default function ReviewPage() {
                                     entry.kind === 'folder' ? (
                                         <div
                                             key={entry.key}
-                                            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-[var(--app-hint)]"
+                                            className="flex items-center gap-2 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--app-hint)]/85"
                                             style={{ paddingLeft: `${12 + entry.depth * 18}px` }}
                                         >
                                             <span aria-hidden="true">▾</span>
@@ -1014,17 +1143,16 @@ export default function ReviewPage() {
                                                     search: { mode, path: entry.filePath }
                                                 })
                                             }}
-                                            className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] ${selectedPath === entry.filePath ? 'bg-[var(--app-subtle-bg)]' : ''}`}
+                                            className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left hover:bg-[var(--app-subtle-bg)] ${selectedPath === entry.filePath ? 'bg-[var(--app-subtle-bg)]' : ''}`}
                                             style={{ paddingLeft: `${12 + entry.depth * 18}px` }}
                                         >
                                             <div className="min-w-0 flex-1">
-                                                <div className="truncate text-sm font-medium text-[var(--app-fg)]">{entry.name}</div>
-                                                <div className="truncate text-[11px] text-[var(--app-hint)]">{entry.filePath}</div>
+                                                <div className="truncate text-[13px] font-medium text-[var(--app-fg)]">{entry.name}</div>
                                                 {entry.oldPath ? (
-                                                    <div className="truncate text-[11px] text-[var(--app-hint)]">renamed from {entry.oldPath}</div>
+                                                    <div className="truncate text-[10px] text-[var(--app-hint)]">renamed from {entry.oldPath}</div>
                                                 ) : null}
                                             </div>
-                                            <div className="shrink-0 text-right text-[11px]">
+                                            <div className="shrink-0 text-right text-[10px]">
                                                 <div className="text-emerald-600">+{entry.added ?? '-'}</div>
                                                 <div className="text-red-600">-{entry.removed ?? '-'}</div>
                                             </div>
@@ -1089,6 +1217,32 @@ export default function ReviewPage() {
                         </div>
                     )}
                 </div>
+
+                {splitSessionId ? (
+                    <div className="relative flex shrink-0 border-l border-[var(--app-border)]" style={{ width: `${splitPanelWidth}px` }}>
+                        <div
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label="Resize review terminal"
+                            onPointerDown={handleSplitResizeStart}
+                            className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
+                        >
+                            <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
+                        </div>
+                        <SplitTerminalPanel
+                            sessionId={splitSessionId}
+                            onClose={handleCloseSplit}
+                            isClosing={closingSplitSessionId === splitSessionId}
+                            onNavigate={(id) => {
+                                setSplitSessionId(null)
+                                void navigate({
+                                    to: '/sessions/$sessionId/terminal',
+                                    params: { sessionId: id },
+                                })
+                            }}
+                        />
+                    </div>
+                ) : null}
             </div>
         </div>
     )

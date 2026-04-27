@@ -269,7 +269,7 @@ function CodeLineRow(props: {
                 props.onOpenMenu(props.lineNumber, { x: event.clientX, y: event.clientY })
             }}
             data-line-number={props.lineNumber}
-            className={`group grid grid-cols-[32px_60px_minmax(0,1fr)] items-start font-mono text-[12px] leading-[1.42] ${rowTone}`}
+            className={`group grid grid-cols-[32px_60px_minmax(0,1fr)] items-start font-mono text-[12px] font-normal leading-[1.56] antialiased ${rowTone}`}
         >
             <div className="relative flex justify-center border-r border-[var(--code-border)] bg-[var(--code-gutter-bg)] px-1 py-1.5">
                 {props.reviewMode ? (
