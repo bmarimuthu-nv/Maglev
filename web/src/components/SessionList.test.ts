@@ -129,6 +129,27 @@ describe('getSessionRows', () => {
         // Should appear as top-level since parent is missing
         expect(rows[0].isChild).toBeFalsy()
     })
+
+    it('keeps review-terminal children as indented child rows under their parent', () => {
+        const sessions = [
+            makeSession({ id: 'review-parent', metadata: { path: '/repo' } }),
+            makeSession({
+                id: 'review-shell',
+                metadata: {
+                    path: '/repo',
+                    parentSessionId: 'review-parent',
+                    childRole: 'review-terminal',
+                    name: 'Some other shell name'
+                }
+            }),
+        ]
+
+        const rows = getSessionRows(sessions)
+
+        expect(rows).toHaveLength(2)
+        expect(rows[1]?.isChild).toBe(true)
+        expect(rows[1]?.sessions[0].metadata?.childRole).toBe('review-terminal')
+    })
 })
 
 describe('getSessionSubgroups', () => {

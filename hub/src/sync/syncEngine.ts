@@ -524,6 +524,13 @@ export class SyncEngine {
         }))
     }
 
+    async setChildRole(sessionId: string, childRole: 'review-terminal'): Promise<void> {
+        await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
+            ...metadata,
+            childRole
+        }))
+    }
+
     async setShellSessionOptions(sessionId: string, options: { pinned?: boolean; autoRespawn?: boolean; startupCommand?: string | null }): Promise<void> {
         await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
             ...metadata,

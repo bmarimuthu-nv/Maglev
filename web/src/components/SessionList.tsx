@@ -249,6 +249,9 @@ function MoreIcon(props: { className?: string }) {
 }
 
 function getSessionTitle(session: SessionSummary): string {
+    if (session.metadata?.childRole === 'review-terminal') {
+        return 'review-terminal'
+    }
     if (session.metadata?.name) {
         return session.metadata.name
     }

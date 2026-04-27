@@ -18,6 +18,7 @@ export type SessionMetadataSummary = {
     path: string
     host: string
     branch?: string
+    childRole?: 'review-terminal'
     version?: string
     name?: string
     os?: string

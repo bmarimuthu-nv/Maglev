@@ -505,11 +505,12 @@ export class ApiClient {
         startupCommand?: string,
         sessionType?: 'simple' | 'worktree',
         worktreeName?: string,
-        parentSessionId?: string
+        parentSessionId?: string,
+        childRole?: 'review-terminal'
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>('/api/hub/spawn', {
             method: 'POST',
-            body: JSON.stringify({ directory, name, notesPath, createNotesFile, pinned, autoRespawn, startupCommand, sessionType, worktreeName, parentSessionId })
+            body: JSON.stringify({ directory, name, notesPath, createNotesFile, pinned, autoRespawn, startupCommand, sessionType, worktreeName, parentSessionId, childRole })
         })
     }
 

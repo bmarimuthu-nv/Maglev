@@ -6,6 +6,8 @@ import { useTerminalSocket } from '@/hooks/useTerminalSocket'
 import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 
+const TERMINAL_TAKEOVER_MESSAGE = 'Terminal is attached in another browser. Reconnect here to take over.'
+
 function CloseIcon() {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -29,8 +31,10 @@ export function SplitTerminalPanel(props: {
     onClose: () => Promise<void> | void
     onNavigate?: (sessionId: string) => void
     isClosing?: boolean
+    title?: string
+    subtitle?: string
 }) {
-    const { sessionId, onClose, onNavigate, isClosing = false } = props
+    const { sessionId, onClose, onNavigate, isClosing = false, title, subtitle } = props
     const { api, token, baseUrl } = useAppContext()
     const { session, isLoading: sessionLoading } = useSession(api, sessionId)
     const isShellSession = session?.metadata?.flavor === 'shell'
@@ -54,8 +58,10 @@ export function SplitTerminalPanel(props: {
         reconnectView,
         write,
         resize,
+        disconnect,
         onOutput,
         onExit,
+        takeOver,
     } = useTerminalSocket({
         token,
         sessionId,
@@ -91,10 +97,14 @@ export function SplitTerminalPanel(props: {
         [terminalState.status, write]
     )
 
+    const errorMessage = terminalState.status === 'error' ? terminalState.error : null
+    const canTakeOver = errorMessage === TERMINAL_TAKEOVER_MESSAGE
+
     const handleResize = useCallback(
         (cols: number, rows: number) => {
             lastSizeRef.current = { cols, rows }
             if (!session?.active || !terminalId || sessionLoading) return
+            if (canTakeOver) return
             if (!connectOnceRef.current) {
                 connectOnceRef.current = true
                 reconnectView(cols, rows)
@@ -102,7 +112,7 @@ export function SplitTerminalPanel(props: {
                 resize(cols, rows)
             }
         },
-        [session?.active, reconnectView, resize, sessionLoading, terminalId]
+        [session?.active, canTakeOver, reconnectView, resize, sessionLoading, terminalId]
     )
 
     useEffect(() => {
@@ -110,17 +120,40 @@ export function SplitTerminalPanel(props: {
         if (connectOnceRef.current) return
         const size = lastSizeRef.current
         if (!size) return
+        if (canTakeOver) return
         connectOnceRef.current = true
         connect(size.cols, size.rows)
-    }, [session?.active, connect, sessionLoading, terminalId])
+    }, [session?.active, canTakeOver, connect, sessionLoading, terminalId])
+
+    useEffect(() => {
+        connectOnceRef.current = false
+    }, [sessionId])
+
+    useEffect(() => {
+        if (session?.active === false) {
+            disconnect()
+            connectOnceRef.current = false
+        }
+    }, [disconnect, session?.active])
+
+    useEffect(() => {
+        if (terminalState.status === 'error') {
+            if (!canTakeOver) {
+                connectOnceRef.current = false
+            }
+            return
+        }
+    }, [canTakeOver, terminalState.status])
 
     useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
+            connectOnceRef.current = false
         }
     }, [])
 
     const sessionName = session?.metadata?.name ?? session?.metadata?.summary?.text ?? sessionId.slice(0, 8)
+    const panelTitle = title ?? (session?.metadata?.childRole === 'review-terminal' ? 'Review terminal' : sessionName)
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden p-3">
@@ -131,16 +164,26 @@ export function SplitTerminalPanel(props: {
                         : 'border-[var(--app-border)]'
                 }`}
             >
-                <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-1.5">
+                <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-2">
                     <ConnectionDot status={terminalState.status} />
-                    <button
-                        type="button"
-                        onClick={() => onNavigate?.(sessionId)}
-                        className="min-w-0 flex-1 truncate text-left text-xs font-medium hover:underline"
-                        title={`Navigate to ${sessionName}`}
-                    >
-                        {sessionName}
-                    </button>
+                    <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px] font-medium text-[var(--app-fg)]">
+                            {panelTitle}
+                        </div>
+                        {subtitle ? (
+                            <div className="truncate text-[10px] text-[var(--app-hint)]">{subtitle}</div>
+                        ) : null}
+                    </div>
+                    {onNavigate ? (
+                        <button
+                            type="button"
+                            onClick={() => onNavigate(sessionId)}
+                            className="shrink-0 rounded-full border border-[var(--app-border)] px-2.5 py-1 text-[10px] font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            title={`Open ${sessionName} in the full terminal view`}
+                        >
+                            Open full
+                        </button>
+                    ) : null}
                     <button
                         type="button"
                         onClick={() => {
@@ -153,6 +196,22 @@ export function SplitTerminalPanel(props: {
                         <CloseIcon />
                     </button>
                 </div>
+                {errorMessage ? (
+                    <div className="border-b border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] px-3 py-2 text-xs text-[var(--app-badge-error-text)]">
+                        <div>{errorMessage}</div>
+                        {canTakeOver ? (
+                            <div className="mt-2">
+                                <button
+                                    type="button"
+                                    onClick={takeOver}
+                                    className="rounded-full border border-[var(--app-badge-error-border)] px-3 py-1 font-medium transition-colors hover:bg-[var(--app-badge-error-bg)]"
+                                >
+                                    Take over here
+                                </button>
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
                 <div className="flex-1 overflow-hidden p-2">
                     <TerminalView
                         onMount={handleTerminalMount}

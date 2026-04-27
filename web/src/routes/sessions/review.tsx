@@ -899,7 +899,11 @@ export default function ReviewPage() {
             return
         }
         const child = allSessions.find(
-            (candidate) => candidate.active && candidate.metadata?.parentSessionId === session.id && candidate.id !== closingSplitSessionId
+            (candidate) =>
+                candidate.active
+                && candidate.metadata?.parentSessionId === session.id
+                && candidate.metadata?.childRole === 'review-terminal'
+                && candidate.id !== closingSplitSessionId
         )
         if (child) {
             setSplitSessionId(child.id)
@@ -944,7 +948,7 @@ export default function ReviewPage() {
         try {
             const result = await api.spawnHubSession(
                 session.metadata.path,
-                `${session.metadata.name ?? 'review'} (terminal)`,
+                'review-terminal',
                 undefined,
                 undefined,
                 undefined,
@@ -952,7 +956,8 @@ export default function ReviewPage() {
                 undefined,
                 undefined,
                 undefined,
-                sessionId
+                sessionId,
+                'review-terminal'
             )
             if (result.type === 'success') {
                 setSplitSessionId(result.sessionId)
@@ -1021,10 +1026,10 @@ export default function ReviewPage() {
                                 ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-button-text)]'
                                 : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
                         } disabled:cursor-not-allowed disabled:opacity-60`}
-                        title={splitSessionId ? 'Close review terminal' : 'Open terminal in this workspace'}
+                        title={splitSessionId ? 'Close review shell' : 'Open a review shell in this workspace'}
                     >
                         <TerminalIcon />
-                        <span>{splitSessionId ? (closingSplitSessionId === splitSessionId ? 'Closing…' : 'Close terminal') : 'Terminal'}</span>
+                        <span>{splitSessionId ? (closingSplitSessionId === splitSessionId ? 'Closing…' : 'Close shell') : 'Review shell'}</span>
                     </button>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -1233,6 +1238,8 @@ export default function ReviewPage() {
                             sessionId={splitSessionId}
                             onClose={handleCloseSplit}
                             isClosing={closingSplitSessionId === splitSessionId}
+                            title="Review terminal"
+                            subtitle={session.metadata?.path ?? undefined}
                             onNavigate={(id) => {
                                 setSplitSessionId(null)
                                 void navigate({
