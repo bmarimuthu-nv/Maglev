@@ -920,6 +920,20 @@ export default function ReviewPage() {
         }
     }, [allSessions, closingSplitSessionId])
 
+    useEffect(() => {
+        if (!splitSessionId) {
+            return
+        }
+
+        const splitSession = allSessions.find((candidate) => candidate.id === splitSessionId)
+        if (!splitSession || !splitSession.active) {
+            setSplitSessionId(null)
+            if (closingSplitSessionId === splitSessionId) {
+                setClosingSplitSessionId(null)
+            }
+        }
+    }, [allSessions, closingSplitSessionId, splitSessionId])
+
     const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         event.preventDefault()
         const startX = event.clientX
