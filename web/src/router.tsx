@@ -524,13 +524,15 @@ function NewSessionPage() {
             ) : null}
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-                <NewSession
-                    api={api}
-                    machine={machine}
-                    isLoading={hubLoading}
-                    onCancel={handleCancel}
-                    onSuccess={handleSuccess}
-                />
+                <div className="mx-auto w-full max-w-[720px]">
+                    <NewSession
+                        api={api}
+                        machine={machine}
+                        isLoading={hubLoading}
+                        onCancel={handleCancel}
+                        onSuccess={handleSuccess}
+                    />
+                </div>
             </div>
         </div>
     )
