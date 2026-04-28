@@ -7,6 +7,7 @@ import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 
 const TERMINAL_TAKEOVER_MESSAGE = 'Terminal is attached in another browser. Reconnect here to take over.'
+const TERMINAL_MOVED_MESSAGE = 'Terminal moved to another browser.'
 
 function CloseIcon() {
     return (
@@ -38,7 +39,11 @@ export function SplitTerminalPanel(props: {
 }) {
     const { sessionId, onClose, onNavigate, onUnsplit, isClosing = false, starting = false, title, subtitle } = props
     const { api, token, baseUrl } = useAppContext()
-    const { session, isLoading: sessionLoading } = useSession(api, sessionId)
+    const {
+        session,
+        isLoading: sessionLoading,
+        refetch: refetchSession
+    } = useSession(api, sessionId)
     const isShellSession = session?.metadata?.flavor === 'shell'
     const [isTerminalFocused, setIsTerminalFocused] = useState(false)
 
@@ -53,6 +58,7 @@ export function SplitTerminalPanel(props: {
     const inputDisposableRef = useRef<{ dispose: () => void } | null>(null)
     const connectOnceRef = useRef(false)
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
+    const writeRef = useRef<(data: string) => void>(() => {})
 
     const {
         state: terminalState,
@@ -63,6 +69,7 @@ export function SplitTerminalPanel(props: {
         disconnect,
         onOutput,
         onExit,
+        replay,
         takeOver,
     } = useTerminalSocket({
         token,
@@ -71,6 +78,10 @@ export function SplitTerminalPanel(props: {
         baseUrl,
         createIfMissing: sessionLoading ? false : !isShellSession
     })
+
+    useEffect(() => {
+        writeRef.current = write
+    }, [write])
 
     useEffect(() => {
         onOutput((data) => {
@@ -90,17 +101,18 @@ export function SplitTerminalPanel(props: {
             terminalRef.current = terminal
             inputDisposableRef.current?.dispose()
             inputDisposableRef.current = terminal.onData((data) => {
-                write(data)
+                writeRef.current(data)
             })
+            replay()
             if (terminalState.status === 'connected') {
                 terminal.focus()
             }
         },
-        [terminalState.status, write]
+        [replay, terminalState.status]
     )
 
     const errorMessage = terminalState.status === 'error' ? terminalState.error : null
-    const canTakeOver = errorMessage === TERMINAL_TAKEOVER_MESSAGE
+    const canTakeOver = errorMessage === TERMINAL_TAKEOVER_MESSAGE || errorMessage === TERMINAL_MOVED_MESSAGE
 
     const handleResize = useCallback(
         (cols: number, rows: number) => {
@@ -181,6 +193,48 @@ export function SplitTerminalPanel(props: {
     }, [terminalState.status])
 
     useEffect(() => {
+        if (!api) {
+            return
+        }
+        const shellReady = Boolean(
+            session?.active
+            && isShellSession
+            && session.metadata?.shellTerminalId
+            && session.metadata?.shellTerminalState === 'ready'
+        )
+        if (shellReady) {
+            return
+        }
+        if (!starting && !isShellSession && session) {
+            return
+        }
+
+        let cancelled = false
+        const interval = window.setInterval(() => {
+            if (cancelled) {
+                return
+            }
+            void refetchSession()
+        }, 400)
+
+        void refetchSession()
+
+        return () => {
+            cancelled = true
+            window.clearInterval(interval)
+        }
+    }, [
+        api,
+        isShellSession,
+        refetchSession,
+        session?.active,
+        session?.metadata?.shellTerminalId,
+        session?.metadata?.shellTerminalState,
+        session,
+        starting
+    ])
+
+    useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
             connectOnceRef.current = false
@@ -190,6 +244,7 @@ export function SplitTerminalPanel(props: {
     const sessionName = session?.metadata?.name ?? session?.metadata?.summary?.text ?? sessionId.slice(0, 8)
     const panelTitle = title ?? (session?.metadata?.childRole === 'review-terminal' ? 'Review terminal' : sessionName)
     const isSplitTerminalChild = session?.metadata?.childRole === 'split-terminal'
+    const startupLabel = panelTitle === 'Review terminal' ? 'Starting review shell…' : 'Starting split terminal…'
 
     const startupPending = starting || sessionLoading || !session || (isShellSession && (!session.metadata?.shellTerminalId || session.metadata?.shellTerminalState !== 'ready'))
 
@@ -262,7 +317,7 @@ export function SplitTerminalPanel(props: {
                     </div>
                 ) : startupPending ? (
                     <div className="border-b border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
-                        Starting review shell…
+                        {startupLabel}
                     </div>
                 ) : null}
                 <div className="flex-1 overflow-hidden p-2">
