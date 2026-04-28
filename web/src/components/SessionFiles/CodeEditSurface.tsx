@@ -9,6 +9,7 @@ function CodeEditSurfaceInner(props: {
     draft: string
     filePath: string
     onChange: (value: string) => void
+    scrollContainerRef?: React.RefObject<HTMLElement | null>
 }, ref: React.Ref<CodeEditSurfaceHandle>) {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null)
     const containerRef = useRef<HTMLDivElement | null>(null)
@@ -26,11 +27,12 @@ function CodeEditSurfaceInner(props: {
     }, [props.draft])
 
     const scrollToBottom = () => {
-        if (!containerRef.current) {
+        const target = props.scrollContainerRef?.current ?? containerRef.current
+        if (!target) {
             return
         }
-        containerRef.current.scrollTo({
-            top: containerRef.current.scrollHeight,
+        target.scrollTo({
+            top: target.scrollHeight,
             behavior: 'smooth'
         })
     }

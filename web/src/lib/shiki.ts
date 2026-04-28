@@ -192,6 +192,7 @@ export function useShikiLines(
 
     useEffect(() => {
         let cancelled = false
+        setLines(null)
 
         async function highlight() {
             const highlighter = await getHighlighter()

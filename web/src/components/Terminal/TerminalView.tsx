@@ -8,6 +8,44 @@ import { useTheme } from '@/hooks/useTheme'
 import { useTerminalCopyOnSelect } from '@/hooks/useTerminalCopyOnSelect'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 
+function fallbackCopyText(text: string): boolean {
+    if (typeof document === 'undefined') {
+        return false
+    }
+
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.top = '-9999px'
+    textarea.style.left = '-9999px'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+
+    try {
+        return document.execCommand('copy')
+    } catch {
+        return false
+    } finally {
+        document.body.removeChild(textarea)
+    }
+}
+
+async function writeClipboardText(text: string): Promise<boolean> {
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text)
+            return true
+        }
+    } catch {
+        // fall through to legacy copy path
+    }
+
+    return fallbackCopyText(text)
+}
+
 function resolveThemeColors(isDark: boolean) {
     const styles = getComputedStyle(document.documentElement)
     const background = styles.getPropertyValue('--app-bg').trim() || '#000000'
@@ -149,6 +187,7 @@ export function TerminalView(props: {
         })
         terminalRef.current = terminal
         let selectionCopyTimer: ReturnType<typeof setTimeout> | null = null
+        let lastCopiedSelection = ''
 
         const fitAddon = new FitAddon()
         const webLinksAddon = new WebLinksAddon()
@@ -165,6 +204,20 @@ export function TerminalView(props: {
             }
             terminal.focus()
         }
+        const tryCopyCurrentSelection = () => {
+            if (!copyOnSelectRef.current || !terminal.hasSelection()) {
+                return
+            }
+            const selection = terminal.getSelection()
+            if (!selection || selection === lastCopiedSelection) {
+                return
+            }
+            void writeClipboardText(selection).then((copied) => {
+                if (copied) {
+                    lastCopiedSelection = selection
+                }
+            })
+        }
         const handleFocusIn = () => {
             onFocusChangeRef.current?.(true)
         }
@@ -175,6 +228,7 @@ export function TerminalView(props: {
             onFocusChangeRef.current?.(false)
         }
         container.addEventListener('pointerdown', handlePointerDown, { signal: abortController.signal })
+        container.addEventListener('pointerup', tryCopyCurrentSelection, { signal: abortController.signal })
         container.addEventListener('focusin', handleFocusIn, { signal: abortController.signal })
         container.addEventListener('focusout', handleFocusOut, { signal: abortController.signal })
 
@@ -197,16 +251,11 @@ export function TerminalView(props: {
 
             selectionCopyTimer = setTimeout(() => {
                 if (!copyOnSelectRef.current || !terminal.hasSelection()) {
+                    lastCopiedSelection = ''
                     return
                 }
-                const selection = terminal.getSelection()
-                if (!selection) {
-                    return
-                }
-                void navigator.clipboard?.writeText(selection).catch(() => {
-                    // ignore clipboard permission failures
-                })
-            }, 120)
+                tryCopyCurrentSelection()
+            }, 40)
         })
 
         const refreshFont = (forceRemeasure = false) => {
