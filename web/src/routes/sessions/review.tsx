@@ -6,6 +6,7 @@ import { useSession } from '@/hooks/queries/useSession'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
 import { useReviewAppearance } from '@/hooks/useReviewAppearance'
+import { useTheme } from '@/hooks/useTheme'
 import { LoadingState } from '@/components/LoadingState'
 import { SplitTerminalPanel } from '@/components/SplitTerminalPanel'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
@@ -55,6 +56,30 @@ function TerminalIcon() {
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m4 17 6-6-6-6" />
             <path d="M12 19h8" />
+        </svg>
+    )
+}
+
+function SunIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2" />
+            <path d="M12 20v2" />
+            <path d="m4.93 4.93 1.41 1.41" />
+            <path d="m17.66 17.66 1.41 1.41" />
+            <path d="M2 12h2" />
+            <path d="M20 12h2" />
+            <path d="m6.34 17.66-1.41 1.41" />
+            <path d="m19.07 4.93-1.41 1.41" />
+        </svg>
+    )
+}
+
+function MoonIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3a6 6 0 1 0 9 9 9 9 0 1 1-9-9" />
         </svg>
     )
 }
@@ -416,22 +441,25 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                     const hasSyntax = syntaxNode !== undefined
                                     const changeMark = line.kind === 'add' ? '+' : line.kind === 'delete' ? '-' : ' '
                                     const diffSurfaceClass = line.kind === 'add'
-                                        ? 'bg-emerald-500/10'
+                                        ? 'bg-[var(--app-diff-added-bg)]'
                                         : line.kind === 'delete'
-                                            ? 'bg-red-500/10'
+                                            ? 'bg-[var(--app-diff-removed-bg)]'
                                             : 'bg-transparent'
-                                    const contentSurfaceClass = highlighted
-                                        ? 'bg-[var(--code-line-selected)]'
-                                        : line.kind === 'add'
-                                            ? 'bg-emerald-500/10'
-                                            : line.kind === 'delete'
-                                                ? 'bg-red-500/10'
+                                    const contentSurfaceClass = line.kind === 'add'
+                                        ? 'bg-[var(--app-diff-added-bg)]'
+                                        : line.kind === 'delete'
+                                            ? 'bg-[var(--app-diff-removed-bg)]'
+                                            : highlighted
+                                                ? 'bg-[var(--code-line-selected)]'
                                                 : 'bg-[var(--code-bg)]'
+                                    const rowSelectionClass = highlighted
+                                        ? 'shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--review-accent)_38%,transparent)]'
+                                        : ''
 
                                     return (
                                         <div key={`${props.file.filePath}-${hunkIndex}-${lineIndex}`} className={highlighted ? 'border-l-2 border-l-[var(--review-accent)]/60' : ''}>
                                             <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12.5px] font-normal leading-[1.6] antialiased ${
-                                                highlighted ? 'bg-[var(--code-line-selected)]' : 'hover:bg-[var(--code-line-hover)]'
+                                                highlighted ? rowSelectionClass : 'hover:bg-[var(--code-line-hover)]'
                                             }`}>
                                                 <button
                                                     type="button"
@@ -449,13 +477,13 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                 >
                                                     +
                                                 </button>
-                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass}`}>
+                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${line.kind === 'context' && highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass}`}>
                                                     {'oldLine' in line ? line.oldLine : ''}
                                                 </div>
-                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass}`}>
+                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${line.kind === 'context' && highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass}`}>
                                                     {'newLine' in line ? line.newLine : ''}
                                                 </div>
-                                                <div className={`px-1 py-1.5 text-center select-none ${highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass} ${
+                                                <div className={`px-1 py-1.5 text-center select-none ${line.kind === 'context' && highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass} ${
                                                     line.kind === 'add'
                                                         ? 'text-[var(--app-diff-added-text)]'
                                                         : line.kind === 'delete'
@@ -610,7 +638,8 @@ export default function ReviewPage() {
     const { sessions: allSessions } = useSessions(api)
     const { copy, copied } = useCopyToClipboard()
     const { reviewBaseMode } = useReviewBaseMode()
-    const { reviewAppearance } = useReviewAppearance()
+    const { reviewAppearance, setReviewAppearance } = useReviewAppearance()
+    const { colorScheme } = useTheme()
     const reviewBaseModeOptions = getReviewBaseModeOptions()
     const mode: ReviewMode = search.mode === 'working' ? 'working' : 'branch'
     const selectedPathFromSearch = typeof search.path === 'string' ? search.path : ''
@@ -1074,6 +1103,10 @@ export default function ReviewPage() {
     }, [api, closingSplitSessionId, splitSessionId])
 
     const splitSessionStarting = splitSessionId !== null && pendingSplitStartupSessionId === splitSessionId
+    const effectiveReviewScheme = reviewAppearance === 'system' ? colorScheme : reviewAppearance
+    const toggleReviewAppearance = useCallback(() => {
+        setReviewAppearance(effectiveReviewScheme === 'dark' ? 'light' : 'dark')
+    }, [effectiveReviewScheme, setReviewAppearance])
 
     if (!session) {
         return <div className="flex h-full items-center justify-center"><LoadingState label="Loading review…" className="text-sm" /></div>
@@ -1107,6 +1140,15 @@ export default function ReviewPage() {
                         title="Refresh"
                     >
                         <RefreshIcon />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={toggleReviewAppearance}
+                        className="inline-flex h-8 items-center justify-center gap-2 rounded-full border border-[var(--app-border)] px-3 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+                        title={effectiveReviewScheme === 'dark' ? 'Switch review to light mode' : 'Switch review to dark mode'}
+                    >
+                        {effectiveReviewScheme === 'dark' ? <SunIcon /> : <MoonIcon />}
+                        <span>{effectiveReviewScheme === 'dark' ? 'Light' : 'Dark'}</span>
                     </button>
                     <button
                         type="button"
@@ -1272,8 +1314,8 @@ export default function ReviewPage() {
                                                 ) : null}
                                             </div>
                                             <div className="shrink-0 text-right text-[10px]">
-                                                <div className="text-emerald-600">+{entry.added ?? '-'}</div>
-                                                <div className="text-red-600">-{entry.removed ?? '-'}</div>
+                                                <div className="text-[var(--app-diff-added-text)]">+{entry.added ?? '-'}</div>
+                                                <div className="text-[var(--app-diff-removed-text)]">-{entry.removed ?? '-'}</div>
                                             </div>
                                         </button>
                                     )

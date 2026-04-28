@@ -8,6 +8,7 @@ import { eventToShortcutLabel, getOpenFileShortcut, setOpenFileShortcut } from '
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { useTerminalCopyOnSelect } from '@/hooks/useTerminalCopyOnSelect'
 import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
+import { getReviewAppearanceOptions, useReviewAppearance } from '@/hooks/useReviewAppearance'
 import { PROTOCOL_VERSION } from '@maglev/protocol'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
@@ -87,10 +88,12 @@ export default function SettingsPage() {
     const { autoScroll, setAutoScroll } = useAutoScroll()
     const { copyOnSelect, setCopyOnSelect } = useTerminalCopyOnSelect()
     const { reviewBaseMode, setReviewBaseMode } = useReviewBaseMode()
+    const { reviewAppearance, setReviewAppearance } = useReviewAppearance()
 
     const fontScaleOptions = getFontScaleOptions()
     const appearanceOptions = getAppearanceOptions()
     const reviewBaseModeOptions = getReviewBaseModeOptions()
+    const reviewAppearanceOptions = getReviewAppearanceOptions()
     const currentLocale = locales.find((loc) => loc.value === locale)
     const currentAppearanceLabel = appearanceOptions.find((opt) => opt.value === appearance)?.labelKey ?? 'settings.display.appearance.system'
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
@@ -360,12 +363,14 @@ export default function SettingsPage() {
                                 role="switch"
                                 aria-checked={autoScroll}
                                 onClick={() => setAutoScroll(!autoScroll)}
-                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
-                                    autoScroll ? 'bg-[var(--app-link)]' : 'bg-[var(--app-border)]'
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                                    autoScroll
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)]'
+                                        : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
                                 }`}
                             >
                                 <span
-                                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                                    className={`pointer-events-none inline-block h-5 w-5 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] shadow-sm transition-transform ${
                                         autoScroll ? 'translate-x-5' : 'translate-x-0'
                                     }`}
                                 />
@@ -381,12 +386,14 @@ export default function SettingsPage() {
                                 role="switch"
                                 aria-checked={copyOnSelect}
                                 onClick={() => setCopyOnSelect(!copyOnSelect)}
-                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
-                                    copyOnSelect ? 'bg-[var(--app-link)]' : 'bg-[var(--app-border)]'
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                                    copyOnSelect
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)]'
+                                        : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
                                 }`}
                             >
                                 <span
-                                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                                    className={`pointer-events-none inline-block h-5 w-5 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] shadow-sm transition-transform ${
                                         copyOnSelect ? 'translate-x-5' : 'translate-x-0'
                                     }`}
                                 />
@@ -397,6 +404,38 @@ export default function SettingsPage() {
                     <div className="border-b border-[var(--app-divider)]">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
                             Review
+                        </div>
+                        <div className="px-3 py-3 border-b border-[var(--app-divider)]">
+                            <div className="text-[var(--app-fg)]">Review appearance</div>
+                            <div className="mt-1 text-xs text-[var(--app-hint)]">
+                                Override light or dark mode inside review without changing the rest of Maglev
+                            </div>
+                            <div className="mt-3 space-y-2">
+                                {reviewAppearanceOptions.map((option) => {
+                                    const checked = reviewAppearance === option.value
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setReviewAppearance(option.value)}
+                                            className={`flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
+                                                checked
+                                                    ? 'border-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                    : 'border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]'
+                                            }`}
+                                            aria-pressed={checked}
+                                        >
+                                            <div>
+                                                <div className={`text-sm font-medium ${checked ? 'text-[var(--app-link)]' : 'text-[var(--app-fg)]'}`}>
+                                                    {option.label}
+                                                </div>
+                                                <div className="mt-1 text-xs text-[var(--app-hint)]">{option.description}</div>
+                                            </div>
+                                            {checked ? <CheckIcon className="mt-0.5 shrink-0 text-[var(--app-link)]" /> : null}
+                                        </button>
+                                    )
+                                })}
+                            </div>
                         </div>
                         <div className="px-3 py-3">
                             <div className="text-[var(--app-fg)]">Branch diff base</div>
