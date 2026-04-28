@@ -394,7 +394,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                     <LoadingState label="Loading patch…" className="text-sm" />
                 </div>
             ) : props.queryState.data && !props.queryState.data.success ? (
-                <div className="px-4 py-4 text-sm text-red-600">{props.queryState.data.error}</div>
+                <div className="px-4 py-4 text-sm text-[var(--app-badge-error-text)]">{props.queryState.data.error}</div>
             ) : !props.file.lines.length ? (
                 <div className="px-4 py-4 text-sm text-[var(--app-hint)]">No diff for this file.</div>
                     ) : (
@@ -1114,9 +1114,10 @@ export default function ReviewPage() {
 
     return (
         <div
-            className="review-theme-scope flex h-full min-h-0 flex-col bg-[var(--app-bg)]"
+            className="review-theme-scope flex h-full min-h-0 bg-[var(--app-bg)]"
             data-review-theme={reviewAppearance === 'system' ? undefined : reviewAppearance}
         >
+            <div className="flex min-w-0 flex-1 flex-col">
             <div className="border-b border-[var(--app-border)] p-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
                 <div className="flex items-center gap-2">
                     <button
@@ -1127,7 +1128,7 @@ export default function ReviewPage() {
                         <BackIcon />
                     </button>
                     <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold">Review</div>
+                        <div className="truncate font-semibold text-[var(--app-fg)]">Review</div>
                         <div className="truncate text-xs text-[var(--app-hint)]">{subtitle}</div>
                     </div>
                     <button
@@ -1253,8 +1254,8 @@ export default function ReviewPage() {
                 </div>
             </div>
 
-            {reviewError ? <div className="px-3 py-2 text-sm text-red-600">{reviewError}</div> : null}
-            {saveError ? <div className="px-3 py-2 text-sm text-red-600">{saveError}</div> : null}
+            {reviewError ? <div className="px-3 py-2 text-sm text-[var(--app-badge-error-text)]">{reviewError}</div> : null}
+            {saveError ? <div className="px-3 py-2 text-sm text-[var(--app-badge-error-text)]">{saveError}</div> : null}
 
             <div className="min-h-0 flex flex-1 overflow-hidden">
                 <div className="relative shrink-0 border-r border-[var(--app-border)] bg-[var(--app-secondary-bg)]" style={{ width: `${sidebarWidth}px` }}>
@@ -1268,14 +1269,14 @@ export default function ReviewPage() {
                         <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
                     </div>
                     <div className="flex items-center justify-between gap-2 border-b border-[var(--app-border)] px-3 py-2">
-                        <div className="text-sm font-medium">Changed files</div>
+                        <div className="text-sm font-medium text-[var(--app-fg)]">Changed files</div>
                         <div className="text-[11px] text-[var(--app-hint)]">{expandedCount}/{diffFiles.length} open</div>
                     </div>
                     <div className="h-full overflow-y-auto">
                         {summaryQuery.isLoading ? (
                             <div className="px-3 py-4 text-sm text-[var(--app-hint)]">Loading diff…</div>
                         ) : summaryQuery.data && !summaryQuery.data.success ? (
-                            <div className="px-3 py-4 text-sm text-red-600">{summaryQuery.data.error}</div>
+                            <div className="px-3 py-4 text-sm text-[var(--app-badge-error-text)]">{summaryQuery.data.error}</div>
                         ) : sidebarEntries.length ? (
                             <div className="py-1">
                                 {sidebarEntries.map((entry) => (
@@ -1379,36 +1380,38 @@ export default function ReviewPage() {
                     )}
                 </div>
 
-                {splitSessionId ? (
-                    <div className="relative flex shrink-0 border-l border-[var(--app-border)]" style={{ width: `${splitPanelWidth}px` }}>
-                        <div
-                            role="separator"
-                            aria-orientation="vertical"
-                            aria-label="Resize review terminal"
-                            onPointerDown={handleSplitResizeStart}
-                            className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
-                        >
-                            <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
-                        </div>
-                        <SplitTerminalPanel
-                            sessionId={splitSessionId}
-                            onClose={handleCloseSplit}
-                            isClosing={closingSplitSessionId === splitSessionId}
-                            starting={splitSessionStarting}
-                            title="Review terminal"
-                            subtitle={session.metadata?.path ?? undefined}
-                            onNavigate={(id) => {
-                                setSplitSessionId(null)
-                                setPendingSplitStartupSessionId((current) => current === id ? null : current)
-                                void navigate({
-                                    to: '/sessions/$sessionId',
-                                    params: { sessionId: id },
-                                })
-                            }}
-                        />
-                    </div>
-                ) : null}
             </div>
+            </div>
+
+            {splitSessionId ? (
+                <div className="relative flex h-full shrink-0 border-l border-[var(--app-border)]" style={{ width: `${splitPanelWidth}px` }}>
+                    <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize review terminal"
+                        onPointerDown={handleSplitResizeStart}
+                        className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
+                    >
+                        <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
+                    </div>
+                    <SplitTerminalPanel
+                        sessionId={splitSessionId}
+                        onClose={handleCloseSplit}
+                        isClosing={closingSplitSessionId === splitSessionId}
+                        starting={splitSessionStarting}
+                        title="Review terminal"
+                        subtitle={session.metadata?.path ?? undefined}
+                        onNavigate={(id) => {
+                            setSplitSessionId(null)
+                            setPendingSplitStartupSessionId((current) => current === id ? null : current)
+                            void navigate({
+                                to: '/sessions/$sessionId',
+                                params: { sessionId: id },
+                            })
+                        }}
+                    />
+                </div>
+            ) : null}
         </div>
     )
 }

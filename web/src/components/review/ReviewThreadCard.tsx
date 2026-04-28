@@ -74,7 +74,7 @@ export function ReviewThreadCard(props: {
                         type="button"
                         disabled={props.disabled}
                         onClick={props.onDelete}
-                        className="rounded-full border border-red-300/70 px-2.5 py-1 text-[11px] font-medium text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-full border border-[var(--app-badge-error-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-badge-error-text)] transition-colors hover:bg-[var(--app-badge-error-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         Delete
                     </button>

@@ -1557,8 +1557,11 @@ export default function TerminalPage() {
     const helperCommand = bridge ? `${bridge.helperScriptPath} <command ...>` : null
     const sessionLabel = `Session ${sessionId}`
 
+    const previewPanelOpen = !splitSessionId && Boolean(previewFilePath && loadedSessionId)
+
     return (
-        <div className="relative flex h-full flex-col">
+        <div className="relative flex h-full min-h-0 bg-[var(--app-bg)]">
+            <div className="flex min-w-0 flex-1 flex-col">
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="border-b border-[var(--app-border)] p-3">
                     <div className="flex items-center gap-2">
@@ -1800,24 +1803,6 @@ export default function TerminalPage() {
                                     params: { sessionId: id },
                                 })
                             }}
-                        />
-                    </div>
-                ) : previewFilePath && loadedSessionId ? (
-                    <div className="relative flex shrink-0 border-l border-[var(--app-border)]" style={{ width: `${previewPanelWidth}px` }}>
-                        <div
-                            role="separator"
-                            aria-orientation="vertical"
-                            aria-label="Resize file preview"
-                            onPointerDown={handlePreviewResizeStart}
-                            className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
-                        >
-                            <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
-                        </div>
-                        <FilePreviewPanel
-                            sessionId={loadedSessionId}
-                            filePath={previewFilePath}
-                            api={api}
-                            onClose={() => setPreviewFilePath(null)}
                         />
                     </div>
                 ) : null}
@@ -2335,6 +2320,27 @@ export default function TerminalPage() {
                     </div>
                 </DialogContent>
             </Dialog>
+            </div>
+
+            {previewPanelOpen && previewFilePath && loadedSessionId ? (
+                <div className="relative flex h-full shrink-0 border-l border-[var(--app-border)]" style={{ width: `${previewPanelWidth}px` }}>
+                    <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize file preview"
+                        onPointerDown={handlePreviewResizeStart}
+                        className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
+                    >
+                        <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
+                    </div>
+                    <FilePreviewPanel
+                        sessionId={loadedSessionId}
+                        filePath={previewFilePath}
+                        api={api}
+                        onClose={() => setPreviewFilePath(null)}
+                    />
+                </div>
+            ) : null}
         </div>
     )
 }

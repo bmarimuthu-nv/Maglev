@@ -484,12 +484,12 @@ export default function SettingsPage() {
                         <div className="flex w-full items-center justify-between px-3 py-3">
                             <span className="text-[var(--app-fg)]">{t('settings.about.website')}</span>
                             <a
-                                href="https://maglev.run"
+                                href="https://github.com/bmarimuthu-nv/Maglev"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-[var(--app-link)] hover:underline"
                             >
-                                maglev.run
+                                github.com/bmarimuthu-nv/Maglev
                             </a>
                         </div>
                         <div className="flex w-full items-center justify-between px-3 py-3">
