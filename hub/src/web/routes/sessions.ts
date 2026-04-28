@@ -8,6 +8,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 import { configuration } from '../../configuration'
 import { resolveTerminalSupervisionBridgeLocation } from '../../supervision/bridge'
+import { ensureNotesParentDir, resolveSessionNotesLocation } from '../../notes/storage'
 
 const updateSessionSchema = z.object({
     name: z.string().trim().min(1).max(255).optional(),
@@ -29,14 +30,6 @@ const shellSessionOptionsSchema = z.object({
 const notesContentSchema = z.object({
     content: z.string()
 })
-
-function getNotesDir(): string {
-    return join(configuration.dataDir, 'notes')
-}
-
-function getNotesFilePath(sessionId: string): string {
-    return join(getNotesDir(), `${sessionId}.txt`)
-}
 
 const attachTerminalSupervisionSchema = z.object({
     workerSessionId: z.string().min(1)
@@ -627,7 +620,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return sessionResult
         }
 
-        const filePath = getNotesFilePath(sessionResult.sessionId)
+        const { fsPath: filePath } = resolveSessionNotesLocation(sessionResult.session)
         if (!existsSync(filePath)) {
             return c.json({ success: true, content: null })
         }
@@ -659,15 +652,12 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
-            const notesDir = getNotesDir()
-            if (!existsSync(notesDir)) {
-                mkdirSync(notesDir, { recursive: true })
-            }
-            writeFileSync(getNotesFilePath(sessionResult.sessionId), parsed.data.content, 'utf-8')
+            const location = resolveSessionNotesLocation(sessionResult.session)
+            ensureNotesParentDir(location.fsPath)
+            writeFileSync(location.fsPath, parsed.data.content, 'utf-8')
 
-            // Ensure session metadata has notesPath set so the UI knows notes exist
-            if (!sessionResult.session.metadata?.notesPath) {
-                await engine.setSessionNotesPath(sessionResult.sessionId, `~/.maglev/notes/${sessionResult.sessionId}.txt`)
+            if (sessionResult.session.metadata?.notesPath !== location.displayPath) {
+                await engine.setSessionNotesPath(sessionResult.sessionId, location.displayPath)
             }
 
             return c.json({ ok: true })

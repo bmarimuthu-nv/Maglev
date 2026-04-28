@@ -421,6 +421,7 @@ export default function TerminalPage() {
         } catch { return FILE_PREVIEW_DEFAULT_WIDTH }
     })
     const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
+    const [pendingSplitStartupSessionId, setPendingSplitStartupSessionId] = useState<string | null>(null)
     const [closingSplitSessionId, setClosingSplitSessionId] = useState<string | null>(null)
     const [mainTerminalFocused, setMainTerminalFocused] = useState(false)
     const [splitPanelWidth, setSplitPanelWidth] = useState(() => {
@@ -453,6 +454,17 @@ export default function TerminalPage() {
             setClosingSplitSessionId(null)
         }
     }, [allSessions, closingSplitSessionId])
+
+    useEffect(() => {
+        if (!pendingSplitStartupSessionId) {
+            return
+        }
+
+        const pendingSession = allSessions.find((candidate) => candidate.id === pendingSplitStartupSessionId)
+        if (pendingSession?.active) {
+            setPendingSplitStartupSessionId(null)
+        }
+    }, [allSessions, pendingSplitStartupSessionId])
 
     const { copied, copy } = useCopyToClipboard()
     const notesAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -617,11 +629,12 @@ export default function TerminalPage() {
                 const modifierState = modifierStateRef.current
                 dispatchSequence(data, modifierState)
             })
+            replay()
             if (terminalState.status === 'connected') {
                 focusTerminalIfAllowed()
             }
         },
-        [dispatchSequence, focusTerminalIfAllowed, terminalState.status]
+        [dispatchSequence, focusTerminalIfAllowed, replay, terminalState.status]
     )
 
     const errorMessage = terminalState.status === 'error' ? terminalState.error : null
@@ -1215,6 +1228,7 @@ export default function TerminalPage() {
             )
             if (result.type === 'success') {
                 setSplitSessionId(result.sessionId)
+                setPendingSplitStartupSessionId(result.sessionId)
             }
         } catch {
             // silently fail
@@ -1230,6 +1244,7 @@ export default function TerminalPage() {
         try {
             await api.closeSession(splitSessionId)
             setSplitSessionId((current) => current === splitSessionId ? null : current)
+            setPendingSplitStartupSessionId((current) => current === splitSessionId ? null : current)
         } catch {
             setClosingSplitSessionId(null)
         }
@@ -1244,8 +1259,34 @@ export default function TerminalPage() {
             childRole: null
         })
         setSplitSessionId((current) => current === childSessionId ? null : current)
+        setPendingSplitStartupSessionId((current) => current === childSessionId ? null : current)
         setClosingSplitSessionId((current) => current === childSessionId ? null : current)
     }, [api])
+
+    useEffect(() => {
+        if (!splitSessionId) {
+            return
+        }
+
+        const splitSession = allSessions.find((candidate) => candidate.id === splitSessionId)
+        if (splitSession?.active) {
+            if (pendingSplitStartupSessionId === splitSessionId) {
+                setPendingSplitStartupSessionId(null)
+            }
+            return
+        }
+        if (pendingSplitStartupSessionId === splitSessionId) {
+            return
+        }
+        if (!splitSession || !splitSession.active) {
+            setSplitSessionId(null)
+            if (closingSplitSessionId === splitSessionId) {
+                setClosingSplitSessionId(null)
+            }
+        }
+    }, [allSessions, closingSplitSessionId, pendingSplitStartupSessionId, splitSessionId])
+
+    const splitSessionStarting = splitSessionId !== null && pendingSplitStartupSessionId === splitSessionId
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -1750,10 +1791,12 @@ export default function TerminalPage() {
                             onClose={handleCloseSplit}
                             onUnsplit={handleUnsplitTerminal}
                             isClosing={closingSplitSessionId === splitSessionId}
+                            starting={splitSessionStarting}
                             onNavigate={(id) => {
                                 setSplitSessionId(null)
+                                setPendingSplitStartupSessionId((current) => current === id ? null : current)
                                 void navigate({
-                                    to: '/sessions/$sessionId/terminal',
+                                    to: '/sessions/$sessionId',
                                     params: { sessionId: id },
                                 })
                             }}
@@ -2092,7 +2135,7 @@ export default function TerminalPage() {
                     <DialogHeader>
                         <DialogTitle>Create Notes</DialogTitle>
                         <DialogDescription>
-                            Attach a notes file to this session. Notes are stored in ~/.maglev/notes/ and won't affect your git tree.
+                            Attach a notes file to this session. Notes are stored under MAGLEV_HOME and won't affect your git tree.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="mt-4 flex flex-col gap-3">

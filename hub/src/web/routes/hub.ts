@@ -4,6 +4,8 @@ import type { HubLaunchFolder } from '../../hubConfig'
 import type { SyncEngine } from '../../sync/syncEngine'
 import { configuration } from '../../configuration'
 import { z } from 'zod'
+import { ensureNotesParentDir, resolveSessionNotesLocation } from '../../notes/storage'
+import { writeFileSync } from 'node:fs'
 
 const spawnBodySchema = z.object({
     directory: z.string().min(1),
@@ -91,14 +93,17 @@ export function createHubRoutes(
                 await engine.renameSession(result.sessionId, parsed.data.name.trim())
             }
             if (parsed.data.notesPath?.trim()) {
+                const spawnedSession = engine.getSessionByNamespace(result.sessionId, namespace)
+                if (!spawnedSession) {
+                    return c.json({ error: 'Spawned session not found' }, 500)
+                }
                 await engine.setSessionNotesPath(result.sessionId, parsed.data.notesPath.trim())
+                const refreshedSession = engine.getSessionByNamespace(result.sessionId, namespace) ?? spawnedSession
+                const notesLocation = resolveSessionNotesLocation(refreshedSession)
+                await engine.setSessionNotesPath(result.sessionId, notesLocation.displayPath)
                 if (parsed.data.createNotesFile) {
-                    await engine.writeSessionFile(
-                        result.sessionId,
-                        parsed.data.notesPath.trim(),
-                        '',
-                        null
-                    )
+                    ensureNotesParentDir(notesLocation.fsPath)
+                    writeFileSync(notesLocation.fsPath, '', 'utf-8')
                 }
             }
             if (parsed.data.parentSessionId) {
