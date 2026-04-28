@@ -5,6 +5,7 @@ import { useAppContext } from '@/lib/app-context'
 import { useSession } from '@/hooks/queries/useSession'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
+import { useReviewAppearance } from '@/hooks/useReviewAppearance'
 import { LoadingState } from '@/components/LoadingState'
 import { SplitTerminalPanel } from '@/components/SplitTerminalPanel'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
@@ -19,6 +20,18 @@ const REVIEW_SPLIT_TERMINAL_WIDTH_KEY = 'maglev:reviewSplitTerminalWidth'
 const REVIEW_SPLIT_TERMINAL_DEFAULT_WIDTH = 560
 const REVIEW_SPLIT_TERMINAL_MIN_WIDTH = 320
 const REVIEW_SPLIT_TERMINAL_MAX_WIDTH = 1200
+const REVIEW_FILE_LIST_WIDTH_KEY = 'maglev:reviewFileListWidth'
+const REVIEW_FILE_LIST_DEFAULT_WIDTH = 320
+const REVIEW_FILE_LIST_MIN_WIDTH = 220
+const REVIEW_FILE_LIST_MAX_WIDTH = 520
+
+function isMissingReviewFileError(message: string): boolean {
+    const normalized = message.toLowerCase()
+    return normalized.includes('enoent')
+        || normalized.includes('enotdir')
+        || normalized.includes('no such file')
+        || normalized.includes('not a directory')
+}
 
 function BackIcon() {
     return (
@@ -342,8 +355,8 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                     ) : null}
                 </div>
                 <div className="shrink-0 text-right text-xs">
-                    <div className="text-emerald-600">+{props.file.added ?? '-'}</div>
-                    <div className="text-red-600">-{props.file.removed ?? '-'}</div>
+                    <div className="text-[var(--app-diff-added-text)]">+{props.file.added ?? '-'}</div>
+                    <div className="text-[var(--app-diff-removed-text)]">-{props.file.removed ?? '-'}</div>
                 </div>
             </div>
 
@@ -389,7 +402,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
 
                     {visibleHunks.map((hunk, hunkIndex) => (
                         <div key={`${props.file.filePath}-${hunk.header}-${hunkIndex}`}>
-                        <div className="border-b border-[var(--code-border)] bg-[var(--app-secondary-bg)]/70 px-4 py-2 font-mono text-[11.5px] font-normal text-[var(--app-hint)]">
+                        <div className="border-b border-[var(--code-border)] bg-[var(--app-secondary-bg)]/70 px-4 py-2 font-mono text-[12px] font-normal text-[var(--app-fg)]/72">
                                 {hunk.header}
                             </div>
                             <div>
@@ -402,12 +415,24 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                     const syntaxNode = highlightedLines[syntaxLineIdx++]
                                     const hasSyntax = syntaxNode !== undefined
                                     const changeMark = line.kind === 'add' ? '+' : line.kind === 'delete' ? '-' : ' '
+                                    const diffSurfaceClass = line.kind === 'add'
+                                        ? 'bg-emerald-500/10'
+                                        : line.kind === 'delete'
+                                            ? 'bg-red-500/10'
+                                            : 'bg-transparent'
+                                    const contentSurfaceClass = highlighted
+                                        ? 'bg-[var(--code-line-selected)]'
+                                        : line.kind === 'add'
+                                            ? 'bg-emerald-500/10'
+                                            : line.kind === 'delete'
+                                                ? 'bg-red-500/10'
+                                                : 'bg-[var(--code-bg)]'
 
                                     return (
                                         <div key={`${props.file.filePath}-${hunkIndex}-${lineIndex}`} className={highlighted ? 'border-l-2 border-l-[var(--review-accent)]/60' : ''}>
-                                            <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12px] font-normal leading-[1.56] antialiased ${
-                                                line.kind === 'add' ? 'bg-emerald-500/10' : line.kind === 'delete' ? 'bg-red-500/10' : ''
-                                            } ${highlighted ? 'bg-[var(--code-line-selected)]' : 'hover:bg-[var(--code-line-hover)]'}`}>
+                                            <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12.5px] font-normal leading-[1.6] antialiased ${
+                                                highlighted ? 'bg-[var(--code-line-selected)]' : 'hover:bg-[var(--code-line-hover)]'
+                                            }`}>
                                                 <button
                                                     type="button"
                                                     disabled={!anchor}
@@ -424,25 +449,25 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                 >
                                                     +
                                                 </button>
-                                                <div className="border-r border-[var(--code-border)] bg-[var(--code-gutter-bg)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)]">
+                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass}`}>
                                                     {'oldLine' in line ? line.oldLine : ''}
                                                 </div>
-                                                <div className="border-r border-[var(--code-border)] bg-[var(--code-gutter-bg)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)]">
+                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass}`}>
                                                     {'newLine' in line ? line.newLine : ''}
                                                 </div>
-                                                <div className={`px-1 py-1.5 text-center select-none ${
+                                                <div className={`px-1 py-1.5 text-center select-none ${highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass} ${
                                                     line.kind === 'add'
-                                                        ? 'text-emerald-700'
+                                                        ? 'text-[var(--app-diff-added-text)]'
                                                         : line.kind === 'delete'
-                                                            ? 'text-red-700'
+                                                            ? 'text-[var(--app-diff-removed-text)]'
                                                             : 'text-[var(--app-hint)]'
                                                 }`}>
                                                     {changeMark}
                                                 </div>
-                                                <div className={`shiki min-w-0 whitespace-pre-wrap break-words bg-[var(--code-bg)] px-3 py-1.5 text-[var(--app-fg)] ${
+                                                <div className={`shiki min-w-0 whitespace-pre-wrap break-words px-3 py-1.5 text-[var(--app-fg)] ${contentSurfaceClass} ${
                                                     hasSyntax
                                                         ? ''
-                                                        : line.kind === 'add' ? 'text-emerald-700' : line.kind === 'delete' ? 'text-red-700' : 'text-[var(--app-fg)]'
+                                                        : line.kind === 'add' ? 'text-[var(--app-diff-added-text)]' : line.kind === 'delete' ? 'text-[var(--app-diff-removed-text)]' : 'text-[var(--app-fg)]'
                                                 }`}>
                                                     {syntaxNode ?? (line.text || ' ')}
                                                 </div>
@@ -585,6 +610,7 @@ export default function ReviewPage() {
     const { sessions: allSessions } = useSessions(api)
     const { copy, copied } = useCopyToClipboard()
     const { reviewBaseMode } = useReviewBaseMode()
+    const { reviewAppearance } = useReviewAppearance()
     const reviewBaseModeOptions = getReviewBaseModeOptions()
     const mode: ReviewMode = search.mode === 'working' ? 'working' : 'branch'
     const selectedPathFromSearch = typeof search.path === 'string' ? search.path : ''
@@ -609,6 +635,14 @@ export default function ReviewPage() {
             return saved ? Math.max(REVIEW_SPLIT_TERMINAL_MIN_WIDTH, Math.min(REVIEW_SPLIT_TERMINAL_MAX_WIDTH, Number(saved))) : REVIEW_SPLIT_TERMINAL_DEFAULT_WIDTH
         } catch {
             return REVIEW_SPLIT_TERMINAL_DEFAULT_WIDTH
+        }
+    })
+    const [sidebarWidth, setSidebarWidth] = useState(() => {
+        try {
+            const saved = localStorage.getItem(REVIEW_FILE_LIST_WIDTH_KEY)
+            return saved ? Math.max(REVIEW_FILE_LIST_MIN_WIDTH, Math.min(REVIEW_FILE_LIST_MAX_WIDTH, Number(saved))) : REVIEW_FILE_LIST_DEFAULT_WIDTH
+        } catch {
+            return REVIEW_FILE_LIST_DEFAULT_WIDTH
         }
     })
     const initializedExpandedRef = useRef(false)
@@ -655,7 +689,7 @@ export default function ReviewPage() {
                 }
                 if (!result.success) {
                     const errorMessage = result.error ?? 'Failed to load review file'
-                    if (errorMessage.toLowerCase().includes('enoent') || errorMessage.toLowerCase().includes('no such file')) {
+                    if (isMissingReviewFileError(errorMessage)) {
                         setReviewFile(createEmptyReviewFile(workspacePath))
                         setReviewHash(null)
                         reviewHashRef.current = null
@@ -976,6 +1010,27 @@ export default function ReviewPage() {
         window.addEventListener('pointerup', onUp)
     }, [splitPanelWidth])
 
+    const handleSidebarResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault()
+        const startX = event.clientX
+        const startWidth = sidebarWidth
+
+        const onMove = (e: globalThis.PointerEvent) => {
+            const delta = e.clientX - startX
+            const next = Math.max(REVIEW_FILE_LIST_MIN_WIDTH, Math.min(REVIEW_FILE_LIST_MAX_WIDTH, startWidth + delta))
+            setSidebarWidth(next)
+            try { localStorage.setItem(REVIEW_FILE_LIST_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+        }
+
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+    }, [sidebarWidth])
+
     const handleOpenSplitTerminal = useCallback(async () => {
         if (!api || !session?.metadata?.path) {
             return
@@ -1025,7 +1080,10 @@ export default function ReviewPage() {
     }
 
     return (
-        <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]">
+        <div
+            className="review-theme-scope flex h-full min-h-0 flex-col bg-[var(--app-bg)]"
+            data-review-theme={reviewAppearance === 'system' ? undefined : reviewAppearance}
+        >
             <div className="border-b border-[var(--app-border)] p-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
                 <div className="flex items-center gap-2">
                     <button
@@ -1157,7 +1215,16 @@ export default function ReviewPage() {
             {saveError ? <div className="px-3 py-2 text-sm text-red-600">{saveError}</div> : null}
 
             <div className="min-h-0 flex flex-1 overflow-hidden">
-                <div className="w-[320px] shrink-0 border-r border-[var(--app-border)] bg-[var(--app-secondary-bg)]">
+                <div className="relative shrink-0 border-r border-[var(--app-border)] bg-[var(--app-secondary-bg)]" style={{ width: `${sidebarWidth}px` }}>
+                    <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize changed files panel"
+                        onPointerDown={handleSidebarResizeStart}
+                        className="absolute inset-y-0 right-0 z-10 w-3 translate-x-1/2 cursor-col-resize"
+                    >
+                        <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
+                    </div>
                     <div className="flex items-center justify-between gap-2 border-b border-[var(--app-border)] px-3 py-2">
                         <div className="text-sm font-medium">Changed files</div>
                         <div className="text-[11px] text-[var(--app-hint)]">{expandedCount}/{diffFiles.length} open</div>
@@ -1292,7 +1359,7 @@ export default function ReviewPage() {
                                 setSplitSessionId(null)
                                 setPendingSplitStartupSessionId((current) => current === id ? null : current)
                                 void navigate({
-                                    to: '/sessions/$sessionId/terminal',
+                                    to: '/sessions/$sessionId',
                                     params: { sessionId: id },
                                 })
                             }}
