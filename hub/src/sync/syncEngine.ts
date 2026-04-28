@@ -517,17 +517,17 @@ export class SyncEngine {
         }))
     }
 
-    async setParentSessionId(sessionId: string, parentSessionId: string): Promise<void> {
+    async setParentSessionId(sessionId: string, parentSessionId: string | null): Promise<void> {
         await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
             ...metadata,
-            parentSessionId
+            parentSessionId: parentSessionId ?? undefined
         }))
     }
 
-    async setChildRole(sessionId: string, childRole: 'review-terminal' | 'split-terminal'): Promise<void> {
+    async setChildRole(sessionId: string, childRole: 'review-terminal' | 'split-terminal' | null): Promise<void> {
         await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
             ...metadata,
-            childRole
+            childRole: childRole ?? undefined
         }))
     }
 

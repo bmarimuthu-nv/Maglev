@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { buildCloneRequest, getGroupBranchHint, getSessionRows, getSessionSubgroups, reconcileOrder } from './SessionList'
+import { buildCloneRequest, getGroupBranchHint, getSessionRows, getSessionSubgroups, isVisibleInSessionList, reconcileOrder } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -149,6 +149,30 @@ describe('getSessionRows', () => {
         expect(rows).toHaveLength(2)
         expect(rows[1]?.isChild).toBe(true)
         expect(rows[1]?.sessions[0].metadata?.childRole).toBe('review-terminal')
+    })
+})
+
+describe('isVisibleInSessionList', () => {
+    it('hides split-terminal child sessions from the default session list', () => {
+        expect(isVisibleInSessionList(makeSession({
+            id: 'split-child',
+            metadata: {
+                path: '/repo',
+                parentSessionId: 'parent',
+                childRole: 'split-terminal'
+            }
+        }))).toBe(false)
+    })
+
+    it('keeps review-terminal child sessions visible in the session list', () => {
+        expect(isVisibleInSessionList(makeSession({
+            id: 'review-child',
+            metadata: {
+                path: '/repo',
+                parentSessionId: 'parent',
+                childRole: 'review-terminal'
+            }
+        }))).toBe(true)
     })
 })
 

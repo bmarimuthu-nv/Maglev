@@ -527,6 +527,8 @@ export class ApiClient {
     async updateSession(sessionId: string, updates: {
         name?: string
         directory?: string
+        parentSessionId?: string | null
+        childRole?: 'review-terminal' | 'split-terminal' | null
     }): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'PATCH',

@@ -100,6 +100,10 @@ type ClearSessionsTarget = {
     sessions: SessionSummary[]
 }
 
+export function isVisibleInSessionList(session: SessionSummary): boolean {
+    return session.metadata?.childRole !== 'split-terminal'
+}
+
 function getGroupDisplayName(directory: string): string {
     if (directory === 'Other') return directory
     const parts = directory.split(/[\\/]+/).filter(Boolean)
@@ -944,9 +948,13 @@ export function SessionList(props: {
     const { renderHeader = true, api, selectedSessionId } = props
     const { scopeKey } = useAppContext()
     const queryClient = useQueryClient()
-    const groups = useMemo(
-        () => groupSessionsByDirectory(props.sessions),
+    const visibleSessions = useMemo(
+        () => props.sessions.filter(isVisibleInSessionList),
         [props.sessions]
+    )
+    const groups = useMemo(
+        () => groupSessionsByDirectory(visibleSessions),
+        [visibleSessions]
     )
     const [clearSessionsTarget, setClearSessionsTarget] = useState<ClearSessionsTarget | null>(null)
     const [groupMenuDirectory, setGroupMenuDirectory] = useState<string | null>(null)
@@ -1684,7 +1692,7 @@ export function SessionList(props: {
                     <div className="flex items-center justify-between rounded-[14px] bg-[var(--app-secondary-bg)] px-3 py-2 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_65%,transparent)]">
                         <div>
                             <div className="text-[12px] text-[var(--app-fg)]">
-                                {t('sessions.count', { n: props.sessions.length, m: groups.length })}
+                                {t('sessions.count', { n: visibleSessions.length, m: groups.length })}
                             </div>
                         </div>
                         <button

@@ -1235,6 +1235,18 @@ export default function TerminalPage() {
         }
     }, [api, closingSplitSessionId, splitSessionId])
 
+    const handleUnsplitTerminal = useCallback(async (childSessionId: string) => {
+        if (!api) {
+            return
+        }
+        await api.updateSession(childSessionId, {
+            parentSessionId: null,
+            childRole: null
+        })
+        setSplitSessionId((current) => current === childSessionId ? null : current)
+        setClosingSplitSessionId((current) => current === childSessionId ? null : current)
+    }, [api])
+
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             // Allow the shortcut from the terminal (xterm textarea) since it always has modifiers.
@@ -1736,6 +1748,7 @@ export default function TerminalPage() {
                         <SplitTerminalPanel
                             sessionId={splitSessionId}
                             onClose={handleCloseSplit}
+                            onUnsplit={handleUnsplitTerminal}
                             isClosing={closingSplitSessionId === splitSessionId}
                             onNavigate={(id) => {
                                 setSplitSessionId(null)

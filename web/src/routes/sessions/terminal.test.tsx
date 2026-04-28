@@ -6,6 +6,7 @@ import TerminalPage from './terminal'
 
 const writeMock = vi.fn()
 const closeSessionMock = vi.fn()
+const updateSessionMock = vi.fn()
 const getTerminalSupervisionTargetMock = vi.fn()
 let mockTerminalSocketState: { status: 'idle' | 'connecting' | 'connected' | 'error'; error?: string } = { status: 'connected' }
 const AUTO_SCROLL_KEY = 'maglev-auto-scroll'
@@ -28,6 +29,7 @@ vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
         api: {
             closeSession: closeSessionMock,
+            updateSession: updateSessionMock,
             getTerminalSupervisionTarget: getTerminalSupervisionTargetMock
         },
         token: 'test-token',
@@ -125,8 +127,15 @@ vi.mock('@/components/FilePreviewPanel', () => ({
 }))
 
 vi.mock('@/components/SplitTerminalPanel', () => ({
-    SplitTerminalPanel: (props: { sessionId: string }) => (
-        <div data-testid="split-terminal-panel">{props.sessionId}</div>
+    SplitTerminalPanel: (props: { sessionId: string; onUnsplit?: (sessionId: string) => void }) => (
+        <div data-testid="split-terminal-panel">
+            <span>{props.sessionId}</span>
+            {props.onUnsplit ? (
+                <button type="button" onClick={() => props.onUnsplit?.(props.sessionId)}>
+                    Unsplit
+                </button>
+            ) : null}
+        </div>
     )
 }))
 
@@ -510,6 +519,21 @@ describe('TerminalPage split close behavior', () => {
 
         await waitFor(() => {
             expect(closeSessionMock).toHaveBeenCalledWith('split-session-1')
+        })
+
+        expect(screen.queryByTestId('split-terminal-panel')).not.toBeInTheDocument()
+    })
+
+    it('unsplits the child terminal into a standalone session', async () => {
+        renderWithProviders()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Unsplit' }))
+
+        await waitFor(() => {
+            expect(updateSessionMock).toHaveBeenCalledWith('split-session-1', {
+                parentSessionId: null,
+                childRole: null
+            })
         })
 
         expect(screen.queryByTestId('split-terminal-panel')).not.toBeInTheDocument()

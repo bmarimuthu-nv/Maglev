@@ -11,7 +11,9 @@ import { resolveTerminalSupervisionBridgeLocation } from '../../supervision/brid
 
 const updateSessionSchema = z.object({
     name: z.string().trim().min(1).max(255).optional(),
-    directory: z.string().trim().min(1).max(4000).optional()
+    directory: z.string().trim().min(1).max(4000).optional(),
+    parentSessionId: z.string().trim().min(1).max(255).nullable().optional(),
+    childRole: z.enum(['review-terminal', 'split-terminal']).nullable().optional()
 })
 
 const pinSessionSchema = z.object({
@@ -491,7 +493,12 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid body' }, 400)
         }
 
-        if (parsed.data.name === undefined && parsed.data.directory === undefined) {
+        if (
+            parsed.data.name === undefined
+            && parsed.data.directory === undefined
+            && parsed.data.parentSessionId === undefined
+            && parsed.data.childRole === undefined
+        ) {
             return c.json({ error: 'At least one session update is required' }, 400)
         }
 
@@ -500,6 +507,12 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 name: parsed.data.name,
                 directory: parsed.data.directory
             })
+            if (parsed.data.parentSessionId !== undefined) {
+                await engine.setParentSessionId(sessionResult.sessionId, parsed.data.parentSessionId)
+            }
+            if (parsed.data.childRole !== undefined) {
+                await engine.setChildRole(sessionResult.sessionId, parsed.data.childRole)
+            }
             return c.json({ ok: true })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to update session'

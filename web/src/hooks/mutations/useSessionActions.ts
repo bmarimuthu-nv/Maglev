@@ -11,7 +11,12 @@ export function useSessionActions(
     abortSession: () => Promise<void>
     archiveSession: () => Promise<void>
     switchSession: () => Promise<void>
-    updateSession: (updates: { name?: string; directory?: string }) => Promise<void>
+    updateSession: (updates: {
+        name?: string
+        directory?: string
+        parentSessionId?: string | null
+        childRole?: 'review-terminal' | 'split-terminal' | null
+    }) => Promise<void>
     renameSession: (name: string) => Promise<void>
     setPinned: (pinned: boolean) => Promise<void>
     setShellOptions: (options: { startupCommand?: string | null; autoRespawn?: boolean; pinned?: boolean }) => Promise<void>
@@ -66,7 +71,12 @@ export function useSessionActions(
     })
 
     const updateMutation = useMutation({
-        mutationFn: async (updates: { name?: string; directory?: string }) => {
+        mutationFn: async (updates: {
+            name?: string
+            directory?: string
+            parentSessionId?: string | null
+            childRole?: 'review-terminal' | 'split-terminal' | null
+        }) => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }

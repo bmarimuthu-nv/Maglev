@@ -30,12 +30,13 @@ export function SplitTerminalPanel(props: {
     sessionId: string
     onClose: () => Promise<void> | void
     onNavigate?: (sessionId: string) => void
+    onUnsplit?: (sessionId: string) => Promise<void> | void
     isClosing?: boolean
     starting?: boolean
     title?: string
     subtitle?: string
 }) {
-    const { sessionId, onClose, onNavigate, isClosing = false, starting = false, title, subtitle } = props
+    const { sessionId, onClose, onNavigate, onUnsplit, isClosing = false, starting = false, title, subtitle } = props
     const { api, token, baseUrl } = useAppContext()
     const { session, isLoading: sessionLoading } = useSession(api, sessionId)
     const isShellSession = session?.metadata?.flavor === 'shell'
@@ -188,6 +189,7 @@ export function SplitTerminalPanel(props: {
 
     const sessionName = session?.metadata?.name ?? session?.metadata?.summary?.text ?? sessionId.slice(0, 8)
     const panelTitle = title ?? (session?.metadata?.childRole === 'review-terminal' ? 'Review terminal' : sessionName)
+    const isSplitTerminalChild = session?.metadata?.childRole === 'split-terminal'
 
     const startupPending = starting || sessionLoading || !session || (isShellSession && (!session.metadata?.shellTerminalId || session.metadata?.shellTerminalState !== 'ready'))
 
@@ -210,7 +212,18 @@ export function SplitTerminalPanel(props: {
                             <div className="truncate text-[10px] text-[var(--app-hint)]">{subtitle}</div>
                         ) : null}
                     </div>
-                    {onNavigate ? (
+                    {isSplitTerminalChild && onUnsplit ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                void onUnsplit(sessionId)
+                            }}
+                            className="shrink-0 rounded-full border border-[var(--app-border)] px-2.5 py-1 text-[10px] font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            title={`Unsplit ${sessionName}`}
+                        >
+                            Unsplit
+                        </button>
+                    ) : onNavigate ? (
                         <button
                             type="button"
                             onClick={() => onNavigate(sessionId)}
