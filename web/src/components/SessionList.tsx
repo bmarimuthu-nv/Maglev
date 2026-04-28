@@ -375,10 +375,9 @@ function getSubgroupIdentity(row: SessionRow): { key: string; label: string; kin
         }
     }
 
-    const branch = primarySession?.metadata?.branch?.trim()
     return {
-        key: `branch:${branch ?? 'default'}`,
-        label: branch || 'default',
+        key: 'branch:folder',
+        label: '',
         kind: 'branch'
     }
 }
@@ -1562,7 +1561,7 @@ export function SessionList(props: {
                     className={`group/drag px-5 pt-0.5 ${dropClass}`}
                 >
                     <div
-                        className="relative flex items-center gap-1 text-[11px] text-[var(--app-hint)]/74"
+                        className="relative flex items-center gap-1 text-[12px] text-[var(--app-hint)]/74"
                         onContextMenu={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
