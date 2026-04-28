@@ -714,7 +714,7 @@ function SessionItem(props: {
                 className={`flex w-full flex-col gap-0.5 rounded-[12px] px-3 py-1.5 text-left transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--app-link)] select-none ${
                     selected
                         ? 'bg-[var(--app-surface-raised)] text-[var(--app-fg)] shadow-[inset_0_0_0_1px_var(--mg-border-strong)]'
-                        : 'bg-[var(--app-secondary-bg)] text-[var(--app-hint)] hover:bg-[color-mix(in_srgb,var(--app-secondary-bg)_84%,white_16%)]'
+                        : 'bg-transparent text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]/55'
                 }`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
