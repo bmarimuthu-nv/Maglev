@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { FileReviewThread } from '@/types/api'
-import { CodeLinesView } from '@/components/SessionFiles/CodeLinesView'
+import { CodeLinesView, type CodeLinesViewHandle } from '@/components/SessionFiles/CodeLinesView'
 
 export function SourceReviewFileCard(props: {
     filePath: string
@@ -20,9 +20,11 @@ export function SourceReviewFileCard(props: {
     onResolveThread: (thread: FileReviewThread) => void
     onDeleteThread: (thread: FileReviewThread) => void
     onReplyToThread: (thread: FileReviewThread, body: string) => void
+    codeViewRef?: React.Ref<CodeLinesViewHandle>
 }) {
     return (
         <CodeLinesView
+            ref={props.codeViewRef}
             content={props.sourceLines.join('\n')}
             filePath={props.filePath}
             mode="review"

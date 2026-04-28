@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FileReviewThread } from '@/types/api'
 import { useLongPress } from '@/hooks/useLongPress'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
@@ -298,7 +298,11 @@ function CodeLineRow(props: {
     )
 }
 
-export function CodeLinesView(props: {
+export type CodeLinesViewHandle = {
+    scrollToBottom: () => void
+}
+
+function CodeLinesViewInner(props: {
     content: string
     filePath: string
     highlightedLine?: number | null
@@ -317,7 +321,7 @@ export function CodeLinesView(props: {
     onResolveThread?: (thread: FileReviewThread) => void
     onDeleteThread?: (thread: FileReviewThread) => void
     onReplyToThread?: (thread: FileReviewThread, body: string) => void
-}) {
+}, ref: React.Ref<CodeLinesViewHandle>) {
     const { copy } = useCopyToClipboard()
     const [menuState, setMenuState] = useState<LineMenuState | null>(null)
     const [searchQuery, setSearchQuery] = useState('')
@@ -375,6 +379,10 @@ export function CodeLinesView(props: {
             behavior: 'smooth'
         })
     }
+
+    useImperativeHandle(ref, () => ({
+        scrollToBottom,
+    }), [])
 
     return (
         <div className="relative">
@@ -538,3 +546,5 @@ export function CodeLinesView(props: {
         </div>
     )
 }
+
+export const CodeLinesView = forwardRef(CodeLinesViewInner)

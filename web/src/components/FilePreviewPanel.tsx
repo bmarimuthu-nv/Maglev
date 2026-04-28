@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import { FileIcon } from '@/components/FileIcon'
-import { CodeLinesView } from '@/components/SessionFiles/CodeLinesView'
+import { CodeLinesView, type CodeLinesViewHandle } from '@/components/SessionFiles/CodeLinesView'
+import { CodeEditSurface, type CodeEditSurfaceHandle } from '@/components/SessionFiles/CodeEditSurface'
 import { useAppContext } from '@/lib/app-context'
 import { queryKeys } from '@/lib/query-keys'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
@@ -38,6 +39,25 @@ function ReloadIcon(props: { spinning?: boolean }) {
             <path d="M3 12a9 9 0 0 1 15.5-6.36L21 8" />
             <path d="M3 22v-6h6" />
             <path d="M21 12a9 9 0 0 1-15.5 6.36L3 16" />
+        </svg>
+    )
+}
+
+function ArrowDownIcon() {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M12 5v14" />
+            <path d="m19 12-7 7-7-7" />
         </svg>
     )
 }
@@ -103,6 +123,9 @@ export function FilePreviewPanel(props: {
     const [composerLine, setComposerLine] = useState<number | null>(null)
     const [composerText, setComposerText] = useState('')
     const [collapsedResolvedThreadIds, setCollapsedResolvedThreadIds] = useState<Record<string, boolean>>({})
+    const codeViewRef = useRef<CodeLinesViewHandle | null>(null)
+    const reviewViewRef = useRef<CodeLinesViewHandle | null>(null)
+    const editViewRef = useRef<CodeEditSurfaceHandle | null>(null)
     const isEditing = panelMode === 'edit'
 
     useEffect(() => {
@@ -214,6 +237,18 @@ export function FilePreviewPanel(props: {
         [reviewThreads]
     )
 
+    const handleScrollToBottom = useCallback(() => {
+        if (isEditing) {
+            editViewRef.current?.scrollToBottom()
+            return
+        }
+        if (panelMode === 'review') {
+            reviewViewRef.current?.scrollToBottom()
+            return
+        }
+        codeViewRef.current?.scrollToBottom()
+    }, [isEditing, panelMode])
+
     const handleCreateThread = useCallback(async (line: number) => {
         const body = composerText.trim()
         if (!api || !body) {
@@ -284,6 +319,15 @@ export function FilePreviewPanel(props: {
                             title={isRefreshing ? 'Reloading file and review threads' : 'Reload file and review threads'}
                         >
                             <ReloadIcon spinning={isRefreshing} />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleScrollToBottom}
+                            disabled={fileQuery.isLoading || binary}
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Scroll to bottom"
+                        >
+                            <ArrowDownIcon />
                         </button>
                         <button
                             type="button"
@@ -388,7 +432,7 @@ export function FilePreviewPanel(props: {
                     >
                         Cancel
                     </button>
-                    {saveError ? <span className="text-[11px] text-red-500">{saveError}</span> : null}
+                    {saveError ? <span className="text-[11px] text-[var(--app-badge-error-text)]">{saveError}</span> : null}
                     {isDirty ? <span className="text-[11px] text-[var(--app-hint)]">Unsaved changes</span> : null}
                 </div>
             ) : panelMode === 'review' && !binary ? (
@@ -400,9 +444,9 @@ export function FilePreviewPanel(props: {
                     <span className="text-[var(--app-hint)]">{unresolvedCount} unresolved</span>
                     {reviewSaving ? <span className="text-[var(--app-hint)]">Saving…</span> : null}
                     {reviewThreadsQuery.isLoading ? <span className="text-[var(--app-hint)]">Loading threads…</span> : null}
-                    {reviewError ? <span className="text-red-500">{reviewError}</span> : null}
+                    {reviewError ? <span className="text-[var(--app-badge-error-text)]">{reviewError}</span> : null}
                     {reviewThreadsQuery.data && !reviewThreadsQuery.data.success ? (
-                        <span className="text-red-500">{reviewThreadsQuery.data.error ?? 'Failed to load review threads'}</span>
+                        <span className="text-[var(--app-badge-error-text)]">{reviewThreadsQuery.data.error ?? 'Failed to load review threads'}</span>
                     ) : null}
                 </div>
             ) : null}
@@ -416,7 +460,7 @@ export function FilePreviewPanel(props: {
                     </div>
                 ) : fileQuery.error ? (
                     <div className="p-4">
-                        <div className="rounded-[24px] border border-red-300/30 bg-red-500/10 px-4 py-4 text-sm text-red-500">
+                        <div className="rounded-[24px] border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] px-4 py-4 text-sm text-[var(--app-badge-error-text)]">
                             {fileQuery.error instanceof Error ? fileQuery.error.message : 'Failed to load file'}
                         </div>
                     </div>
@@ -427,15 +471,16 @@ export function FilePreviewPanel(props: {
                         </div>
                     </div>
                 ) : isEditing ? (
-                    <textarea
-                        value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
-                        className="h-full w-full resize-none bg-[var(--app-code-bg)] p-4 font-mono text-xs text-[var(--app-fg)] focus:outline-none"
-                        spellCheck={false}
+                    <CodeEditSurface
+                        ref={editViewRef}
+                        draft={draft}
+                        filePath={filePath}
+                        onChange={setDraft}
                     />
                 ) : panelMode === 'review' ? (
                     <div className="p-4">
                         <SourceReviewFileCard
+                            codeViewRef={reviewViewRef}
                             filePath={filePath}
                             sourceLines={sourceLines}
                             reviewSaving={reviewSaving}
@@ -463,6 +508,7 @@ export function FilePreviewPanel(props: {
                 ) : (
                     <div className="p-4">
                         <CodeLinesView
+                            ref={codeViewRef}
                             content={content}
                             filePath={filePath}
                             buildLink={buildPreviewLink}
