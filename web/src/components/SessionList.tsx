@@ -1473,7 +1473,7 @@ export function SessionList(props: {
                     className={`group/drag px-2.5 pt-1.5 ${dropClass}`}
                 >
                     <div
-                        className="relative flex items-start gap-2 rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_92%,white_8%)] px-2 py-1"
+                        className="relative flex items-start gap-2 rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_96%,white_4%)] px-2 py-1"
                         onContextMenu={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
