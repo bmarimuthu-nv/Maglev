@@ -1494,50 +1494,46 @@ export function SessionList(props: {
                     onDrop={(e) => handleGroupDrop(groupRenderStates.map((groupState) => groupState.group), e)}
                     className={`group/drag px-3 pt-2 ${dropClass}`}
                 >
-                    <div className="relative flex items-start gap-2 rounded-[14px] bg-[var(--app-secondary-bg)] px-3 py-2 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_70%,transparent)]">
+                    <div
+                        className="relative flex items-start gap-2 rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_92%,black_8%)] px-3 py-2"
+                        onContextMenu={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            setSubgroupMenuTarget(null)
+                            setGroupMenuDirectory((current) => current === group.directory ? null : group.directory)
+                        }}
+                    >
                         {renderDragHandle('header')}
                         <button
                             type="button"
                             onClick={() => toggleGroup(group.directory, isCollapsed)}
-                            className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-0.5 py-0.5 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                            aria-label={isCollapsed ? 'Expand group' : 'Collapse group'}
+                            title={isCollapsed ? 'Expand group' : 'Collapse group'}
                         >
                             <ChevronIcon
-                                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]"
+                                className="h-3.5 w-3.5 shrink-0 text-current"
                                 collapsed={isCollapsed}
                             />
-                            <div className="min-w-0 flex-1">
-                                <div className="flex min-w-0 items-center gap-2">
-                                    <span className="truncate text-[13px] font-medium text-[var(--app-fg)]" title={group.directory}>
-                                        {group.displayName}
-                                    </span>
-                                    {groupBranchHint ? (
-                                        <>
-                                            <span className="shrink-0 text-[10px] text-[var(--app-hint)]/35">/</span>
-                                            <span className="truncate text-[10px] text-[var(--app-hint)]/78" title={groupBranchHint}>
-                                                {groupBranchHint}
-                                            </span>
-                                        </>
-                                    ) : null}
-                                    <span className="shrink-0 text-[10px] text-[var(--app-hint)]/80">
-                                        {group.sessions.length} sessions
-                                    </span>
-                                </div>
+                        </button>
+                        <div className="min-w-0 flex-1 px-0.5 py-0.5">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate text-[13px] font-medium text-[var(--app-fg)]" title={group.directory}>
+                                    {group.displayName}
+                                </span>
+                                <span className="shrink-0 text-[10px] text-[var(--app-hint)]/80">
+                                    {group.sessions.length} sessions
+                                </span>
                             </div>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={(event) => {
-                                event.stopPropagation()
-                                setGroupMenuDirectory((current) => current === group.directory ? null : group.directory)
-                            }}
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] opacity-0 transition-[opacity,color,background-color] group-hover/drag:opacity-100 hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                            title="More"
-                        >
-                            <MoreIcon className="h-4 w-4" />
-                        </button>
+                            {groupBranchHint ? (
+                                <div className="mt-0.5 truncate text-[10px] text-[var(--app-hint)]/72" title={groupBranchHint}>
+                                    {groupBranchHint}
+                                </div>
+                            ) : null}
+                        </div>
                         {groupMenuDirectory === group.directory ? (
                             <div
-                                className="absolute right-3 top-[calc(100%+6px)] z-20 min-w-[160px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]"
+                                className="absolute right-3 top-[calc(100%+6px)] z-20 min-w-[160px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]"
                                 onPointerDown={(event) => event.stopPropagation()}
                             >
                                 <button

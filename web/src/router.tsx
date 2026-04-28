@@ -313,10 +313,10 @@ function SessionsPage() {
                             <button
                                 type="button"
                                 onClick={() => setSidebarCollapsedWithPersistence(true)}
-                                className="hidden lg:flex p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                className="hidden lg:flex rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                 title="Hide sidebar"
                             >
-                                <PanelLeftIcon className="h-5 w-5" />
+                                <PanelLeftIcon className="h-4 w-4" />
                             </button>
                         ) : null}
                         <button
@@ -325,10 +325,10 @@ function SessionsPage() {
                                 setMobileSidebarOpen(false)
                                 navigate({ to: '/settings' })
                             }}
-                            className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                            className="rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                             title={t('settings.title')}
                         >
-                            <SettingsIcon className="h-5 w-5" />
+                            <SettingsIcon className="h-4 w-4" />
                         </button>
                         <button
                             type="button"
@@ -337,11 +337,11 @@ function SessionsPage() {
                                 navigate({ to: '/sessions/new' })
                             }}
                             className={mode === 'desktop'
-                                ? 'hidden lg:inline-flex h-9 items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-button)] px-3 text-sm font-semibold text-[var(--app-button-text)] shadow-[0_18px_36px_-22px_var(--app-button-shadow)] transition-[transform,background-color] duration-150 hover:-translate-y-px hover:bg-[var(--app-button-hover)]'
+                                ? 'hidden lg:inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)]/55 px-2.5 text-[12px] font-medium text-[var(--app-fg)] transition-colors duration-150 hover:bg-[var(--app-subtle-bg)]'
                                 : 'session-list-new-button rounded-full p-1.5 text-[var(--app-link)] transition-colors'}
                             title={t('sessions.new')}
                         >
-                            <PlusIcon className="h-5 w-5" />
+                            <PlusIcon className="h-4 w-4" />
                             {mode === 'desktop' ? <span className="hidden xl:inline">New</span> : null}
                         </button>
                     </div>
