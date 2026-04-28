@@ -39,11 +39,42 @@ const SESSIONS_SIDEBAR_WIDTH_KEY = 'maglev:sessionsSidebarWidth'
 const SESSIONS_SIDEBAR_DEFAULT_WIDTH = 360
 const SESSIONS_SIDEBAR_MIN_WIDTH = 280
 const SESSIONS_SIDEBAR_MAX_WIDTH = 640
+const SPAWN_SESSION_READY_TIMEOUT_MS = 4_000
+const SPAWN_SESSION_READY_POLL_MS = 150
 
 type HubMenuItem = {
     key: string
     label: string
     to: '/sessions' | '/sessions/new' | '/settings'
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        window.setTimeout(resolve, ms)
+    })
+}
+
+function isSpawnedShellSessionReady(session: { active: boolean; metadata?: unknown } | null | undefined): boolean {
+    if (!session?.active) {
+        return false
+    }
+
+    const metadata = session.metadata && typeof session.metadata === 'object'
+        ? session.metadata as Record<string, unknown>
+        : null
+    const flavor = typeof metadata?.flavor === 'string' ? metadata.flavor : null
+    if (flavor !== 'shell') {
+        return true
+    }
+
+    const shellTerminalState = typeof metadata?.shellTerminalState === 'string'
+        ? metadata.shellTerminalState
+        : null
+    const shellTerminalId = typeof metadata?.shellTerminalId === 'string'
+        ? metadata.shellTerminalId
+        : null
+
+    return shellTerminalState === 'ready' || Boolean(shellTerminalId)
 }
 
 function BackIcon(props: { className?: string }) {
@@ -490,17 +521,42 @@ function NewSessionPage() {
     }, [navigate])
 
     const handleSuccess = useCallback((sessionId: string, _agent: AgentType) => {
-        markPendingTerminalFocus(sessionId)
-        if (document.activeElement instanceof HTMLElement) {
-            document.activeElement.blur()
+        const openSpawnedSession = async () => {
+            markPendingTerminalFocus(sessionId)
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur()
+            }
+
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
+
+            if (api) {
+                const deadline = Date.now() + SPAWN_SESSION_READY_TIMEOUT_MS
+                while (Date.now() < deadline) {
+                    try {
+                        const response = await api.getSession(sessionId)
+                        queryClient.setQueryData(
+                            queryKeys.session(scopeKey, sessionId),
+                            response
+                        )
+                        if (isSpawnedShellSessionReady(response.session)) {
+                            break
+                        }
+                    } catch {
+                        // keep polling until the session becomes readable or we time out
+                    }
+                    await delay(SPAWN_SESSION_READY_POLL_MS)
+                }
+            }
+
+            navigate({
+                to: '/sessions/$sessionId/terminal',
+                params: { sessionId },
+                replace: true
+            })
         }
-        void queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
-        navigate({
-            to: '/sessions/$sessionId',
-            params: { sessionId },
-            replace: true
-        })
-    }, [navigate, queryClient, scopeKey])
+
+        void openSpawnedSession()
+    }, [api, navigate, queryClient, scopeKey])
 
     return (
         <div className="flex h-full min-h-0 flex-col">

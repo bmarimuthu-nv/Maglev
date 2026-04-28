@@ -357,7 +357,12 @@ export default function TerminalPage() {
     const { api, token, baseUrl } = useAppContext()
     const navigate = useNavigate()
     const goBack = useAppGoBack()
-    const { session, isLoading: sessionLoading, refetch: refetchSession } = useSession(api, sessionId)
+    const {
+        session,
+        isLoading: sessionLoading,
+        error: sessionError,
+        refetch: refetchSession
+    } = useSession(api, sessionId)
     const { sessions: allSessions } = useSessions(api)
     const loadedSessionId = session?.id ?? null
     const isShellSession = session?.metadata?.flavor === 'shell'
@@ -1543,9 +1548,35 @@ export default function TerminalPage() {
                     : (errorMessage ?? 'The new shell did not become interactive.')
 
     if (!session) {
+        if (sessionLoading) {
+            return (
+                <div className="flex h-full items-center justify-center">
+                    <LoadingState label={pendingNewSessionFocus ? 'Starting shell…' : 'Loading session…'} className="text-sm" />
+                </div>
+            )
+        }
+
         return (
-            <div className="flex h-full items-center justify-center">
-                <LoadingState label={pendingNewSessionFocus ? 'Starting shell…' : 'Loading session…'} className="text-sm" />
+            <div className="flex h-full items-center justify-center px-6">
+                <div className="flex max-w-md flex-col items-center gap-3 text-center">
+                    <div className="text-base font-semibold text-[var(--app-fg)]">
+                        Select a terminal
+                    </div>
+                    <div className="text-sm text-[var(--app-hint)]">
+                        {sessionError
+                            ? 'This terminal is no longer available. Choose another session from the list.'
+                            : 'Choose a terminal session from the list to keep working.'}
+                    </div>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                            navigate({ to: '/sessions' })
+                        }}
+                    >
+                        Open sessions
+                    </Button>
+                </div>
             </div>
         )
     }
