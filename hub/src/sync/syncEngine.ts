@@ -524,7 +524,7 @@ export class SyncEngine {
         }))
     }
 
-    async setChildRole(sessionId: string, childRole: 'review-terminal'): Promise<void> {
+    async setChildRole(sessionId: string, childRole: 'review-terminal' | 'split-terminal'): Promise<void> {
         await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
             ...metadata,
             childRole

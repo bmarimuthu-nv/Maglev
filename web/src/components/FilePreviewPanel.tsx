@@ -57,9 +57,10 @@ export function FilePreviewPanel(props: {
     filePath: string
     api: ApiClient | null
     onClose: () => void
+    allowReview?: boolean
 }) {
     const { scopeKey } = useAppContext()
-    const { sessionId, filePath, api, onClose } = props
+    const { sessionId, filePath, api, onClose, allowReview = true } = props
     const queryClient = useQueryClient()
 
     const fileQuery = useQuery({
@@ -78,7 +79,7 @@ export function FilePreviewPanel(props: {
             if (!api) throw new Error('API unavailable')
             return await api.getSessionFileReviewThreads(sessionId, filePath)
         },
-        enabled: Boolean(api && filePath),
+        enabled: Boolean(allowReview && api && filePath),
         retry: false
     })
 
@@ -115,6 +116,12 @@ export function FilePreviewPanel(props: {
         setComposerText('')
         setCollapsedResolvedThreadIds({})
     }, [filePath])
+
+    useEffect(() => {
+        if (!allowReview && panelMode === 'review') {
+            setPanelMode('read')
+        }
+    }, [allowReview, panelMode])
 
     useEffect(() => {
         if (panelMode !== 'review') {
@@ -301,7 +308,7 @@ export function FilePreviewPanel(props: {
                         <div className="flex shrink-0 items-center rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1 text-[11px]">
                             {([
                                 ['read', 'Code'],
-                                ['review', 'Review'],
+                                ...(allowReview ? [['review', 'Review'] as const] : []),
                                 ['edit', 'Edit']
                             ] as const).map(([value, label]) => (
                                 <button

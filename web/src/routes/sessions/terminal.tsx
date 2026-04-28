@@ -430,11 +430,14 @@ export default function TerminalPage() {
         } catch { return SPLIT_TERMINAL_DEFAULT_WIDTH }
     })
 
-    // Auto-restore split pane: find an active child session of the current session
+    // Auto-restore split pane: only restore real terminal split children, not review-owned companion shells.
     useEffect(() => {
         if (splitSessionId || !loadedSessionId) return
         const child = allSessions.find(
-            (s) => s.active && s.metadata?.parentSessionId === loadedSessionId && s.id !== closingSplitSessionId
+            (s) => s.active
+                && s.metadata?.parentSessionId === loadedSessionId
+                && s.metadata?.childRole === 'split-terminal'
+                && s.id !== closingSplitSessionId
         )
         if (child) {
             setSplitSessionId(child.id)
@@ -1184,7 +1187,8 @@ export default function TerminalPage() {
                 `${session.metadata.name ?? 'terminal'} (split)`,
                 undefined, undefined,
                 undefined, undefined, undefined, undefined, undefined,
-                sessionId
+                sessionId,
+                'split-terminal'
             )
             if (result.type === 'success') {
                 setSplitSessionId(result.sessionId)
@@ -1735,6 +1739,7 @@ export default function TerminalPage() {
                             filePath={previewFilePath}
                             api={api}
                             onClose={() => setPreviewFilePath(null)}
+                            allowReview={false}
                         />
                     </div>
                 ) : null}

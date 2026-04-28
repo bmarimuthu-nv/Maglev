@@ -87,7 +87,7 @@ export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
     branch: z.string().optional(),
-    childRole: z.enum(['review-terminal']).optional(),
+    childRole: z.enum(['review-terminal', 'split-terminal']).optional(),
     version: z.string().optional(),
     name: z.string().optional(),
     os: z.string().optional(),

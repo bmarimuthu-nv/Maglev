@@ -124,6 +124,12 @@ vi.mock('@/components/FilePreviewPanel', () => ({
     FilePreviewPanel: () => <div data-testid="file-preview-panel" />
 }))
 
+vi.mock('@/components/SplitTerminalPanel', () => ({
+    SplitTerminalPanel: (props: { sessionId: string }) => (
+        <div data-testid="split-terminal-panel">{props.sessionId}</div>
+    )
+}))
+
 function renderWithProviders() {
     return render(
         <I18nProvider>
@@ -309,6 +315,61 @@ describe('TerminalPage auto-scroll wheel detection', () => {
     })
 })
 
+describe('TerminalPage split child restore', () => {
+    beforeEach(() => {
+        cleanup()
+        vi.clearAllMocks()
+        mockTerminalSocketState = { status: 'connected' }
+        allowMockTerminalTextareaFocus = true
+        mockTerminalTextarea = null
+        closeSessionMock.mockResolvedValue(undefined)
+        setDefaultFileSearchMock()
+        setDefaultSupervisionTargetMock()
+        setMatchMediaMock()
+        mockSessionMetadata = { path: '/tmp/project' }
+    })
+
+    afterEach(() => {
+        cleanup()
+    })
+
+    it('does not restore a review-terminal child into the main terminal split pane', () => {
+        mockSessions = [
+            {
+                id: 'review-child',
+                active: true,
+                metadata: {
+                    path: '/tmp/project',
+                    parentSessionId: 'session-1',
+                    childRole: 'review-terminal'
+                }
+            }
+        ]
+
+        renderWithProviders()
+
+        expect(screen.queryByTestId('split-terminal-panel')).not.toBeInTheDocument()
+    })
+
+    it('restores a split-terminal child into the main terminal split pane', () => {
+        mockSessions = [
+            {
+                id: 'split-child',
+                active: true,
+                metadata: {
+                    path: '/tmp/project',
+                    parentSessionId: 'session-1',
+                    childRole: 'split-terminal'
+                }
+            }
+        ]
+
+        renderWithProviders()
+
+        expect(screen.getByTestId('split-terminal-panel')).toHaveTextContent('split-child')
+    })
+})
+
 describe('TerminalPage open file dialog', () => {
     beforeEach(() => {
         cleanup()
@@ -424,7 +485,7 @@ describe('TerminalPage split close behavior', () => {
             {
                 id: 'split-session-1',
                 active: true,
-                metadata: { parentSessionId: 'session-1' }
+                metadata: { parentSessionId: 'session-1', childRole: 'split-terminal' }
             }
         ]
         mockSessionMetadata = { path: '/tmp/project' }
@@ -443,7 +504,7 @@ describe('TerminalPage split close behavior', () => {
     it('closes the split session instead of only hiding the panel', async () => {
         renderWithProviders()
 
-        expect(screen.getAllByTestId('terminal-view')).toHaveLength(2)
+        expect(screen.getByTestId('split-terminal-panel')).toHaveTextContent('split-session-1')
 
         fireEvent.click(screen.getAllByRole('button', { name: 'Close split' })[0]!)
 
@@ -451,7 +512,7 @@ describe('TerminalPage split close behavior', () => {
             expect(closeSessionMock).toHaveBeenCalledWith('split-session-1')
         })
 
-        expect(screen.getAllByTestId('terminal-view')).toHaveLength(1)
+        expect(screen.queryByTestId('split-terminal-panel')).not.toBeInTheDocument()
     })
 })
 

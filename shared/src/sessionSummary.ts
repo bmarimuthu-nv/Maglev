@@ -4,7 +4,7 @@ export type SessionSummaryMetadata = {
     name?: string
     path: string
     branch?: string
-    childRole?: 'review-terminal'
+    childRole?: 'review-terminal' | 'split-terminal'
     machineId?: string
     summary?: { text: string }
     flavor?: string | null

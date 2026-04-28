@@ -506,7 +506,7 @@ export class ApiClient {
         sessionType?: 'simple' | 'worktree',
         worktreeName?: string,
         parentSessionId?: string,
-        childRole?: 'review-terminal'
+        childRole?: 'review-terminal' | 'split-terminal'
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>('/api/hub/spawn', {
             method: 'POST',

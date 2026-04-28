@@ -11,7 +11,7 @@ const spawnBodySchema = z.object({
     notesPath: z.string().min(1).max(1024).optional(),
     createNotesFile: z.boolean().optional(),
     parentSessionId: z.string().optional(),
-    childRole: z.enum(['review-terminal']).optional(),
+    childRole: z.enum(['review-terminal', 'split-terminal']).optional(),
     pinned: z.boolean().optional(),
     autoRespawn: z.boolean().optional(),
     startupCommand: z.string().max(4000).optional(),
