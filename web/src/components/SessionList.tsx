@@ -84,9 +84,8 @@ const VIRTUAL_OVERSCAN_PX = 500
 type SessionSubgroup = {
     key: string
     label: string
-    hint?: string
     rows: SessionRow[]
-    kind: 'folder' | 'worktree'
+    kind: 'branch'
 }
 
 type SessionListOrders = {
@@ -364,30 +363,23 @@ export function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
     return rows
 }
 
-function getSubgroupIdentity(row: SessionRow): { key: string; label: string; hint?: string; kind: 'folder' | 'worktree' } {
+function getSubgroupIdentity(row: SessionRow): { key: string; label: string; kind: 'branch' } {
     const primarySession = row.sessions[0]
     const worktree = primarySession?.metadata?.worktree
     if (worktree) {
-        const trimmedName = worktree.name?.trim()
         const trimmedBranch = worktree.branch.trim()
-        const label = trimmedName || trimmedBranch
-        const hint = trimmedName
-            ? trimmedBranch
-            : undefined
         return {
             key: `worktree:${worktree.worktreePath ?? primarySession.metadata?.path ?? primarySession.id}`,
-            label,
-            hint,
-            kind: 'worktree'
+            label: trimmedBranch,
+            kind: 'branch'
         }
     }
 
     const branch = primarySession?.metadata?.branch?.trim()
     return {
-        key: 'folder:main',
-        label: 'Folder',
-        hint: branch || undefined,
-        kind: 'folder'
+        key: `branch:${branch ?? 'default'}`,
+        label: branch || 'default',
+        kind: 'branch'
     }
 }
 
@@ -418,19 +410,13 @@ export function getSessionSubgroups(_groupDirectory: string, orderedRows: Sessio
         subgroupMap.set(subgroupIdentity.key, {
             key: subgroupIdentity.key,
             label: subgroupIdentity.label,
-            hint: subgroupIdentity.hint,
             kind: subgroupIdentity.kind,
             rows: [row]
         })
     }
 
     const subgroups = Array.from(subgroupMap.values())
-    subgroups.sort((left, right) => {
-        if (left.kind !== right.kind) {
-            return left.kind === 'folder' ? -1 : 1
-        }
-        return left.label.localeCompare(right.label)
-    })
+    subgroups.sort((left, right) => left.label.localeCompare(right.label))
 
     return subgroups
 }
@@ -721,8 +707,6 @@ function SessionItem(props: {
 
     const sessionName = getSessionTitle(s)
     const relativeTime = formatRelativeTime(s.updatedAt, t)
-    const branch = s.metadata?.worktree?.branch?.trim() ?? s.metadata?.branch?.trim()
-    const contextLine = branch ?? null
 
     return (
         <>
@@ -731,8 +715,8 @@ function SessionItem(props: {
                 {...longPressHandlers}
                 className={`flex w-full flex-col gap-0.5 rounded-[12px] px-3 py-1.5 text-left transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--app-link)] select-none ${
                     selected
-                        ? 'bg-[var(--app-surface-raised)] text-[var(--app-fg)] shadow-[inset_0_0_0_1px_var(--mg-border-strong)]'
-                        : 'bg-transparent text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]/55'
+                        ? 'bg-[color-mix(in_srgb,var(--app-surface-raised)_94%,white_6%)] text-[var(--app-fg)] shadow-[inset_0_0_0_1px_var(--mg-border-strong)]'
+                        : 'bg-transparent text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]/55'
                 }`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
@@ -740,23 +724,18 @@ function SessionItem(props: {
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-1.5">
-                            <div className={`truncate text-[15px] font-medium leading-5 ${selected ? 'text-[var(--app-fg)]' : 'text-[var(--app-fg)]/72'}`}>
+                            <div className="truncate text-[16px] font-medium leading-5 text-[var(--app-fg)]">
                                 {sessionName}
                             </div>
                             {s.metadata?.pinned ? (
-                                <span className={`shrink-0 ${selected ? 'text-[var(--app-fg)]/75' : 'text-[var(--app-hint)]/80'}`} title="Pinned shell">
+                                <span className="shrink-0 text-[var(--app-fg)]" title="Pinned shell">
                                     <PinIcon className="h-2.5 w-2.5" />
                                 </span>
                             ) : null}
                         </div>
-                        {contextLine ? (
-                            <div className={`truncate text-[10px] leading-4 ${selected ? 'text-[var(--app-hint)]' : 'text-[var(--app-hint)]/78'}`}>
-                                {contextLine}
-                            </div>
-                        ) : null}
                     </div>
                     <div className="flex shrink-0 items-start gap-2">
-                        <div className={`text-[8px] font-medium ${selected ? 'text-[var(--app-hint)]' : 'text-[var(--app-hint)]/72'}`}>
+                        <div className="text-[9px] font-medium text-[var(--app-fg)]/72">
                             {relativeTime}
                         </div>
                     </div>
@@ -1254,7 +1233,7 @@ export function SessionList(props: {
                 )
             }))
             const orderedRows = subgroups.flatMap((subgroup) => subgroup.rows)
-            const shouldShowSubgroups = subgroups.length > 1 || subgroups.some((subgroup) => subgroup.kind === 'worktree')
+            const shouldShowSubgroups = subgroups.length > 0
             return {
                 group,
                 isCollapsed,
@@ -1492,10 +1471,10 @@ export function SessionList(props: {
                     onDragEnd={handleDragEnd}
                     onDragOver={(e) => handleGroupDragOver(groupIndex, e)}
                     onDrop={(e) => handleGroupDrop(groupRenderStates.map((groupState) => groupState.group), e)}
-                    className={`group/drag px-3 pt-2 ${dropClass}`}
+                    className={`group/drag px-2.5 pt-1.5 ${dropClass}`}
                 >
                     <div
-                        className="relative flex items-start gap-2 rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_92%,black_8%)] px-3 py-2"
+                        className="relative flex items-start gap-2 rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_92%,black_8%)] px-2 py-1"
                         onContextMenu={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
@@ -1583,7 +1562,7 @@ export function SessionList(props: {
                     className={`group/drag px-5 pt-0.5 ${dropClass}`}
                 >
                     <div
-                        className="relative flex items-center gap-1 text-[9px] text-[var(--app-hint)]/68"
+                        className="relative flex items-center gap-1 text-[11px] text-[var(--app-hint)]/74"
                         onContextMenu={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
@@ -1597,12 +1576,6 @@ export function SessionList(props: {
                     >
                         {renderDragHandle('header')}
                         <span className="truncate font-medium">{item.subgroup.label}</span>
-                        {item.subgroup.hint ? (
-                            <>
-                                <span className="text-[var(--app-hint)]/40">/</span>
-                                <span className="truncate text-[9px] text-[var(--app-hint)]/60">{item.subgroup.hint}</span>
-                            </>
-                        ) : null}
                         {subgroupMenuTarget?.groupDir === item.groupState.group.directory && subgroupMenuTarget.subgroupKey === item.subgroup.key ? (
                             <div
                                 className="absolute left-0 top-[calc(100%+4px)] z-20 min-w-[160px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]"
@@ -1613,7 +1586,7 @@ export function SessionList(props: {
                                     onClick={() => {
                                         setSubgroupMenuTarget(null)
                                         setClearSessionsTarget({
-                                            name: item.subgroup.hint ? `${item.subgroup.label} / ${item.subgroup.hint}` : item.subgroup.label,
+                                            name: item.subgroup.label,
                                             sessions: item.subgroup.rows.flatMap((row) => row.sessions)
                                         })
                                     }}
@@ -1621,7 +1594,7 @@ export function SessionList(props: {
                                     className="flex w-full rounded-xl px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     {clearGroupMutation.isPending
-                                        && clearSessionsTarget?.name === (item.subgroup.hint ? `${item.subgroup.label} / ${item.subgroup.hint}` : item.subgroup.label)
+                                        && clearSessionsTarget?.name === item.subgroup.label
                                         ? t('dialog.clearGroup.confirming')
                                         : t('session.group.clearAll')}
                                 </button>
@@ -1684,8 +1657,8 @@ export function SessionList(props: {
     return (
         <div className="mx-auto w-full max-w-content flex flex-col">
             {renderHeader ? (
-                <div className="px-3 py-1.5">
-                    <div className="flex items-center justify-between rounded-[14px] bg-[var(--app-secondary-bg)] px-3 py-2 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_65%,transparent)]">
+                <div className="px-2.5 py-1">
+                    <div className="flex items-center justify-between rounded-[14px] bg-[var(--app-secondary-bg)] px-2.5 py-1.5 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_65%,transparent)]">
                         <div>
                             <div className="text-[12px] text-[var(--app-fg)]">
                                 {t('sessions.count', { n: visibleSessions.length, m: groups.length })}

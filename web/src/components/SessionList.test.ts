@@ -211,10 +211,10 @@ describe('getSessionSubgroups', () => {
 
         const subgroups = getSessionSubgroups('/repo', rows)
 
-        expect(subgroups.map((subgroup) => subgroup.label)).toEqual(['Folder', 'feature-a', 'feature-b'])
+        expect(subgroups.map((subgroup) => subgroup.label)).toEqual(['default', 'feature/a', 'feature/b'])
         expect(subgroups[0]?.rows.map((row) => row.sessions[0].id)).toEqual(['folder-session'])
-        expect(subgroups[1]?.hint).toBe('feature/a')
-        expect(subgroups[2]?.hint).toBe('feature/b')
+        expect(subgroups[1]?.rows.map((row) => row.sessions[0].id)).toEqual(['worktree-a'])
+        expect(subgroups[2]?.rows.map((row) => row.sessions[0].id)).toEqual(['worktree-b'])
     })
 
     it('keeps a single folder subgroup for plain sessions without worktrees', () => {
@@ -226,11 +226,11 @@ describe('getSessionSubgroups', () => {
         const subgroups = getSessionSubgroups('/repo', rows)
 
         expect(subgroups).toHaveLength(1)
-        expect(subgroups[0]?.label).toBe('Folder')
+        expect(subgroups[0]?.label).toBe('default')
         expect(subgroups[0]?.rows.map((row) => row.sessions[0].id)).toEqual(['a', 'b'])
     })
 
-    it('shows the plain git branch as subgroup hint when no worktree metadata exists', () => {
+    it('shows the plain git branch as subgroup label when no worktree metadata exists', () => {
         const rows = getSessionRows([
             makeSession({ id: 'a', metadata: { path: '/repo', branch: 'feature/plain-repo' } }),
         ])
@@ -238,8 +238,7 @@ describe('getSessionSubgroups', () => {
         const subgroups = getSessionSubgroups('/repo', rows)
 
         expect(subgroups).toHaveLength(1)
-        expect(subgroups[0]?.label).toBe('Folder')
-        expect(subgroups[0]?.hint).toBe('feature/plain-repo')
+        expect(subgroups[0]?.label).toBe('feature/plain-repo')
     })
 })
 
