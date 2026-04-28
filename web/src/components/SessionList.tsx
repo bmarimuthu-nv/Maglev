@@ -375,9 +375,10 @@ function getSubgroupIdentity(row: SessionRow): { key: string; label: string; kin
         }
     }
 
+    const branch = primarySession?.metadata?.branch?.trim()
     return {
-        key: 'branch:folder',
-        label: '',
+        key: `branch:${branch ?? 'default'}`,
+        label: branch || 'default',
         kind: 'branch'
     }
 }
@@ -1453,7 +1454,6 @@ export function SessionList(props: {
         if (item.kind === 'header') {
             const { group, isCollapsed } = item.groupState
             const groupIndex = groupRenderStates.findIndex((groupState) => groupState.group.directory === group.directory)
-            const groupBranchHint = getGroupBranchHint(group.sessions)
             const isDropBefore = dropIndicator?.kind === 'group' && dropIndicator.insertIndex === groupIndex
             const isDropAfter = dropIndicator?.kind === 'group'
                 && dropIndicator.insertIndex === groupRenderStates.length
@@ -1473,7 +1473,7 @@ export function SessionList(props: {
                     className={`group/drag px-2.5 pt-1.5 ${dropClass}`}
                 >
                     <div
-                        className="relative flex items-start gap-2 rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_92%,black_8%)] px-2 py-1"
+                        className="relative flex items-start gap-2 rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_84%,white_16%)] px-2 py-1"
                         onContextMenu={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
@@ -1503,11 +1503,6 @@ export function SessionList(props: {
                                     {group.sessions.length} sessions
                                 </span>
                             </div>
-                            {groupBranchHint ? (
-                                <div className="mt-0.5 truncate text-[10px] text-[var(--app-hint)]/72" title={groupBranchHint}>
-                                    {groupBranchHint}
-                                </div>
-                            ) : null}
                         </div>
                         {groupMenuDirectory === group.directory ? (
                             <div

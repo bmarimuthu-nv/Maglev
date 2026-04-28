@@ -282,33 +282,23 @@ function SessionsPage() {
     const renderSidebarContent = (mode: 'desktop' | 'mobile') => (
         <>
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                <div className="px-3 py-3">
-                    <div className="relative">
-                        <div className="flex min-w-0 items-center gap-2.5 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2.5 py-2">
-                            <MaglevMark size="sm" className="h-8.5 w-8.5 rounded-[14px] shrink-0" />
-                            <button
-                                type="button"
-                                onClick={() => setHubMenuOpen((value) => !value)}
-                                className="min-w-0 flex flex-1 items-center gap-2 rounded-xl text-left transition-colors hover:text-[var(--app-link)]"
-                            >
-                                <div className="min-w-0 flex-1">
-                                    <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--app-hint)]">
-                                        Maglev Hub
-                                    </div>
-                                    <div className="mt-0.5 truncate text-[12px] font-semibold text-[var(--app-fg)]">
-                                        {hubLabel}
-                                    </div>
-                                    <div className="text-[10px] text-[var(--app-hint)]">
-                                        {t('sessions.count', { n: sessions.length, m: projectCount })}
-                                    </div>
-                                </div>
-                                <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform ${hubMenuOpen ? 'rotate-180' : ''}`} />
-                            </button>
+                <div className="px-2.5 py-2">
+                    <div className="flex min-w-0 items-center gap-2.5 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2.5 py-2">
+                        <MaglevMark size="sm" className="h-8.5 w-8.5 rounded-[14px] shrink-0" />
+                        <div className="min-w-0 flex-1">
+                            <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--app-hint)]">
+                                Maglev Hub
+                            </div>
+                            <div className="mt-0.5 truncate text-[12px] font-semibold text-[var(--app-fg)]">
+                                {hubLabel}
+                            </div>
+                            <div className="text-[10px] text-[var(--app-hint)]">
+                                {t('sessions.count', { n: sessions.length, m: projectCount })}
+                            </div>
                         </div>
-                        {hubMenuOpen ? renderHubMenu() : null}
                     </div>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         {mode === 'desktop' ? (
                             <button
                                 type="button"
@@ -506,7 +496,7 @@ function NewSessionPage() {
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
         navigate({
-            to: '/sessions/$sessionId/terminal',
+            to: '/sessions/$sessionId',
             params: { sessionId },
             replace: true
         })
