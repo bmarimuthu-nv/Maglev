@@ -202,7 +202,7 @@ function SearchResultRow(props: {
     const subtitle = props.file.filePath || 'project root'
     const icon = props.file.fileType === 'file'
         ? <FileIcon fileName={props.file.fileName} size={22} />
-        : <FolderIcon className="text-[var(--app-link)]" />
+        : <FolderIcon className="text-[var(--app-fg)]/80" />
 
     return (
         <button
@@ -210,7 +210,7 @@ function SearchResultRow(props: {
             onClick={props.onOpen}
             className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors ${
                 props.active
-                    ? 'bg-[color:rgba(228,115,83,0.10)] shadow-[0_14px_28px_-24px_rgba(228,115,83,0.5)]'
+                    ? 'bg-[var(--app-subtle-bg)] shadow-[0_14px_28px_-24px_rgba(255,255,255,0.10)]'
                     : 'hover:bg-[var(--app-subtle-bg)]'
             } ${props.showDivider ? 'border-b border-[var(--app-divider)]/70' : ''}`}
         >
@@ -805,7 +805,7 @@ export default function FilesPage() {
                                                                 {activeTab.fileName}
                                                             </div>
                                                             {activeTab.isEditing ? (
-                                                                <span className="rounded-full border border-[var(--app-border)] bg-[color:rgba(228,115,83,0.10)] px-2 py-0.5 text-[10px] font-semibold text-[var(--app-link)]">
+                                                                <span className="rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--app-fg)]">
                                                                     Editing
                                                                 </span>
                                                             ) : null}
@@ -854,7 +854,7 @@ export default function FilesPage() {
                                                         key={tab.id}
                                                         className={`inline-flex max-w-[240px] items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
                                                             tab.id === activeTabId
-                                                                ? 'border-[var(--app-link)] bg-[color:rgba(228,115,83,0.10)] text-[var(--app-fg)]'
+                                                                ? 'border-[var(--app-link)] bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
                                                                 : 'border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
                                                         }`}
                                                     >

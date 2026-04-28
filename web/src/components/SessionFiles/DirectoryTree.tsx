@@ -95,7 +95,7 @@ function DirectoryFileRow(props: {
             onClick={() => props.onOpenFile(props.filePath)}
             className={`relative flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors ${
                 props.isActive
-                    ? 'bg-[color:rgba(228,115,83,0.10)] text-[var(--app-fg)] shadow-[0_12px_28px_-24px_rgba(228,115,83,0.5)]'
+                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)] shadow-[0_12px_28px_-24px_rgba(255,255,255,0.10)]'
                     : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
             }`}
             style={{ paddingLeft: props.childIndent }}
@@ -149,14 +149,14 @@ function DirectoryNode(props: {
                 onClick={() => props.onToggle(props.path)}
                 className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors ${
                     hasActiveDescendant
-                        ? 'bg-[color:rgba(228,115,83,0.08)] text-[var(--app-fg)]'
+                        ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
                         : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
                 }`}
                 style={{ paddingLeft: indent }}
             >
                 <ChevronIcon collapsed={!isExpanded} className={hasActiveDescendant ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'} />
                 <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                    hasActiveDescendant ? 'bg-[color:rgba(228,115,83,0.14)] text-[var(--app-link)]' : 'bg-[var(--app-subtle-bg)] text-[var(--app-link)]'
+                    hasActiveDescendant ? 'bg-[var(--app-surface-raised)] text-[var(--app-fg)]' : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]/80'
                 }`}>
                     <FolderIcon className="h-[18px] w-[18px]" />
                 </span>

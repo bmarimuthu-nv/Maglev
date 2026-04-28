@@ -122,7 +122,7 @@ function buildEventsUrl(
         const base = new URL(baseUrl)
         const prefix = base.pathname.replace(/\/+$/, '')
         const joinedPath = prefix ? `${prefix}${path}` : path
-        return new URL(`${joinedPath}${base.search}`, base.origin).toString()
+        return new URL(joinedPath, base.origin).toString()
     } catch {
         return path
     }
