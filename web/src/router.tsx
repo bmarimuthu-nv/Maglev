@@ -25,6 +25,7 @@ import { useSession } from '@/hooks/queries/useSession'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { queryKeys } from '@/lib/query-keys'
 import { markPendingTerminalFocus } from '@/lib/pending-terminal-focus'
+import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
 import { useTranslation } from '@/lib/use-translation'
 import { getCurrentHubLabel } from '@/utils/url'
 import type { AgentType } from '@/components/NewSession/types'
@@ -39,42 +40,10 @@ const SESSIONS_SIDEBAR_WIDTH_KEY = 'maglev:sessionsSidebarWidth'
 const SESSIONS_SIDEBAR_DEFAULT_WIDTH = 360
 const SESSIONS_SIDEBAR_MIN_WIDTH = 280
 const SESSIONS_SIDEBAR_MAX_WIDTH = 640
-const SPAWN_SESSION_READY_TIMEOUT_MS = 4_000
-const SPAWN_SESSION_READY_POLL_MS = 150
-
 type HubMenuItem = {
     key: string
     label: string
     to: '/sessions' | '/sessions/new' | '/settings'
-}
-
-function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-        window.setTimeout(resolve, ms)
-    })
-}
-
-function isSpawnedShellSessionReady(session: { active: boolean; metadata?: unknown } | null | undefined): boolean {
-    if (!session?.active) {
-        return false
-    }
-
-    const metadata = session.metadata && typeof session.metadata === 'object'
-        ? session.metadata as Record<string, unknown>
-        : null
-    const flavor = typeof metadata?.flavor === 'string' ? metadata.flavor : null
-    if (flavor !== 'shell') {
-        return true
-    }
-
-    const shellTerminalState = typeof metadata?.shellTerminalState === 'string'
-        ? metadata.shellTerminalState
-        : null
-    const shellTerminalId = typeof metadata?.shellTerminalId === 'string'
-        ? metadata.shellTerminalId
-        : null
-
-    return shellTerminalState === 'ready' || Boolean(shellTerminalId)
 }
 
 function BackIcon(props: { className?: string }) {
@@ -527,26 +496,12 @@ function NewSessionPage() {
                 document.activeElement.blur()
             }
 
-            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
-
-            if (api) {
-                const deadline = Date.now() + SPAWN_SESSION_READY_TIMEOUT_MS
-                while (Date.now() < deadline) {
-                    try {
-                        const response = await api.getSession(sessionId)
-                        queryClient.setQueryData(
-                            queryKeys.session(scopeKey, sessionId),
-                            response
-                        )
-                        if (isSpawnedShellSessionReady(response.session)) {
-                            break
-                        }
-                    } catch {
-                        // keep polling until the session becomes readable or we time out
-                    }
-                    await delay(SPAWN_SESSION_READY_POLL_MS)
-                }
-            }
+            await waitForSpawnedShellSessionReady({
+                api,
+                queryClient,
+                scopeKey,
+                sessionId
+            })
 
             navigate({
                 to: '/sessions/$sessionId/terminal',

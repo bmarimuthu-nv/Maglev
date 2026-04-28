@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
 import type { FileSearchItem, TerminalSupervisionTargetResponse } from '@/types/api'
@@ -13,6 +14,7 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useSessionFileSearch } from '@/hooks/queries/useSessionFileSearch'
 import { rankFiles } from '@/lib/file-search'
 import { getOpenFileShortcut, matchShortcutEvent } from '@/lib/open-file-shortcut'
+import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
 import { useTranslation } from '@/lib/use-translation'
 import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
 import { clearPendingTerminalFocus, hasPendingTerminalFocus } from '@/lib/pending-terminal-focus'
@@ -354,7 +356,8 @@ function QuickKeyButton(props: {
 export default function TerminalPage() {
     const { t } = useTranslation()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
-    const { api, token, baseUrl } = useAppContext()
+    const { api, token, baseUrl, scopeKey } = useAppContext()
+    const queryClient = useQueryClient()
     const navigate = useNavigate()
     const goBack = useAppGoBack()
     const {
@@ -1234,11 +1237,17 @@ export default function TerminalPage() {
             if (result.type === 'success') {
                 setSplitSessionId(result.sessionId)
                 setPendingSplitStartupSessionId(result.sessionId)
+                await waitForSpawnedShellSessionReady({
+                    api,
+                    queryClient,
+                    scopeKey,
+                    sessionId: result.sessionId
+                })
             }
         } catch {
             // silently fail
         }
-    }, [api, session?.metadata?.path, session?.metadata?.name, sessionId])
+    }, [api, queryClient, scopeKey, session?.metadata?.path, session?.metadata?.name, sessionId])
 
     const handleCloseSplit = useCallback(async () => {
         if (!api || !splitSessionId || closingSplitSessionId === splitSessionId) {
@@ -1567,15 +1576,6 @@ export default function TerminalPage() {
                             ? 'This terminal is no longer available. Choose another session from the list.'
                             : 'Choose a terminal session from the list to keep working.'}
                     </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                            navigate({ to: '/sessions' })
-                        }}
-                    >
-                        Open sessions
-                    </Button>
                 </div>
             </div>
         )

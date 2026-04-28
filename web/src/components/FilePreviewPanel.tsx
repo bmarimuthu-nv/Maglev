@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import { FileIcon } from '@/components/FileIcon'
 import { CodeLinesView, type CodeLinesViewHandle } from '@/components/SessionFiles/CodeLinesView'
 import { CodeEditSurface, type CodeEditSurfaceHandle } from '@/components/SessionFiles/CodeEditSurface'
 import { useAppContext } from '@/lib/app-context'
@@ -66,6 +65,19 @@ function isMarkdownFile(filePath: string): boolean {
     return /\.(md|mdx|markdown)$/i.test(filePath)
 }
 
+function getImageMimeTypeFromPath(filePath: string): string | null {
+    const normalized = filePath.toLowerCase()
+    if (normalized.endsWith('.png')) return 'image/png'
+    if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) return 'image/jpeg'
+    if (normalized.endsWith('.gif')) return 'image/gif'
+    if (normalized.endsWith('.webp')) return 'image/webp'
+    if (normalized.endsWith('.svg')) return 'image/svg+xml'
+    if (normalized.endsWith('.bmp')) return 'image/bmp'
+    if (normalized.endsWith('.ico')) return 'image/x-icon'
+    if (normalized.endsWith('.avif')) return 'image/avif'
+    return null
+}
+
 function normalizeSourceLines(content: string): string[] {
     const normalized = content.replace(/\r\n/g, '\n')
     const lines = normalized.split('\n')
@@ -106,8 +118,13 @@ export function FilePreviewPanel(props: {
         ? decodeBase64(fileQuery.data.content)
         : { text: '', ok: true }
     const content = decoded.text
+    const encodedContent = fileQuery.data?.success ? (fileQuery.data.content ?? '') : ''
     const fileHash = fileQuery.data?.success ? (fileQuery.data.hash ?? null) : null
     const binary = fileQuery.data?.success ? (!decoded.ok || isBinaryContent(content)) : false
+    const imageMimeType = getImageMimeTypeFromPath(filePath)
+    const imagePreviewUrl = binary && imageMimeType && encodedContent
+        ? `data:${imageMimeType};base64,${encodedContent}`
+        : null
     const markdown = isMarkdownFile(filePath)
     const sourceLines = useMemo(() => normalizeSourceLines(content), [content])
     const fileName = filePath.split('/').pop() ?? filePath
@@ -297,10 +314,7 @@ export function FilePreviewPanel(props: {
     return (
         <div className="flex h-full w-full flex-col overflow-hidden">
             <div className="border-b border-[var(--app-border)] px-3 py-2.5">
-                <div className="flex items-start gap-3">
-                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-[var(--app-surface-raised)]">
-                        <FileIcon fileName={fileName} size={16} />
-                    </span>
+                <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                         <div className="truncate text-[13px] font-semibold text-[var(--app-fg)]" title={filePath}>
                             {filePath}
@@ -458,6 +472,16 @@ export function FilePreviewPanel(props: {
                     <div className="p-4">
                         <div className="rounded-[24px] border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] px-4 py-4 text-sm text-[var(--app-badge-error-text)]">
                             {fileQuery.error instanceof Error ? fileQuery.error.message : 'Failed to load file'}
+                        </div>
+                    </div>
+                ) : binary && imagePreviewUrl ? (
+                    <div className="flex h-full min-h-0 items-center justify-center p-4">
+                        <div className="flex h-full w-full min-h-0 items-center justify-center overflow-auto rounded-[24px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-4">
+                            <img
+                                src={imagePreviewUrl}
+                                alt={fileName}
+                                className="block max-h-full max-w-full rounded-xl object-contain shadow-[0_20px_60px_-32px_rgba(0,0,0,0.45)]"
+                            />
                         </div>
                     </div>
                 ) : binary ? (

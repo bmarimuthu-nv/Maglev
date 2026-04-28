@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
 import { useSession } from '@/hooks/queries/useSession'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -16,6 +16,7 @@ import { decodeBase64, encodeBase64 } from '@/lib/utils'
 import { REVIEW_FILE_PATH, createEmptyReviewFile, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
 import { resolveLanguageFromPath, useShikiLines } from '@/lib/shiki'
+import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
 
 const REVIEW_SPLIT_TERMINAL_WIDTH_KEY = 'maglev:reviewSplitTerminalWidth'
 const REVIEW_SPLIT_TERMINAL_DEFAULT_WIDTH = 560
@@ -631,6 +632,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
 
 export default function ReviewPage() {
     const { api, scopeKey, baseUrl } = useAppContext()
+    const queryClient = useQueryClient()
     const navigate = useNavigate()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/review' })
     const search = useSearch({ from: '/sessions/$sessionId/review' })
@@ -1081,11 +1083,17 @@ export default function ReviewPage() {
             if (result.type === 'success') {
                 setSplitSessionId(result.sessionId)
                 setPendingSplitStartupSessionId(result.sessionId)
+                await waitForSpawnedShellSessionReady({
+                    api,
+                    queryClient,
+                    scopeKey,
+                    sessionId: result.sessionId
+                })
             }
         } catch {
             // ignore
         }
-    }, [api, session?.metadata?.name, session?.metadata?.path, sessionId])
+    }, [api, queryClient, scopeKey, session?.metadata?.name, session?.metadata?.path, sessionId])
 
     const handleCloseSplit = useCallback(async () => {
         if (!api || !splitSessionId || closingSplitSessionId === splitSessionId) {
