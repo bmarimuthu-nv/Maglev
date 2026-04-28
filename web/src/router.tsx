@@ -284,21 +284,21 @@ function SessionsPage() {
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="px-3 py-3">
                     <div className="relative">
-                        <div className="flex min-w-0 items-center gap-3 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2.5 shadow-[var(--app-panel-shadow)]">
-                            <MaglevMark size="sm" className="h-10 w-10 rounded-[16px] shrink-0" />
+                        <div className="flex min-w-0 items-center gap-2.5 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2.5 py-2">
+                            <MaglevMark size="sm" className="h-8.5 w-8.5 rounded-[14px] shrink-0" />
                             <button
                                 type="button"
                                 onClick={() => setHubMenuOpen((value) => !value)}
                                 className="min-w-0 flex flex-1 items-center gap-2 rounded-xl text-left transition-colors hover:text-[var(--app-link)]"
                             >
                                 <div className="min-w-0 flex-1">
-                                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--app-hint)]">
+                                    <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--app-hint)]">
                                         Maglev Hub
                                     </div>
-                                    <div className="mt-0.5 truncate text-[13px] font-semibold text-[var(--app-fg)]">
+                                    <div className="mt-0.5 truncate text-[12px] font-semibold text-[var(--app-fg)]">
                                         {hubLabel}
                                     </div>
-                                    <div className="text-[11px] text-[var(--app-hint)]">
+                                    <div className="text-[10px] text-[var(--app-hint)]">
                                         {t('sessions.count', { n: sessions.length, m: projectCount })}
                                     </div>
                                 </div>

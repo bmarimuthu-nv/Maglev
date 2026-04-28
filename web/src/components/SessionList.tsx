@@ -387,6 +387,20 @@ function getSubgroupIdentity(row: SessionRow): { key: string; label: string; hin
     }
 }
 
+export function getGroupBranchHint(groupSessions: SessionSummary[]): string | undefined {
+    const branchHints = new Set<string>()
+    for (const session of groupSessions) {
+        const branch = session.metadata?.worktree?.branch?.trim() ?? session.metadata?.branch?.trim()
+        if (branch) {
+            branchHints.add(branch)
+        }
+    }
+    if (branchHints.size !== 1) {
+        return undefined
+    }
+    return Array.from(branchHints)[0]
+}
+
 export function getSessionSubgroups(_groupDirectory: string, orderedRows: SessionRow[]): SessionSubgroup[] {
     const subgroupMap = new Map<string, SessionSubgroup>()
 
@@ -722,7 +736,7 @@ function SessionItem(props: {
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-1.5">
-                            <div className={`truncate text-[14px] font-medium leading-5 ${selected ? 'text-[var(--app-fg)]' : 'text-[var(--app-fg)]/72'}`}>
+                            <div className={`truncate text-[15px] font-medium leading-5 ${selected ? 'text-[var(--app-fg)]' : 'text-[var(--app-fg)]/72'}`}>
                                 {sessionName}
                             </div>
                             {s.metadata?.pinned ? (
@@ -732,7 +746,7 @@ function SessionItem(props: {
                             ) : null}
                         </div>
                         {contextLine ? (
-                            <div className={`truncate text-[9px] leading-4 ${selected ? 'text-[var(--app-hint)]' : 'text-[var(--app-hint)]/78'}`}>
+                            <div className={`truncate text-[10px] leading-4 ${selected ? 'text-[var(--app-hint)]' : 'text-[var(--app-hint)]/78'}`}>
                                 {contextLine}
                             </div>
                         ) : null}
@@ -1453,6 +1467,7 @@ export function SessionList(props: {
         if (item.kind === 'header') {
             const { group, isCollapsed } = item.groupState
             const groupIndex = groupRenderStates.findIndex((groupState) => groupState.group.directory === group.directory)
+            const groupBranchHint = getGroupBranchHint(group.sessions)
             const isDropBefore = dropIndicator?.kind === 'group' && dropIndicator.insertIndex === groupIndex
             const isDropAfter = dropIndicator?.kind === 'group'
                 && dropIndicator.insertIndex === groupRenderStates.length
@@ -1487,6 +1502,14 @@ export function SessionList(props: {
                                     <span className="truncate text-[13px] font-medium text-[var(--app-fg)]" title={group.directory}>
                                         {group.displayName}
                                     </span>
+                                    {groupBranchHint ? (
+                                        <>
+                                            <span className="shrink-0 text-[10px] text-[var(--app-hint)]/35">/</span>
+                                            <span className="truncate text-[10px] text-[var(--app-hint)]/78" title={groupBranchHint}>
+                                                {groupBranchHint}
+                                            </span>
+                                        </>
+                                    ) : null}
                                     <span className="shrink-0 text-[10px] text-[var(--app-hint)]/80">
                                         {group.sessions.length} sessions
                                     </span>
@@ -1632,11 +1655,11 @@ export function SessionList(props: {
                 className={`group/drag flex items-stretch px-3 pb-0.5 ${dropClass}`}
             >
                 {renderDragHandle('row')}
-                <div className={`flex-1 min-w-0 ${row.paired ? 'overflow-hidden rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_90%,white_10%)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_55%,transparent)]' : ''} ${row.isChild ? 'pl-4' : ''}`}>
+                <div className={`flex-1 min-w-0 pl-2 ${row.paired ? 'overflow-hidden rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_90%,white_10%)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_55%,transparent)]' : ''} ${row.isChild ? 'pl-4' : ''}`}>
                     {row.sessions.map((session, index) => (
                         <div
                             key={session.id}
-                            className={`${getTerminalSupervisionTone(session)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''} ${row.isChild ? 'relative before:absolute before:bottom-3 before:left-[-12px] before:top-3 before:w-[1px] before:rounded-full before:bg-[var(--app-border)]' : ''}`}
+                            className={`${getTerminalSupervisionTone(session)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''} relative ${row.isChild ? 'before:absolute before:bottom-3 before:left-[-12px] before:top-3 before:w-[1px] before:rounded-full before:bg-[var(--app-border)]' : ''}`}
                         >
                             <SessionItem
                                 session={session}
@@ -1667,7 +1690,7 @@ export function SessionList(props: {
                         <button
                             type="button"
                             onClick={props.onNewSession}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-surface-raised)] px-3 py-1.5 text-[12px] font-medium text-[var(--app-fg)] transition-[background-color] duration-150 hover:bg-[var(--app-subtle-bg)]"
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-subtle-bg)]/55 px-3 py-1.5 text-[12px] font-medium text-[var(--app-fg)] transition-[background-color] duration-150 hover:bg-[var(--app-subtle-bg)]"
                             title={t('sessions.new')}
                         >
                             <PlusIcon className="h-3.5 w-3.5" />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { buildCloneRequest, getSessionRows, getSessionSubgroups, reconcileOrder } from './SessionList'
+import { buildCloneRequest, getGroupBranchHint, getSessionRows, getSessionSubgroups, reconcileOrder } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -216,6 +216,45 @@ describe('getSessionSubgroups', () => {
         expect(subgroups).toHaveLength(1)
         expect(subgroups[0]?.label).toBe('Folder')
         expect(subgroups[0]?.hint).toBe('feature/plain-repo')
+    })
+})
+
+describe('getGroupBranchHint', () => {
+    it('returns the plain repo branch when the group has a single shared branch', () => {
+        const sessions = [
+            makeSession({ id: 'a', metadata: { path: '/repo', branch: 'feature/plain-repo' } }),
+            makeSession({ id: 'b', metadata: { path: '/repo', branch: 'feature/plain-repo' } }),
+        ]
+
+        expect(getGroupBranchHint(sessions)).toBe('feature/plain-repo')
+    })
+
+    it('prefers worktree branch metadata when present', () => {
+        const sessions = [
+            makeSession({
+                id: 'wt',
+                metadata: {
+                    path: '/repo/.worktrees/feature-a',
+                    worktree: {
+                        basePath: '/repo',
+                        branch: 'feature/a',
+                        name: 'feature-a',
+                        worktreePath: '/repo/.worktrees/feature-a'
+                    }
+                }
+            }),
+        ]
+
+        expect(getGroupBranchHint(sessions)).toBe('feature/a')
+    })
+
+    it('returns nothing when the group mixes multiple branches', () => {
+        const sessions = [
+            makeSession({ id: 'a', metadata: { path: '/repo', branch: 'feature/a' } }),
+            makeSession({ id: 'b', metadata: { path: '/repo', branch: 'feature/b' } }),
+        ]
+
+        expect(getGroupBranchHint(sessions)).toBeUndefined()
     })
 })
 
