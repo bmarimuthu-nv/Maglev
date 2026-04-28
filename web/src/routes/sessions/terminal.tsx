@@ -714,6 +714,29 @@ export default function TerminalPage() {
     }, [terminalState.status, canTakeOver])
 
     useEffect(() => {
+        if (terminalState.status !== 'error' || canTakeOver) {
+            return
+        }
+        if (!session?.active || !terminalId || sessionLoading) {
+            return
+        }
+        const size = lastSizeRef.current
+        if (!size || connectOnceRef.current) {
+            return
+        }
+
+        const timer = window.setTimeout(() => {
+            if (connectOnceRef.current) {
+                return
+            }
+            connectOnceRef.current = true
+            connect(size.cols, size.rows)
+        }, 250)
+
+        return () => window.clearTimeout(timer)
+    }, [canTakeOver, connect, session?.active, sessionLoading, terminalId, terminalState.status])
+
+    useEffect(() => {
         if (terminalState.status !== 'connected') {
             return
         }

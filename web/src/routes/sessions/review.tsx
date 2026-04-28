@@ -601,6 +601,7 @@ export default function ReviewPage() {
     const [collapsedResolvedThreadIds, setCollapsedResolvedThreadIds] = useState<Record<string, boolean>>({})
     const [expandedFilePaths, setExpandedFilePaths] = useState<Set<string>>(() => new Set())
     const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
+    const [pendingSplitStartupSessionId, setPendingSplitStartupSessionId] = useState<string | null>(null)
     const [closingSplitSessionId, setClosingSplitSessionId] = useState<string | null>(null)
     const [splitPanelWidth, setSplitPanelWidth] = useState(() => {
         try {
@@ -911,6 +912,17 @@ export default function ReviewPage() {
     }, [allSessions, closingSplitSessionId, session?.id, splitSessionId])
 
     useEffect(() => {
+        if (!pendingSplitStartupSessionId) {
+            return
+        }
+
+        const pendingSession = allSessions.find((candidate) => candidate.id === pendingSplitStartupSessionId)
+        if (pendingSession?.active) {
+            setPendingSplitStartupSessionId(null)
+        }
+    }, [allSessions, pendingSplitStartupSessionId])
+
+    useEffect(() => {
         if (!closingSplitSessionId) {
             return
         }
@@ -926,13 +938,22 @@ export default function ReviewPage() {
         }
 
         const splitSession = allSessions.find((candidate) => candidate.id === splitSessionId)
+        if (splitSession?.active) {
+            if (pendingSplitStartupSessionId === splitSessionId) {
+                setPendingSplitStartupSessionId(null)
+            }
+            return
+        }
+        if (pendingSplitStartupSessionId === splitSessionId) {
+            return
+        }
         if (!splitSession || !splitSession.active) {
             setSplitSessionId(null)
             if (closingSplitSessionId === splitSessionId) {
                 setClosingSplitSessionId(null)
             }
         }
-    }, [allSessions, closingSplitSessionId, splitSessionId])
+    }, [allSessions, closingSplitSessionId, pendingSplitStartupSessionId, splitSessionId])
 
     const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         event.preventDefault()
@@ -975,6 +996,7 @@ export default function ReviewPage() {
             )
             if (result.type === 'success') {
                 setSplitSessionId(result.sessionId)
+                setPendingSplitStartupSessionId(result.sessionId)
             }
         } catch {
             // ignore
@@ -990,10 +1012,13 @@ export default function ReviewPage() {
         try {
             await api.closeSession(splitSessionId)
             setSplitSessionId((current) => current === splitSessionId ? null : current)
+            setPendingSplitStartupSessionId((current) => current === splitSessionId ? null : current)
         } catch {
             setClosingSplitSessionId(null)
         }
     }, [api, closingSplitSessionId, splitSessionId])
+
+    const splitSessionStarting = splitSessionId !== null && pendingSplitStartupSessionId === splitSessionId
 
     if (!session) {
         return <div className="flex h-full items-center justify-center"><LoadingState label="Loading review…" className="text-sm" /></div>
@@ -1043,7 +1068,15 @@ export default function ReviewPage() {
                         title={splitSessionId ? 'Close review shell' : 'Open a review shell in this workspace'}
                     >
                         <TerminalIcon />
-                        <span>{splitSessionId ? (closingSplitSessionId === splitSessionId ? 'Closing…' : 'Close shell') : 'Review shell'}</span>
+                        <span>{
+                            splitSessionId
+                                ? closingSplitSessionId === splitSessionId
+                                    ? 'Closing…'
+                                    : splitSessionStarting
+                                        ? 'Starting…'
+                                        : 'Close shell'
+                                : 'Review shell'
+                        }</span>
                     </button>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -1252,10 +1285,12 @@ export default function ReviewPage() {
                             sessionId={splitSessionId}
                             onClose={handleCloseSplit}
                             isClosing={closingSplitSessionId === splitSessionId}
+                            starting={splitSessionStarting}
                             title="Review terminal"
                             subtitle={session.metadata?.path ?? undefined}
                             onNavigate={(id) => {
                                 setSplitSessionId(null)
+                                setPendingSplitStartupSessionId((current) => current === id ? null : current)
                                 void navigate({
                                     to: '/sessions/$sessionId/terminal',
                                     params: { sessionId: id },

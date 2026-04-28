@@ -31,10 +31,11 @@ export function SplitTerminalPanel(props: {
     onClose: () => Promise<void> | void
     onNavigate?: (sessionId: string) => void
     isClosing?: boolean
+    starting?: boolean
     title?: string
     subtitle?: string
 }) {
-    const { sessionId, onClose, onNavigate, isClosing = false, title, subtitle } = props
+    const { sessionId, onClose, onNavigate, isClosing = false, starting = false, title, subtitle } = props
     const { api, token, baseUrl } = useAppContext()
     const { session, isLoading: sessionLoading } = useSession(api, sessionId)
     const isShellSession = session?.metadata?.flavor === 'shell'
@@ -146,6 +147,39 @@ export function SplitTerminalPanel(props: {
     }, [canTakeOver, terminalState.status])
 
     useEffect(() => {
+        if (terminalState.status !== 'error' || canTakeOver) {
+            return
+        }
+        if (!session?.active || !terminalId || sessionLoading) {
+            return
+        }
+        const size = lastSizeRef.current
+        if (!size || connectOnceRef.current) {
+            return
+        }
+
+        const timer = window.setTimeout(() => {
+            if (connectOnceRef.current) {
+                return
+            }
+            connectOnceRef.current = true
+            connect(size.cols, size.rows)
+        }, 250)
+
+        return () => window.clearTimeout(timer)
+    }, [canTakeOver, connect, session?.active, sessionLoading, terminalId, terminalState.status])
+
+    useEffect(() => {
+        if (terminalState.status !== 'connected') {
+            return
+        }
+        const frame = requestAnimationFrame(() => {
+            terminalRef.current?.focus()
+        })
+        return () => cancelAnimationFrame(frame)
+    }, [terminalState.status])
+
+    useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
             connectOnceRef.current = false
@@ -154,6 +188,8 @@ export function SplitTerminalPanel(props: {
 
     const sessionName = session?.metadata?.name ?? session?.metadata?.summary?.text ?? sessionId.slice(0, 8)
     const panelTitle = title ?? (session?.metadata?.childRole === 'review-terminal' ? 'Review terminal' : sessionName)
+
+    const startupPending = starting || sessionLoading || !session || (isShellSession && (!session.metadata?.shellTerminalId || session.metadata?.shellTerminalState !== 'ready'))
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden p-3">
@@ -210,6 +246,10 @@ export function SplitTerminalPanel(props: {
                                 </button>
                             </div>
                         ) : null}
+                    </div>
+                ) : startupPending ? (
+                    <div className="border-b border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
+                        Starting review shell…
                     </div>
                 ) : null}
                 <div className="flex-1 overflow-hidden p-2">
