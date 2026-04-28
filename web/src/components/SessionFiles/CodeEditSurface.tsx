@@ -1,5 +1,4 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
-import { resolveLanguageFromPath, useShikiLines } from '@/lib/shiki'
 
 export type CodeEditSurfaceHandle = {
     scrollToBottom: () => void
@@ -9,13 +8,10 @@ function CodeEditSurfaceInner(props: {
     draft: string
     filePath: string
     onChange: (value: string) => void
-    scrollContainerRef?: React.RefObject<HTMLElement | null>
 }, ref: React.Ref<CodeEditSurfaceHandle>) {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null)
     const containerRef = useRef<HTMLDivElement | null>(null)
     const rows = useMemo(() => props.draft.split('\n'), [props.draft])
-    const language = useMemo(() => resolveLanguageFromPath(props.filePath), [props.filePath])
-    const highlightedLines = useShikiLines(props.draft, language)
 
     useEffect(() => {
         const textarea = textareaRef.current
@@ -27,12 +23,11 @@ function CodeEditSurfaceInner(props: {
     }, [props.draft])
 
     const scrollToBottom = () => {
-        const target = props.scrollContainerRef?.current ?? containerRef.current
-        if (!target) {
+        if (!containerRef.current) {
             return
         }
-        target.scrollTo({
-            top: target.scrollHeight,
+        containerRef.current.scrollTo({
+            top: containerRef.current.scrollHeight,
             behavior: 'smooth'
         })
     }
@@ -57,22 +52,11 @@ function CodeEditSurfaceInner(props: {
                     </div>
 
                     <div className="relative min-w-0 bg-[var(--code-bg)]">
-                        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                            {rows.map((line, index) => (
-                                <div
-                                    key={`edit-highlight-${index + 1}`}
-                                    className="shiki min-w-0 whitespace-pre-wrap break-words px-3 py-1.5 text-[var(--app-fg)]"
-                                >
-                                    {highlightedLines?.[index] ?? (line || ' ')}
-                                </div>
-                            ))}
-                        </div>
-
                         <textarea
                             ref={textareaRef}
                             value={props.draft}
                             onChange={(event) => props.onChange(event.target.value)}
-                            className="relative z-10 block min-h-full w-full resize-none overflow-hidden bg-transparent px-3 py-1.5 font-mono text-[12.5px] leading-[1.56] text-transparent caret-[var(--app-fg)] focus:outline-none"
+                            className="block min-h-full w-full resize-none overflow-hidden bg-transparent px-3 py-1.5 font-mono text-[12.5px] leading-[1.56] text-[var(--app-fg)] caret-[var(--app-fg)] focus:outline-none"
                             spellCheck={false}
                             autoCapitalize="none"
                             autoCorrect="off"

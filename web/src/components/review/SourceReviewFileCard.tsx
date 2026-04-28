@@ -21,7 +21,6 @@ export function SourceReviewFileCard(props: {
     onDeleteThread: (thread: FileReviewThread) => void
     onReplyToThread: (thread: FileReviewThread, body: string) => void
     codeViewRef?: React.Ref<CodeLinesViewHandle>
-    scrollContainerRef?: React.RefObject<HTMLElement | null>
 }) {
     return (
         <CodeLinesView
@@ -42,7 +41,6 @@ export function SourceReviewFileCard(props: {
             onResolveThread={props.onResolveThread}
             onDeleteThread={props.onDeleteThread}
             onReplyToThread={props.onReplyToThread}
-            scrollContainerRef={props.scrollContainerRef}
             buildLink={(line) => `${window.location.href.split('#')[0]}#L${line}`}
         />
     )

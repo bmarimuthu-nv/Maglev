@@ -126,7 +126,6 @@ export function FilePreviewPanel(props: {
     const codeViewRef = useRef<CodeLinesViewHandle | null>(null)
     const reviewViewRef = useRef<CodeLinesViewHandle | null>(null)
     const editViewRef = useRef<CodeEditSurfaceHandle | null>(null)
-    const panelScrollRef = useRef<HTMLDivElement | null>(null)
     const isEditing = panelMode === 'edit'
 
     useEffect(() => {
@@ -297,19 +296,15 @@ export function FilePreviewPanel(props: {
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden">
-            <div className="border-b border-[var(--app-border)] px-3 py-3">
+            <div className="border-b border-[var(--app-border)] px-3 py-2.5">
                 <div className="flex items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--app-surface-raised)]">
-                        <FileIcon fileName={fileName} size={22} />
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[var(--app-surface-raised)]">
+                        <FileIcon fileName={fileName} size={20} />
                     </span>
                     <div className="min-w-0 flex-1">
-                        <div className="truncate text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--app-hint)]">
-                            File preview
+                        <div className="truncate text-[13px] font-semibold text-[var(--app-fg)]" title={filePath}>
+                            {filePath}
                         </div>
-                        <div className="mt-0.5 truncate text-[15px] font-semibold text-[var(--app-fg)]" title={filePath}>
-                            {fileName}
-                        </div>
-                        <div className="truncate text-xs text-[var(--app-hint)]">{filePath}</div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                         <button
@@ -342,8 +337,8 @@ export function FilePreviewPanel(props: {
                 </div>
 
                 {!binary ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <div className="flex shrink-0 items-center rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1 text-[11px]">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <div className="flex shrink-0 items-center rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-0.5 text-[10px]">
                             {([
                                 ['read', 'Code'],
                                 ['review', 'Review'],
@@ -365,7 +360,7 @@ export function FilePreviewPanel(props: {
                                         }
                                         setPanelMode(value)
                                     }}
-                                    className={`rounded-xl px-3 py-1.5 font-semibold transition-colors ${
+                                    className={`rounded-xl px-2.5 py-1 font-semibold transition-colors ${
                                         panelMode === value
                                             ? 'bg-[var(--app-button)] text-[var(--app-button-text)] shadow-[0_12px_24px_-18px_var(--app-button-shadow)]'
                                             : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
@@ -376,11 +371,11 @@ export function FilePreviewPanel(props: {
                             ))}
                         </div>
                         {markdown && panelMode === 'read' ? (
-                            <div className="flex shrink-0 items-center rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1 text-[11px]">
+                            <div className="flex shrink-0 items-center rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-0.5 text-[10px]">
                                 <button
                                     type="button"
                                     onClick={() => setViewMode('rendered')}
-                                    className={`rounded-xl px-3 py-1.5 font-semibold transition-colors ${
+                                    className={`rounded-xl px-2.5 py-1 font-semibold transition-colors ${
                                         viewMode === 'rendered'
                                             ? 'bg-[var(--app-button)] text-[var(--app-button-text)] shadow-[0_12px_24px_-18px_var(--app-button-shadow)]'
                                             : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
@@ -391,7 +386,7 @@ export function FilePreviewPanel(props: {
                                 <button
                                     type="button"
                                     onClick={() => setViewMode('source')}
-                                    className={`rounded-xl px-3 py-1.5 font-semibold transition-colors ${
+                                    className={`rounded-xl px-2.5 py-1 font-semibold transition-colors ${
                                         viewMode === 'source'
                                             ? 'bg-[var(--app-button)] text-[var(--app-button-text)] shadow-[0_12px_24px_-18px_var(--app-button-shadow)]'
                                             : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
@@ -452,7 +447,7 @@ export function FilePreviewPanel(props: {
                 </div>
             ) : null}
 
-            <div ref={panelScrollRef} className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto">
                 {fileQuery.isLoading ? (
                     <div className="p-4">
                         <div className="rounded-[24px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-4 py-6 text-sm text-[var(--app-hint)]">
@@ -477,13 +472,11 @@ export function FilePreviewPanel(props: {
                         draft={draft}
                         filePath={filePath}
                         onChange={setDraft}
-                        scrollContainerRef={panelScrollRef}
                     />
                 ) : panelMode === 'review' ? (
                     <div className="p-4">
                         <SourceReviewFileCard
                             codeViewRef={reviewViewRef}
-                            scrollContainerRef={panelScrollRef}
                             filePath={filePath}
                             sourceLines={sourceLines}
                             reviewSaving={reviewSaving}
@@ -514,7 +507,6 @@ export function FilePreviewPanel(props: {
                             ref={codeViewRef}
                             content={content}
                             filePath={filePath}
-                            scrollContainerRef={panelScrollRef}
                             buildLink={buildPreviewLink}
                         />
                     </div>

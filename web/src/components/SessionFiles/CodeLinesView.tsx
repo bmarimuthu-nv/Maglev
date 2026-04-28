@@ -321,7 +321,6 @@ function CodeLinesViewInner(props: {
     onResolveThread?: (thread: FileReviewThread) => void
     onDeleteThread?: (thread: FileReviewThread) => void
     onReplyToThread?: (thread: FileReviewThread, body: string) => void
-    scrollContainerRef?: React.RefObject<HTMLElement | null>
 }, ref: React.Ref<CodeLinesViewHandle>) {
     const { copy } = useCopyToClipboard()
     const [menuState, setMenuState] = useState<LineMenuState | null>(null)
@@ -372,12 +371,11 @@ function CodeLinesViewInner(props: {
     }, [activeMatchLine, props.highlightedLine, props.content])
 
     const scrollToBottom = () => {
-        const target = props.scrollContainerRef?.current ?? containerRef.current
-        if (!target) {
+        if (!containerRef.current) {
             return
         }
-        target.scrollTo({
-            top: target.scrollHeight,
+        containerRef.current.scrollTo({
+            top: containerRef.current.scrollHeight,
             behavior: 'smooth'
         })
     }
