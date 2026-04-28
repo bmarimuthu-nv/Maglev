@@ -68,7 +68,7 @@ function createApi(overrides?: Partial<{
     }
 }
 
-function renderPreview(api: ReturnType<typeof createApi>, filePath: string, options?: { allowReview?: boolean }) {
+function renderPreview(api: ReturnType<typeof createApi>, filePath: string) {
     const queryClient = new QueryClient({
         defaultOptions: {
             queries: {
@@ -93,7 +93,6 @@ function renderPreview(api: ReturnType<typeof createApi>, filePath: string, opti
                     filePath={filePath}
                     api={api as never}
                     onClose={vi.fn()}
-                    allowReview={options?.allowReview}
                 />
             </AppContextProvider>
         </QueryClientProvider>
@@ -152,7 +151,7 @@ describe('FilePreviewPanel', () => {
             })
         })
 
-        renderPreview(api, '/repo/src/example.ts', { allowReview: true })
+        renderPreview(api, '/repo/src/example.ts')
 
         expect(await screen.findByText('example.ts')).toBeInTheDocument()
         expect(await screen.findByPlaceholderText('Search in file')).toBeInTheDocument()
@@ -194,7 +193,7 @@ describe('FilePreviewPanel', () => {
             })
         })
 
-        renderPreview(api, '/repo/README.md', { allowReview: true })
+        renderPreview(api, '/repo/README.md')
 
         expect(await screen.findByTestId('markdown-renderer')).toHaveTextContent('# Hello Maglev')
         expect(screen.getByRole('button', { name: 'Rendered' })).toBeInTheDocument()
@@ -209,25 +208,5 @@ describe('FilePreviewPanel', () => {
         await waitFor(() => {
             expect(screen.queryByTestId('markdown-renderer')).not.toBeInTheDocument()
         })
-    })
-
-    it('hides review mode in terminal-style preview mode', async () => {
-        const api = createApi({
-            readSessionFile: vi.fn().mockResolvedValue({
-                success: true,
-                content: encodeBase64(['const a = 1', 'const b = a + 1'].join('\n')),
-                hash: 'file-hash'
-            }),
-            getSessionFileReviewThreads: vi.fn().mockResolvedValue({
-                success: true,
-                threads: [makeThread({ id: 'thread-1', resolvedLine: 2 })]
-            })
-        })
-
-        renderPreview(api, '/repo/src/example.ts', { allowReview: false })
-
-        expect(await screen.findByText('example.ts')).toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument()
-        expect(api.getSessionFileReviewThreads).not.toHaveBeenCalled()
     })
 })

@@ -1739,7 +1739,6 @@ export default function TerminalPage() {
                             filePath={previewFilePath}
                             api={api}
                             onClose={() => setPreviewFilePath(null)}
-                            allowReview={false}
                         />
                     </div>
                 ) : null}
