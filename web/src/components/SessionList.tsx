@@ -1508,9 +1508,14 @@ export function SessionList(props: {
                             <div
                                 className="absolute right-3 top-[calc(100%+6px)] z-20 min-w-[160px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]"
                                 onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => event.stopPropagation()}
                             >
                                 <button
                                     type="button"
+                                    onPointerDown={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                    }}
                                     onClick={() => {
                                         setGroupMenuDirectory(null)
                                         setClearSessionsTarget({
@@ -1574,9 +1579,14 @@ export function SessionList(props: {
                             <div
                                 className="absolute left-0 top-[calc(100%+4px)] z-20 min-w-[160px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]"
                                 onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => event.stopPropagation()}
                             >
                                 <button
                                     type="button"
+                                    onPointerDown={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                    }}
                                     onClick={() => {
                                         setSubgroupMenuTarget(null)
                                         setClearSessionsTarget({
