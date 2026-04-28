@@ -386,61 +386,63 @@ function CodeLinesViewInner(props: {
 
     return (
         <div className="relative">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-full border border-[var(--code-border)] bg-[var(--app-surface-raised)] px-3 py-2">
-                    <SearchIcon className="text-[var(--app-hint)]" />
-                    <input
-                        value={searchQuery}
-                        onChange={(event) => setSearchQuery(event.target.value)}
-                        placeholder="Search in file"
-                        className="w-full bg-transparent text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                    />
-                </div>
-                <div className="flex items-center gap-2 text-xs text-[var(--app-hint)]">
-                    <span>
-                        {searchQuery.trim()
-                            ? (searchMatches.length ? `${Math.min(activeMatchIndex + 1, searchMatches.length)} of ${searchMatches.length}` : 'No matches')
-                            : `${rows.length} lines`}
-                    </span>
-                    {reviewMode ? (
-                        <span className="rounded-full border border-[var(--code-border)] bg-[var(--app-surface-raised)] px-2 py-1 font-medium text-[var(--app-fg)]">
-                            {unresolvedCount} unresolved
-                        </span>
-                    ) : null}
-                    <button
-                        type="button"
-                        onClick={() => setActiveMatchIndex((current) => Math.max(0, current - 1))}
-                        disabled={!searchMatches.length || activeMatchIndex === 0}
-                        className="rounded-full border border-[var(--code-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-fg)] disabled:opacity-50"
-                    >
-                        Prev
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setActiveMatchIndex((current) => Math.min(searchMatches.length - 1, current + 1))}
-                        disabled={!searchMatches.length || activeMatchIndex >= searchMatches.length - 1}
-                        className="rounded-full border border-[var(--code-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-fg)] disabled:opacity-50"
-                    >
-                        Next
-                    </button>
-                    <button
-                        type="button"
-                        onClick={scrollToBottom}
-                        className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--code-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                        title="Scroll to bottom"
-                        aria-label="Scroll to bottom"
-                    >
-                        <ArrowDownIcon />
-                    </button>
-                </div>
-            </div>
-
             <div
                 ref={containerRef}
                 className="overflow-auto rounded-[22px] border border-[var(--code-border)] bg-[var(--code-bg)] shadow-[0_18px_44px_-36px_rgba(28,18,10,0.42)]"
             >
+                <div className="sticky top-0 z-10 border-b border-[var(--code-border)] bg-[var(--app-surface-raised)]/95 px-3 py-3 backdrop-blur">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-full border border-[var(--code-border)] bg-[var(--app-surface-raised)] px-3 py-2">
+                            <SearchIcon className="text-[var(--app-hint)]" />
+                            <input
+                                value={searchQuery}
+                                onChange={(event) => setSearchQuery(event.target.value)}
+                                placeholder="Search in file"
+                                className="w-full bg-transparent text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none"
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-[var(--app-hint)]">
+                            <span>
+                                {searchQuery.trim()
+                                    ? (searchMatches.length ? `${Math.min(activeMatchIndex + 1, searchMatches.length)} of ${searchMatches.length}` : 'No matches')
+                                    : `${rows.length} lines`}
+                            </span>
+                            {reviewMode ? (
+                                <span className="rounded-full border border-[var(--code-border)] bg-[var(--app-surface-raised)] px-2 py-1 font-medium text-[var(--app-fg)]">
+                                    {unresolvedCount} unresolved
+                                </span>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={() => setActiveMatchIndex((current) => Math.max(0, current - 1))}
+                                disabled={!searchMatches.length || activeMatchIndex === 0}
+                                className="rounded-full border border-[var(--code-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-fg)] disabled:opacity-50"
+                            >
+                                Prev
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveMatchIndex((current) => Math.min(searchMatches.length - 1, current + 1))}
+                                disabled={!searchMatches.length || activeMatchIndex >= searchMatches.length - 1}
+                                className="rounded-full border border-[var(--code-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-fg)] disabled:opacity-50"
+                            >
+                                Next
+                            </button>
+                            <button
+                                type="button"
+                                onClick={scrollToBottom}
+                                className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--code-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                                title="Scroll to bottom"
+                                aria-label="Scroll to bottom"
+                            >
+                                <ArrowDownIcon />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 {rows.map((line, index) => {
                     const lineNumber = index + 1
                     const threads = lineThreads.get(lineNumber) ?? []

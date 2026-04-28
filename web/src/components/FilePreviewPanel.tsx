@@ -298,8 +298,8 @@ export function FilePreviewPanel(props: {
         <div className="flex h-full w-full flex-col overflow-hidden">
             <div className="border-b border-[var(--app-border)] px-3 py-2.5">
                 <div className="flex items-start gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[var(--app-surface-raised)]">
-                        <FileIcon fileName={fileName} size={20} />
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-[var(--app-surface-raised)]">
+                        <FileIcon fileName={fileName} size={16} />
                     </span>
                     <div className="min-w-0 flex-1">
                         <div className="truncate text-[13px] font-semibold text-[var(--app-fg)]" title={filePath}>
