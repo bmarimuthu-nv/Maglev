@@ -9,6 +9,7 @@ import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
 import { useSyncingState } from '@/hooks/useSyncingState'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
+import { useSessions } from '@/hooks/queries/useSessions'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
@@ -53,7 +54,6 @@ function AppInner() {
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const router = useRouter()
-    const { addToast } = useToast()
 
     useEffect(() => {
         const tg = getTelegramWebApp()
@@ -241,43 +241,6 @@ function AppInner() {
         }
     }, [])
 
-    const handleSseEvent = useCallback(() => {}, [])
-    const handleToast = useCallback((event: ToastEvent) => {
-        addToast({
-            title: event.data.title,
-            body: event.data.body,
-            sessionId: event.data.sessionId,
-            url: event.data.url
-        })
-    }, [addToast])
-
-    const eventSubscription = useMemo(() => {
-        const match = pathname.match(/^\/sessions\/([^/]+)(?:\/|$)/)
-        const sessionId = match?.[1]
-        if (sessionId && sessionId !== 'new') {
-            return { sessionId }
-        }
-        return { all: true }
-    }, [pathname])
-
-    const { subscriptionId } = useSSE({
-        enabled: Boolean(api && token),
-        token: token ?? '',
-        baseUrl,
-        api,
-        subscription: eventSubscription,
-        onConnect: handleSseConnect,
-        onDisconnect: handleSseDisconnect,
-        onEvent: handleSseEvent,
-        onToast: handleToast
-    })
-
-    useVisibilityReporter({
-        api,
-        subscriptionId,
-        enabled: Boolean(api && token)
-    })
-
     // Loading auth source
     if (isAuthSourceLoading) {
         return (
@@ -373,10 +336,91 @@ function AppInner() {
 
     return (
         <AppContextProvider value={{ api, token, baseUrl, scopeKey }}>
-            <SyncingBanner isSyncing={isSyncing} />
+            <AuthenticatedAppShell
+                api={api}
+                token={token}
+                baseUrl={baseUrl}
+                isSyncing={isSyncing}
+                sseDisconnected={sseDisconnected}
+                sseDisconnectReason={sseDisconnectReason}
+                onSseConnect={handleSseConnect}
+                onSseDisconnect={handleSseDisconnect}
+            />
+        </AppContextProvider>
+    )
+}
+
+function AuthenticatedAppShell(props: {
+    api: NonNullable<ReturnType<typeof useAuth>['api']>
+    token: string
+    baseUrl: string
+    isSyncing: boolean
+    sseDisconnected: boolean
+    sseDisconnectReason: string | null
+    onSseConnect: () => void
+    onSseDisconnect: (reason: string) => void
+}) {
+    const pathname = useLocation({ select: (location) => location.pathname })
+    const { addToast } = useToast()
+    const { sessions, isLoading: sessionsLoading } = useSessions(props.api)
+
+    const handleSseEvent = useCallback(() => {}, [])
+    const handleToast = useCallback((event: ToastEvent) => {
+        addToast({
+            title: event.data.title,
+            body: event.data.body,
+            sessionId: event.data.sessionId,
+            url: event.data.url
+        })
+    }, [addToast])
+
+    const eventSubscription = useMemo(() => {
+        const match = pathname.match(/^\/sessions\/([^/]+)(?:\/|$)/)
+        const sessionId = match?.[1]
+        if (sessionId && sessionId !== 'new') {
+            const routeSessionExists = sessions.some((session) => session.id === sessionId)
+            if (!sessionsLoading && !routeSessionExists) {
+                return { all: true }
+            }
+
+            const childSessionIds = sessions
+                .filter((session) =>
+                    session.metadata?.parentSessionId === sessionId
+                    && (session.metadata?.childRole === 'split-terminal' || session.metadata?.childRole === 'review-terminal')
+                )
+                .map((session) => session.id)
+
+            return {
+                sessionIds: [sessionId, ...childSessionIds]
+            }
+        }
+        return { all: true }
+    }, [pathname, sessions, sessionsLoading])
+
+    const { subscriptionId } = useSSE({
+        enabled: true,
+        token: props.token,
+        baseUrl: props.baseUrl,
+        api: props.api,
+        subscription: eventSubscription,
+        onConnect: props.onSseConnect,
+        onDisconnect: props.onSseDisconnect,
+        onEvent: handleSseEvent,
+        onToast: handleToast
+    })
+
+    useVisibilityReporter({
+        api: props.api,
+        subscriptionId,
+        enabled: true
+    })
+
+    return (
+        <>
+            <SyncingBanner isSyncing={props.isSyncing} />
             <ReconnectingBanner
-                isReconnecting={sseDisconnected && !isSyncing}
-                reason={sseDisconnectReason}
+                isReconnecting={props.sseDisconnected && !props.isSyncing}
+                reason={props.sseDisconnectReason}
             />
             <OfflineBanner />
             <div className="h-full flex flex-col">
@@ -384,6 +428,6 @@ function AppInner() {
             </div>
             <ToastContainer />
             <InstallPrompt />
-        </AppContextProvider>
+        </>
     )
 }
