@@ -5,6 +5,10 @@ export type SessionSummaryMetadata = {
     path: string
     branch?: string
     childRole?: 'review-terminal' | 'split-terminal'
+    lifecycleState?: string
+    lifecycleStateSince?: number
+    archivedBy?: string
+    archiveReason?: string
     machineId?: string
     summary?: { text: string }
     flavor?: string | null
@@ -35,6 +39,10 @@ export function toSessionSummary(session: Session): SessionSummary {
         path: session.metadata.path,
         branch: session.metadata.branch,
         childRole: session.metadata.childRole,
+        lifecycleState: session.metadata.lifecycleState,
+        lifecycleStateSince: session.metadata.lifecycleStateSince,
+        archivedBy: session.metadata.archivedBy,
+        archiveReason: session.metadata.archiveReason,
         machineId: session.metadata.machineId ?? undefined,
         summary: session.metadata.summary ? { text: session.metadata.summary.text } : undefined,
         flavor: session.metadata.flavor ?? null,

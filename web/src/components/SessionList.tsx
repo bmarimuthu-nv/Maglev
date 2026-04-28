@@ -4,14 +4,21 @@ import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
+import { planSessionCleanup, useCloseSessionsBatch, type SessionCleanupMode, type SessionCleanupPlan } from '@/hooks/mutations/useCloseSessionsBatch'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionEditDialog } from '@/components/SessionEditDialog'
+import { SessionListFilter } from '@/components/SessionListFilter'
 import { StartupCommandDialog } from '@/components/StartupCommandDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
 import { queryKeys } from '@/lib/query-keys'
+import { readLocalStorageJson, writeLocalStorageJson } from '@/lib/storage-local'
+import {
+    cleanupSessionScopedStorage,
+    getSessionListOrderStorageKey,
+} from '@/lib/storage-session'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { openSessionReviewWindow } from '@/utils/sessionReview'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -94,13 +101,112 @@ type SessionListOrders = {
     rows: Record<string, string[]>
 }
 
-type ClearSessionsTarget = {
+type SessionListFilters = {
+    active: boolean
+    stopped: boolean
+    archived: boolean
+    search: string
+}
+
+type SessionLifecycleStatus = 'active' | 'stopped' | 'archived'
+
+type CleanupSessionsTarget = {
+    mode: SessionCleanupMode
     name: string
-    sessions: SessionSummary[]
+    plan: SessionCleanupPlan
+}
+
+const DEFAULT_SESSION_FILTERS: SessionListFilters = {
+    active: true,
+    stopped: true,
+    archived: false,
+    search: ''
 }
 
 export function isVisibleInSessionList(session: SessionSummary): boolean {
     return session.metadata?.childRole !== 'split-terminal'
+}
+
+function getSessionListFilterStorageKey(scopeKey: string): string {
+    return `maglev:session-list-filter:${encodeURIComponent(scopeKey)}`
+}
+
+function loadSessionListFilters(scopeKey: string): SessionListFilters {
+    const parsed = readLocalStorageJson<unknown>(getSessionListFilterStorageKey(scopeKey))
+    if (!parsed || typeof parsed !== 'object') {
+        return DEFAULT_SESSION_FILTERS
+    }
+
+    const candidate = parsed as Partial<SessionListFilters>
+    return {
+        active: candidate.active ?? DEFAULT_SESSION_FILTERS.active,
+        stopped: candidate.stopped ?? DEFAULT_SESSION_FILTERS.stopped,
+        archived: candidate.archived ?? DEFAULT_SESSION_FILTERS.archived,
+        search: typeof candidate.search === 'string' ? candidate.search : DEFAULT_SESSION_FILTERS.search
+    }
+}
+
+function saveSessionListFilters(scopeKey: string, filters: SessionListFilters): void {
+    writeLocalStorageJson(getSessionListFilterStorageKey(scopeKey), filters)
+}
+
+export function getSessionLifecycleStatus(session: SessionSummary): SessionLifecycleStatus {
+    if (session.active) {
+        return 'active'
+    }
+    if (session.metadata?.lifecycleState === 'archived') {
+        return 'archived'
+    }
+    return 'stopped'
+}
+
+function normalizeSearch(value: string): string {
+    return value.trim().toLowerCase()
+}
+
+export function matchesSessionSearch(session: SessionSummary, search: string): boolean {
+    const normalizedSearch = normalizeSearch(search)
+    if (!normalizedSearch) {
+        return true
+    }
+
+    const haystack = [
+        session.metadata?.name,
+        session.metadata?.summary?.text,
+        session.metadata?.branch,
+        session.metadata?.worktree?.branch,
+        session.metadata?.path,
+        session.metadata?.startupCommand,
+    ]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .join('\n')
+        .toLowerCase()
+
+    return haystack.includes(normalizedSearch)
+}
+
+export function filterSessionSummaries(
+    sessions: SessionSummary[],
+    filters: SessionListFilters
+): SessionSummary[] {
+    return sessions.filter((session) => {
+        const status = getSessionLifecycleStatus(session)
+        if (!filters[status]) {
+            return false
+        }
+        return matchesSessionSearch(session, filters.search)
+    })
+}
+
+function getSessionLifecycleCounts(sessions: SessionSummary[]): Record<SessionLifecycleStatus, number> {
+    return sessions.reduce<Record<SessionLifecycleStatus, number>>((counts, session) => {
+        counts[getSessionLifecycleStatus(session)] += 1
+        return counts
+    }, {
+        active: 0,
+        stopped: 0,
+        archived: 0
+    })
 }
 
 function getGroupDisplayName(directory: string): string {
@@ -421,40 +527,30 @@ export function getSessionSubgroups(_groupDirectory: string, orderedRows: Sessio
     return subgroups
 }
 
-const SESSION_ORDER_KEY = 'maglev-session-order-v2'
-
 function getRowOrderKey(groupDir: string, subgroupKey: string): string {
     return `${groupDir}::${subgroupKey}`
 }
 
-function loadSessionOrders(): SessionListOrders {
-    try {
-        const raw = localStorage.getItem(SESSION_ORDER_KEY)
-        const parsed = raw ? JSON.parse(raw) : null
-        if (!parsed || typeof parsed !== 'object') {
-            return { groups: [], subgroups: {}, rows: {} }
-        }
-        const candidate = parsed as {
-            groups?: unknown
-            subgroups?: unknown
-            rows?: unknown
-        }
-        return {
-            groups: Array.isArray(candidate.groups) ? candidate.groups.filter((value): value is string => typeof value === 'string') : [],
-            subgroups: candidate.subgroups && typeof candidate.subgroups === 'object' ? candidate.subgroups as Record<string, string[]> : {},
-            rows: candidate.rows && typeof candidate.rows === 'object' ? candidate.rows as Record<string, string[]> : {},
-        }
-    } catch {
+function loadSessionOrders(storageKey: string): SessionListOrders {
+    const parsed = readLocalStorageJson<unknown>(storageKey)
+    if (!parsed || typeof parsed !== 'object') {
         return { groups: [], subgroups: {}, rows: {} }
+    }
+
+    const candidate = parsed as {
+        groups?: unknown
+        subgroups?: unknown
+        rows?: unknown
+    }
+    return {
+        groups: Array.isArray(candidate.groups) ? candidate.groups.filter((value): value is string => typeof value === 'string') : [],
+        subgroups: candidate.subgroups && typeof candidate.subgroups === 'object' ? candidate.subgroups as Record<string, string[]> : {},
+        rows: candidate.rows && typeof candidate.rows === 'object' ? candidate.rows as Record<string, string[]> : {},
     }
 }
 
-function saveSessionOrders(orders: SessionListOrders): void {
-    try {
-        localStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(orders))
-    } catch {
-        // ignore
-    }
+function saveSessionOrders(storageKey: string, orders: SessionListOrders): void {
+    writeLocalStorageJson(storageKey, orders)
 }
 
 export function reconcileOrder<T>(items: T[], savedOrder: string[] | undefined, getKey: (item: T) => string): string[] {
@@ -925,17 +1021,29 @@ export function SessionList(props: {
 }) {
     const { t } = useTranslation()
     const { renderHeader = true, api, selectedSessionId } = props
-    const { scopeKey } = useAppContext()
+    const { baseUrl, scopeKey } = useAppContext()
     const queryClient = useQueryClient()
+    const sessionOrderStorageKey = useMemo(() => getSessionListOrderStorageKey(scopeKey), [scopeKey])
+    const { runBatchCleanup, isPending: isBatchCleanupPending } = useCloseSessionsBatch(api)
     const visibleSessions = useMemo(
         () => props.sessions.filter(isVisibleInSessionList),
         [props.sessions]
     )
-    const groups = useMemo(
-        () => groupSessionsByDirectory(visibleSessions),
+    const [filters, setFilters] = useState<SessionListFilters>(() => loadSessionListFilters(scopeKey))
+    const filteredSessions = useMemo(
+        () => filterSessionSummaries(visibleSessions, filters),
+        [visibleSessions, filters]
+    )
+    const lifecycleCounts = useMemo(
+        () => getSessionLifecycleCounts(visibleSessions),
         [visibleSessions]
     )
-    const [clearSessionsTarget, setClearSessionsTarget] = useState<ClearSessionsTarget | null>(null)
+    const groups = useMemo(
+        () => groupSessionsByDirectory(filteredSessions),
+        [filteredSessions]
+    )
+    const [cleanupSessionsTarget, setCleanupSessionsTarget] = useState<CleanupSessionsTarget | null>(null)
+    const [manageMenuOpen, setManageMenuOpen] = useState(false)
     const [groupMenuDirectory, setGroupMenuDirectory] = useState<string | null>(null)
     const [subgroupMenuTarget, setSubgroupMenuTarget] = useState<{ groupDir: string; subgroupKey: string } | null>(null)
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
@@ -972,22 +1080,31 @@ export function SessionList(props: {
     }, [groups])
 
     useEffect(() => {
-        if (!groupMenuDirectory && !subgroupMenuTarget) {
+        setFilters(loadSessionListFilters(scopeKey))
+    }, [scopeKey])
+
+    useEffect(() => {
+        saveSessionListFilters(scopeKey, filters)
+    }, [filters, scopeKey])
+
+    useEffect(() => {
+        if (!groupMenuDirectory && !subgroupMenuTarget && !manageMenuOpen) {
             return
         }
 
         const handlePointerDown = () => {
             setGroupMenuDirectory(null)
             setSubgroupMenuTarget(null)
+            setManageMenuOpen(false)
         }
 
         window.addEventListener('pointerdown', handlePointerDown)
         return () => {
             window.removeEventListener('pointerdown', handlePointerDown)
         }
-    }, [groupMenuDirectory, subgroupMenuTarget])
+    }, [groupMenuDirectory, subgroupMenuTarget, manageMenuOpen])
 
-    const [sessionOrders, setSessionOrders] = useState<SessionListOrders>(loadSessionOrders)
+    const [sessionOrders, setSessionOrders] = useState<SessionListOrders>(() => loadSessionOrders(sessionOrderStorageKey))
     const gripActiveRef = useRef(false)
     const draggedRef = useRef<
         | { kind: 'group'; groupDir: string }
@@ -1001,38 +1118,32 @@ export function SessionList(props: {
         | { kind: 'row'; groupDir: string; subgroupKey: string; insertIndex: number }
         | null
     >(null)
-    const clearGroupMutation = useMutation({
-        mutationFn: async (target: ClearSessionsTarget) => {
-            if (!api) {
-                throw new Error('Session unavailable')
-            }
+    useEffect(() => {
+        setSessionOrders(loadSessionOrders(sessionOrderStorageKey))
+    }, [sessionOrderStorageKey])
 
-            const failures: string[] = []
-            for (const session of target.sessions) {
-                try {
-                    await api.closeSession(session.id)
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : t('dialog.error.default')
-                    failures.push(`${getSessionTitle(session)}: ${message}`)
-                }
-            }
+    const stoppedCleanupPlan = useMemo(
+        () => planSessionCleanup(visibleSessions, 'stopped'),
+        [visibleSessions]
+    )
 
-            if (failures.length > 0) {
-                const preview = failures.slice(0, 2).join(' ')
-                const suffix = failures.length > 2 ? ` (+${failures.length - 2} more)` : ''
-                throw new Error(preview + suffix)
-            }
-        },
-        onSettled: async (_data, _error, target) => {
-            if (!target) {
-                return
-            }
-            for (const session of target.sessions) {
-                queryClient.removeQueries({ queryKey: queryKeys.session(scopeKey, session.id) })
-            }
-            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
-        }
-    })
+    const updateFilters = useCallback((next: SessionListFilters) => {
+        setFilters(next)
+    }, [])
+
+    const toggleFilter = useCallback((key: 'active' | 'stopped' | 'archived') => {
+        updateFilters({
+            ...filters,
+            [key]: !filters[key]
+        })
+    }, [filters, updateFilters])
+
+    const setSearch = useCallback((search: string) => {
+        updateFilters({
+            ...filters,
+            search
+        })
+    }, [filters, updateFilters])
 
     const handleGroupDragStart = useCallback((groupDir: string, e: React.DragEvent) => {
         if (!gripActiveRef.current) {
@@ -1147,7 +1258,7 @@ export function SessionList(props: {
 
         const updated = { ...sessionOrders, groups: newKeys }
         setSessionOrders(updated)
-        saveSessionOrders(updated)
+        saveSessionOrders(sessionOrderStorageKey, updated)
 
         draggedRef.current = null
         setDropIndicator(null)
@@ -1178,7 +1289,7 @@ export function SessionList(props: {
             }
         }
         setSessionOrders(updated)
-        saveSessionOrders(updated)
+        saveSessionOrders(sessionOrderStorageKey, updated)
 
         draggedRef.current = null
         setDropIndicator(null)
@@ -1210,7 +1321,7 @@ export function SessionList(props: {
             }
         }
         setSessionOrders(updated)
-        saveSessionOrders(updated)
+        saveSessionOrders(sessionOrderStorageKey, updated)
 
         draggedRef.current = null
         setDropIndicator(null)
@@ -1273,8 +1384,8 @@ export function SessionList(props: {
         }
 
         setSessionOrders(nextOrders)
-        saveSessionOrders(nextOrders)
-    }, [groupRenderStates, sessionOrders])
+        saveSessionOrders(sessionOrderStorageKey, nextOrders)
+    }, [groupRenderStates, sessionOrderStorageKey, sessionOrders])
 
     const virtualItems = useMemo<VirtualListItem[]>(() => {
         return groupRenderStates.flatMap((groupState) => {
@@ -1518,17 +1629,18 @@ export function SessionList(props: {
                                     }}
                                     onClick={() => {
                                         setGroupMenuDirectory(null)
-                                        setClearSessionsTarget({
+                                        setCleanupSessionsTarget({
+                                            mode: 'group',
                                             name: group.displayName,
-                                            sessions: group.sessions
+                                            plan: planSessionCleanup(group.sessions, 'group')
                                         })
                                     }}
-                                    disabled={!api || clearGroupMutation.isPending}
+                                    disabled={!api || isBatchCleanupPending}
                                     className="flex w-full rounded-xl px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                    {clearGroupMutation.isPending && clearSessionsTarget?.name === group.displayName
-                                        ? t('dialog.clearGroup.confirming')
-                                        : t('session.group.clearAll')}
+                                    {isBatchCleanupPending && cleanupSessionsTarget?.name === group.displayName
+                                        ? t('dialog.cleanupGroup.confirming')
+                                        : t('session.group.cleanup')}
                                 </button>
                             </div>
                         ) : null}
@@ -1589,18 +1701,19 @@ export function SessionList(props: {
                                     }}
                                     onClick={() => {
                                         setSubgroupMenuTarget(null)
-                                        setClearSessionsTarget({
+                                        setCleanupSessionsTarget({
+                                            mode: 'group',
                                             name: item.subgroup.label,
-                                            sessions: item.subgroup.rows.flatMap((row) => row.sessions)
+                                            plan: planSessionCleanup(item.subgroup.rows.flatMap((row) => row.sessions), 'group')
                                         })
                                     }}
-                                    disabled={!api || clearGroupMutation.isPending}
+                                    disabled={!api || isBatchCleanupPending}
                                     className="flex w-full rounded-xl px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                    {clearGroupMutation.isPending
-                                        && clearSessionsTarget?.name === item.subgroup.label
-                                        ? t('dialog.clearGroup.confirming')
-                                        : t('session.group.clearAll')}
+                                    {isBatchCleanupPending
+                                        && cleanupSessionsTarget?.name === item.subgroup.label
+                                        ? t('dialog.cleanupGroup.confirming')
+                                        : t('session.group.cleanup')}
                                 </button>
                             </div>
                         ) : null}
@@ -1662,70 +1775,134 @@ export function SessionList(props: {
         <div className="mx-auto w-full max-w-content flex flex-col">
             {renderHeader ? (
                 <div className="px-2.5 py-1">
-                    <div className="flex items-center justify-between rounded-[14px] bg-[var(--app-secondary-bg)] px-2.5 py-1.5 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_65%,transparent)]">
+                    <div className="relative flex items-center justify-between rounded-[14px] bg-[var(--app-secondary-bg)] px-2.5 py-1.5 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_65%,transparent)]">
                         <div>
                             <div className="text-[12px] text-[var(--app-fg)]">
-                                {t('sessions.count', { n: visibleSessions.length, m: groups.length })}
+                                {filteredSessions.length === visibleSessions.length
+                                    ? t('sessions.count', { n: visibleSessions.length, m: groups.length })
+                                    : t('sessions.filteredCount', { n: filteredSessions.length, m: visibleSessions.length, g: groups.length })}
                             </div>
                         </div>
-                        <button
-                            type="button"
-                            onClick={props.onNewSession}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-subtle-bg)]/55 px-3 py-1.5 text-[12px] font-medium text-[var(--app-fg)] transition-[background-color] duration-150 hover:bg-[var(--app-subtle-bg)]"
-                            title={t('sessions.new')}
-                        >
-                            <PlusIcon className="h-3.5 w-3.5" />
-                            <span>New</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setManageMenuOpen((open) => !open)}
+                                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-subtle-bg)]/55 px-3 py-1.5 text-[12px] font-medium text-[var(--app-fg)] transition-[background-color] duration-150 hover:bg-[var(--app-subtle-bg)]"
+                            >
+                                <span>{t('sessions.manage')}</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={props.onNewSession}
+                                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-subtle-bg)]/55 px-3 py-1.5 text-[12px] font-medium text-[var(--app-fg)] transition-[background-color] duration-150 hover:bg-[var(--app-subtle-bg)]"
+                                title={t('sessions.new')}
+                            >
+                                <PlusIcon className="h-3.5 w-3.5" />
+                                <span>New</span>
+                            </button>
+                        </div>
+                        {manageMenuOpen ? (
+                            <div className="absolute right-2 top-[calc(100%+6px)] z-20 min-w-[180px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setManageMenuOpen(false)
+                                        setCleanupSessionsTarget({
+                                            mode: 'stopped',
+                                            name: 'Stopped sessions',
+                                            plan: stoppedCleanupPlan
+                                        })
+                                    }}
+                                    disabled={!api || isBatchCleanupPending || stoppedCleanupPlan.delete.length === 0}
+                                    className="flex w-full rounded-xl px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {isBatchCleanupPending
+                                        ? t('sessions.manage.cleaningStopped')
+                                        : `${t('sessions.manage.cleanStopped')} (${stoppedCleanupPlan.delete.length})`}
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             ) : null}
 
-            <div
-                ref={virtualRootRef}
-                className="relative"
-                style={{ height: totalVirtualHeight > 0 ? `${totalVirtualHeight}px` : undefined }}
-                onDragLeave={(e) => {
-                    const related = e.relatedTarget as Node | null
-                    if (!related || !e.currentTarget.contains(related)) {
-                        setDropIndicator(null)
-                    }
+            <SessionListFilter
+                counts={lifecycleCounts}
+                filters={filters}
+                onToggle={toggleFilter}
+                onSearchChange={setSearch}
+                labels={{
+                    active: t('session.filter.active'),
+                    stopped: t('session.filter.stopped'),
+                    archived: t('session.filter.archived'),
+                    searchPlaceholder: t('session.filter.searchPlaceholder')
                 }}
-            >
-                {visibleItemLayouts.map((layout) => (
-                    <VirtualMeasuredItem
-                        key={layout.item.key}
-                        itemKey={layout.item.key}
-                        top={layout.start}
-                        onMeasure={handleMeasureItem}
-                    >
-                        {renderVirtualItem(layout)}
-                    </VirtualMeasuredItem>
-                ))}
-            </div>
+            />
+
+            {filteredSessions.length > 0 ? (
+                <div
+                    ref={virtualRootRef}
+                    className="relative"
+                    style={{ height: totalVirtualHeight > 0 ? `${totalVirtualHeight}px` : undefined }}
+                    onDragLeave={(e) => {
+                        const related = e.relatedTarget as Node | null
+                        if (!related || !e.currentTarget.contains(related)) {
+                            setDropIndicator(null)
+                        }
+                    }}
+                >
+                    {visibleItemLayouts.map((layout) => (
+                        <VirtualMeasuredItem
+                            key={layout.item.key}
+                            itemKey={layout.item.key}
+                            top={layout.start}
+                            onMeasure={handleMeasureItem}
+                        >
+                            {renderVirtualItem(layout)}
+                        </VirtualMeasuredItem>
+                    ))}
+                </div>
+            ) : (
+                <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
+                    {t('session.filter.empty')}
+                </div>
+            )}
 
             <ConfirmDialog
-                isOpen={clearSessionsTarget !== null}
+                isOpen={cleanupSessionsTarget !== null}
                 onClose={() => {
-                    if (!clearGroupMutation.isPending) {
-                        setClearSessionsTarget(null)
+                    if (!isBatchCleanupPending) {
+                        setCleanupSessionsTarget(null)
                     }
                 }}
-                title={t('dialog.clearGroup.title')}
-                description={t('dialog.clearGroup.description', {
-                    name: clearSessionsTarget?.name ?? '',
-                    count: clearSessionsTarget?.sessions.length ?? 0
-                })}
-                confirmLabel={t('dialog.clearGroup.confirm')}
-                confirmingLabel={t('dialog.clearGroup.confirming')}
+                title={cleanupSessionsTarget?.mode === 'stopped'
+                    ? t('dialog.cleanupStopped.title')
+                    : t('dialog.cleanupGroup.title')}
+                description={cleanupSessionsTarget?.mode === 'stopped'
+                    ? t('dialog.cleanupStopped.description', {
+                        deleteCount: cleanupSessionsTarget?.plan.delete.length ?? 0,
+                        skipCount: cleanupSessionsTarget?.plan.skipped.length ?? 0
+                    })
+                    : t('dialog.cleanupGroup.description', {
+                        archiveCount: cleanupSessionsTarget?.plan.archive.length ?? 0,
+                        deleteCount: cleanupSessionsTarget?.plan.delete.length ?? 0,
+                        name: cleanupSessionsTarget?.name ?? '',
+                        skipCount: cleanupSessionsTarget?.plan.skipped.length ?? 0
+                    })}
+                confirmLabel={cleanupSessionsTarget?.mode === 'stopped'
+                    ? t('dialog.cleanupStopped.confirm')
+                    : t('dialog.cleanupGroup.confirm')}
+                confirmingLabel={cleanupSessionsTarget?.mode === 'stopped'
+                    ? t('dialog.cleanupStopped.confirming')
+                    : t('dialog.cleanupGroup.confirming')}
                 onConfirm={async () => {
-                    if (!clearSessionsTarget) {
+                    if (!cleanupSessionsTarget) {
                         return
                     }
-                    await clearGroupMutation.mutateAsync(clearSessionsTarget)
-                    setClearSessionsTarget(null)
+                    await runBatchCleanup(cleanupSessionsTarget)
+                    setCleanupSessionsTarget(null)
                 }}
-                isPending={clearGroupMutation.isPending}
+                isPending={isBatchCleanupPending}
                 destructive
             />
         </div>

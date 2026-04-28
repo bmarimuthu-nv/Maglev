@@ -294,6 +294,9 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             parsed.data.content,
             parsed.data.expectedHash
         ))
+        if ('success' in result && result.success === false && 'conflict' in result && result.conflict) {
+            return c.json(result, 409)
+        }
         return c.json(result)
     })
 

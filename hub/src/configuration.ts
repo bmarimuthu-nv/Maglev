@@ -19,6 +19,7 @@
  * - MAGLEV_BROKER_URL: Self-hosted broker base URL for remote registration
  * - VAPID_SUBJECT: Contact email or URL for Web Push (defaults to mailto:admin@maglev.run)
  * - MAGLEV_TERMINAL_SUPERVISION_HUMAN_OVERRIDE_MS: Human-priority cooldown after worker terminal input (default: 30000)
+ * - MAGLEV_STALE_SESSION_ARCHIVE_MS: Inactive-session auto-archive TTL in milliseconds (default: 86400000)
  * - MAGLEV_HOME: Data directory (default: ~/.maglev)
  * - DB_PATH: SQLite database path (default: {MAGLEV_HOME}/maglev.db)
  */
@@ -114,6 +115,9 @@ class Configuration {
     /** Human-priority cooldown after worker terminal input */
     public readonly terminalSupervisionHumanOverrideMs: number
 
+    /** Inactive-session auto-archive TTL */
+    public readonly staleSessionArchiveMs: number
+
     /** Sources of each configuration value */
     public readonly sources: ConfigSources
 
@@ -149,6 +153,14 @@ class Configuration {
             }
             const parsed = Number.parseInt(raw, 10)
             return Number.isFinite(parsed) && parsed >= 0 ? parsed : 30_000
+        })()
+        this.staleSessionArchiveMs = (() => {
+            const raw = process.env.MAGLEV_STALE_SESSION_ARCHIVE_MS?.trim()
+            if (!raw) {
+                return 24 * 60 * 60 * 1000
+            }
+            const parsed = Number.parseInt(raw, 10)
+            return Number.isFinite(parsed) && parsed >= 0 ? parsed : 24 * 60 * 60 * 1000
         })()
 
         // CLI API token - will be set by _setCliApiToken() before create() returns

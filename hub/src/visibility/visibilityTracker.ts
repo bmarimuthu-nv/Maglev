@@ -51,6 +51,18 @@ export class VisibilityTracker {
         return Boolean(visible && visible.has(subscriptionId))
     }
 
+    getVisibleConnectionCount(namespace?: string): number {
+        if (namespace) {
+            return this.visibleConnections.get(namespace)?.size ?? 0
+        }
+
+        let total = 0
+        for (const connections of this.visibleConnections.values()) {
+            total += connections.size
+        }
+        return total
+    }
+
     private addVisibleConnection(namespace: string, subscriptionId: string): void {
         const existing = this.visibleConnections.get(namespace)
         if (existing) {

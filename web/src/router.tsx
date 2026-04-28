@@ -26,6 +26,15 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { queryKeys } from '@/lib/query-keys'
 import { markPendingTerminalFocus } from '@/lib/pending-terminal-focus'
 import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
+import {
+    migrateStorageFoundation,
+    sweepOrphanedSessionStorage,
+} from '@/lib/storage-session'
+import {
+    readLocalStorageItem,
+    readLocalStorageNumber,
+    writeLocalStorageItem,
+} from '@/lib/storage-local'
 import { useTranslation } from '@/lib/use-translation'
 import { getCurrentHubLabel } from '@/utils/url'
 import type { AgentType } from '@/components/NewSession/types'
@@ -146,7 +155,7 @@ function SettingsIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api, baseUrl } = useAppContext()
+    const { api, baseUrl, scopeKey } = useAppContext()
     const navigate = useNavigate()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
@@ -159,31 +168,19 @@ function SessionsPage() {
     const hubLabel = getCurrentHubLabel(baseUrl)
 
     useEffect(() => {
-        try {
-            setSidebarCollapsed(localStorage.getItem(SESSIONS_SIDEBAR_COLLAPSED_KEY) === 'true')
-        } catch {
-            setSidebarCollapsed(false)
-        }
+        setSidebarCollapsed(readLocalStorageItem(SESSIONS_SIDEBAR_COLLAPSED_KEY) === 'true')
     }, [])
 
     useEffect(() => {
-        try {
-            const raw = localStorage.getItem(SESSIONS_SIDEBAR_WIDTH_KEY)
-            if (!raw) {
-                setSidebarWidth(SESSIONS_SIDEBAR_DEFAULT_WIDTH)
-                return
-            }
-            const nextWidth = Number.parseInt(raw, 10)
-            if (!Number.isFinite(nextWidth)) {
-                setSidebarWidth(SESSIONS_SIDEBAR_DEFAULT_WIDTH)
-                return
-            }
-            setSidebarWidth(
-                Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, nextWidth))
-            )
-        } catch {
+        const nextWidth = readLocalStorageNumber(SESSIONS_SIDEBAR_WIDTH_KEY)
+        if (nextWidth === null) {
             setSidebarWidth(SESSIONS_SIDEBAR_DEFAULT_WIDTH)
+            return
         }
+
+        setSidebarWidth(
+            Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, nextWidth))
+        )
     }, [])
 
     useEffect(() => {
@@ -191,12 +188,27 @@ function SessionsPage() {
         setHubMenuOpen(false)
     }, [pathname])
 
+    useEffect(() => {
+        if (isLoading) {
+            return
+        }
+
+        const sessionIds = sessions.map((session) => session.id)
+        migrateStorageFoundation({
+            scopeKey,
+            baseUrl,
+            sessionIds,
+        })
+        sweepOrphanedSessionStorage({
+            scopeKey,
+            baseUrl,
+            activeSessionIds: sessionIds,
+        })
+    }, [baseUrl, isLoading, scopeKey, sessions])
+
     const setSidebarCollapsedWithPersistence = useCallback((next: boolean) => {
         setSidebarCollapsed(next)
-        try {
-            localStorage.setItem(SESSIONS_SIDEBAR_COLLAPSED_KEY, String(next))
-        } catch {
-        }
+        writeLocalStorageItem(SESSIONS_SIDEBAR_COLLAPSED_KEY, String(next))
     }, [])
 
     const setSidebarWidthWithPersistence = useCallback((nextWidth: number) => {
@@ -205,10 +217,7 @@ function SessionsPage() {
             Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, Math.round(nextWidth))
         )
         setSidebarWidth(clamped)
-        try {
-            localStorage.setItem(SESSIONS_SIDEBAR_WIDTH_KEY, String(clamped))
-        } catch {
-        }
+        writeLocalStorageItem(SESSIONS_SIDEBAR_WIDTH_KEY, String(clamped))
     }, [])
 
     const isFileExplorerRoute = /\/sessions\/[^/]+\/files(?:\/)?(?:$|\?)/.test(pathname)

@@ -100,12 +100,15 @@ export class SyncEngine {
             boundMachineId?: string | null
             terminalStateCache?: TerminalStateCache
             terminalSupervisionHumanOverrideMs?: number
+            staleSessionArchiveMs?: number
         }
     ) {
         this.store = store
         this.io = io
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
-        this.sessionCache = new SessionCache(store, this.eventPublisher)
+        this.sessionCache = new SessionCache(store, this.eventPublisher, {
+            staleSessionArchiveMs: options?.staleSessionArchiveMs
+        })
         this.machineCache = new MachineCache(store, this.eventPublisher)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.terminalStateCache = options?.terminalStateCache ?? new TerminalStateCache()
@@ -146,8 +149,16 @@ export class SyncEngine {
         return this.sessionCache.getSessions()
     }
 
+    getSessionCount(): number {
+        return this.sessionCache.getSessions().length
+    }
+
     getSessionsByNamespace(namespace: string): Session[] {
         return this.sessionCache.getSessionsByNamespace(namespace)
+    }
+
+    getSessionCountByNamespace(namespace: string): number {
+        return this.sessionCache.getSessionsByNamespace(namespace).length
     }
 
     getSession(sessionId: string): Session | undefined {
@@ -174,12 +185,28 @@ export class SyncEngine {
         return this.sessionCache.getActiveSessions()
     }
 
+    getActiveSessionCount(): number {
+        return this.sessionCache.getActiveSessions().length
+    }
+
+    getActiveSessionCountByNamespace(namespace: string): number {
+        return this.sessionCache.getSessionsByNamespace(namespace).filter((session) => session.active).length
+    }
+
     getMachines(): Machine[] {
         return this.machineCache.getMachines()
     }
 
+    getMachineCount(): number {
+        return this.machineCache.getMachines().length
+    }
+
     getMachinesByNamespace(namespace: string): Machine[] {
         return this.machineCache.getMachinesByNamespace(namespace)
+    }
+
+    getMachineCountByNamespace(namespace: string): number {
+        return this.machineCache.getMachinesByNamespace(namespace).length
     }
 
     getMachine(machineId: string): Machine | undefined {
@@ -194,8 +221,16 @@ export class SyncEngine {
         return this.machineCache.getOnlineMachines()
     }
 
+    getOnlineMachineCount(): number {
+        return this.machineCache.getOnlineMachines().length
+    }
+
     getOnlineMachinesByNamespace(namespace: string): Machine[] {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
+    }
+
+    getOnlineMachineCountByNamespace(namespace: string): number {
+        return this.machineCache.getOnlineMachinesByNamespace(namespace).length
     }
 
     getBoundMachine(namespace: string): Machine | undefined {
@@ -791,26 +826,45 @@ export class SyncEngine {
         this.assertTerminalSupervisionAvailable(worker)
 
         const event = this.createTerminalSupervisionEvent('attached', 'system', `Attached supervisor ${supervisor.id.slice(0, 8)} to worker ${worker.id.slice(0, 8)}`)
+        const originalSupervisorSupervision = this.cloneTerminalSupervision(supervisor.metadata?.terminalSupervision)
 
-        await this.sessionCache.updateSessionMetadataFields(supervisor.id, (metadata) => ({
-            ...metadata,
-            terminalSupervision: {
-                role: 'supervisor',
-                peerSessionId: worker.id,
-                state: 'active',
-                events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
-            }
-        }))
-
-        await this.sessionCache.updateSessionMetadataFields(worker.id, (metadata) => ({
-            ...metadata,
-            terminalSupervision: {
-                role: 'worker',
-                peerSessionId: supervisor.id,
-                state: 'active',
-                events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
-            }
-        }))
+        await this.updateTerminalSupervisionPair({
+            primarySessionId: supervisor.id,
+            secondarySessionId: worker.id,
+            primaryRole: 'supervisor',
+            secondaryRole: 'worker',
+            failureMessage: 'Failed to attach terminal supervision consistently.',
+            applyPrimary: (metadata) => {
+                this.assertTerminalSupervisionAvailableForMetadata(metadata)
+                return {
+                    ...metadata,
+                    terminalSupervision: {
+                        role: 'supervisor',
+                        peerSessionId: worker.id,
+                        state: 'active',
+                        events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
+                    }
+                }
+            },
+            applySecondary: (metadata) => {
+                this.assertTerminalSupervisionAvailableForMetadata(metadata)
+                return {
+                    ...metadata,
+                    terminalSupervision: {
+                        role: 'worker',
+                        peerSessionId: supervisor.id,
+                        state: 'active',
+                        events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
+                    }
+                }
+            },
+            rollbackPrimary: (metadata) =>
+                this.restoreTerminalSupervision(metadata, {
+                    peerSessionId: worker.id,
+                    role: 'supervisor',
+                    state: 'active'
+                }, originalSupervisorSupervision)
+        })
 
         await this.syncTerminalSupervisionBridge(supervisor.id, namespace)
     }
@@ -829,19 +883,31 @@ export class SyncEngine {
             'human',
             paused ? 'Paused terminal supervision' : 'Resumed terminal supervision'
         )
+        const originalSessionSupervision = this.cloneTerminalSupervision(session.metadata?.terminalSupervision)
 
-        await this.sessionCache.updateSessionMetadataFields(session.id, (metadata) =>
-            this.setTerminalSupervisionState(metadata, peer.id, pairing.role, nextState, event)
-        )
-        await this.sessionCache.updateSessionMetadataFields(peer.id, (metadata) =>
-            this.setTerminalSupervisionState(
-                metadata,
-                session.id,
-                metadata.terminalSupervision?.role === 'worker' ? 'worker' : 'supervisor',
-                nextState,
-                event
-            )
-        )
+        await this.updateTerminalSupervisionPair({
+            primarySessionId: session.id,
+            secondarySessionId: peer.id,
+            primaryRole: pairing.role,
+            secondaryRole: pairing.role === 'worker' ? 'supervisor' : 'worker',
+            failureMessage: 'Failed to update terminal supervision state consistently.',
+            applyPrimary: (metadata) =>
+                this.setTerminalSupervisionState(metadata, peer.id, pairing.role, nextState, event),
+            applySecondary: (metadata) =>
+                this.setTerminalSupervisionState(
+                    metadata,
+                    session.id,
+                    pairing.role === 'worker' ? 'supervisor' : 'worker',
+                    nextState,
+                    event
+                ),
+            rollbackPrimary: (metadata) =>
+                this.restoreTerminalSupervision(metadata, {
+                    peerSessionId: peer.id,
+                    role: pairing.role,
+                    state: nextState
+                }, originalSessionSupervision)
+        })
 
         await this.syncTerminalSupervisionBridge(session.id, namespace)
     }
@@ -862,15 +928,27 @@ export class SyncEngine {
             : null
 
         const peer = this.getSessionByNamespace(pairing.peerSessionId, namespace)
-        await this.sessionCache.updateSessionMetadataFields(session.id, (metadata) => {
-            const { terminalSupervision, ...rest } = metadata
-            return rest
-        })
         if (peer) {
-            await this.sessionCache.updateSessionMetadataFields(peer.id, (metadata) => {
-                const { terminalSupervision, ...rest } = metadata
-                return rest
+            const originalSessionSupervision = this.cloneTerminalSupervision(session.metadata?.terminalSupervision)
+            await this.updateTerminalSupervisionPair({
+                primarySessionId: session.id,
+                secondarySessionId: peer.id,
+                primaryRole: pairing.role,
+                secondaryRole: pairing.role === 'worker' ? 'supervisor' : 'worker',
+                failureMessage: 'Failed to detach terminal supervision consistently.',
+                applyPrimary: (metadata) => this.clearTerminalSupervision(metadata, peer.id, pairing.role),
+                applySecondary: (metadata) =>
+                    this.clearTerminalSupervision(
+                        metadata,
+                        session.id,
+                        pairing.role === 'worker' ? 'supervisor' : 'worker'
+                    ),
+                rollbackPrimary: (metadata) => this.restoreClearedTerminalSupervision(metadata, originalSessionSupervision)
             })
+        } else {
+            await this.sessionCache.updateSessionMetadataFields(session.id, (metadata) =>
+                this.clearTerminalSupervision(metadata, pairing.peerSessionId, pairing.role)
+            )
         }
         this.recentHumanTerminalActivityBySessionId.delete(session.id)
         this.recentHumanTerminalActivityBySessionId.delete(pairing.peerSessionId)
@@ -1045,6 +1123,7 @@ export class SyncEngine {
         state: TerminalSupervision['state'],
         event: TerminalSupervisionEvent
     ): NonNullable<Metadata> {
+        this.requireTerminalSupervisionMatch(metadata, peerSessionId, role)
         return {
             ...metadata,
             terminalSupervision: {
@@ -1064,20 +1143,142 @@ export class SyncEngine {
         message: string
     ): Promise<void> {
         const event = this.createTerminalSupervisionEvent(type, actor, message)
-        await this.sessionCache.updateSessionMetadataFields(supervisor.id, (metadata) => ({
+        const originalSupervisorSupervision = this.cloneTerminalSupervision(supervisor.metadata?.terminalSupervision)
+
+        await this.updateTerminalSupervisionPair({
+            primarySessionId: supervisor.id,
+            secondarySessionId: worker.id,
+            primaryRole: 'supervisor',
+            secondaryRole: 'worker',
+            failureMessage: 'Failed to record terminal supervision event consistently.',
+            applyPrimary: (metadata) => this.appendTerminalSupervisionEventToMetadata(metadata, worker.id, 'supervisor', event),
+            applySecondary: (metadata) => this.appendTerminalSupervisionEventToMetadata(metadata, supervisor.id, 'worker', event),
+            rollbackPrimary: (metadata) =>
+                this.restoreTerminalSupervision(metadata, {
+                    peerSessionId: worker.id,
+                    role: 'supervisor'
+                }, originalSupervisorSupervision)
+        })
+    }
+
+    private async updateTerminalSupervisionPair(options: {
+        primarySessionId: string
+        secondarySessionId: string
+        primaryRole: TerminalSupervision['role']
+        secondaryRole: TerminalSupervision['role']
+        failureMessage: string
+        applyPrimary: (metadata: NonNullable<Metadata>) => NonNullable<Metadata>
+        applySecondary: (metadata: NonNullable<Metadata>) => NonNullable<Metadata>
+        rollbackPrimary: (metadata: NonNullable<Metadata>) => NonNullable<Metadata>
+    }): Promise<void> {
+        await this.sessionCache.updateSessionMetadataFields(options.primarySessionId, options.applyPrimary)
+        try {
+            await this.sessionCache.updateSessionMetadataFields(options.secondarySessionId, options.applySecondary)
+        } catch (error) {
+            try {
+                await this.sessionCache.updateSessionMetadataFields(options.primarySessionId, options.rollbackPrimary)
+            } catch (rollbackError) {
+                throw new Error(`${options.failureMessage} Partial update could not be rolled back: ${this.toErrorMessage(rollbackError)}`)
+            }
+            throw new Error(`${options.failureMessage} Partial update was rolled back: ${this.toErrorMessage(error)}`)
+        }
+    }
+
+    private assertTerminalSupervisionAvailableForMetadata(metadata: NonNullable<Metadata>): void {
+        if (metadata.terminalSupervision) {
+            throw new Error('Session is already paired')
+        }
+    }
+
+    private requireTerminalSupervisionMatch(
+        metadata: NonNullable<Metadata>,
+        peerSessionId: string,
+        role: TerminalSupervision['role']
+    ): TerminalSupervision {
+        const supervision = metadata.terminalSupervision
+        if (!supervision || supervision.peerSessionId !== peerSessionId || supervision.role !== role) {
+            throw new Error('Terminal supervision changed during update')
+        }
+        return supervision
+    }
+
+    private clearTerminalSupervision(
+        metadata: NonNullable<Metadata>,
+        peerSessionId: string,
+        role: TerminalSupervision['role']
+    ): NonNullable<Metadata> {
+        this.requireTerminalSupervisionMatch(metadata, peerSessionId, role)
+        const { terminalSupervision, ...rest } = metadata
+        return rest
+    }
+
+    private restoreClearedTerminalSupervision(
+        metadata: NonNullable<Metadata>,
+        original: TerminalSupervision | undefined
+    ): NonNullable<Metadata> {
+        if (metadata.terminalSupervision) {
+            throw new Error('Terminal supervision changed during rollback')
+        }
+        if (!original) {
+            return metadata
+        }
+        return {
             ...metadata,
-            terminalSupervision: metadata.terminalSupervision ? {
-                ...metadata.terminalSupervision,
-                events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
-            } : metadata.terminalSupervision
-        }))
-        await this.sessionCache.updateSessionMetadataFields(worker.id, (metadata) => ({
+            terminalSupervision: this.cloneTerminalSupervision(original)
+        }
+    }
+
+    private restoreTerminalSupervision(
+        metadata: NonNullable<Metadata>,
+        expected: {
+            peerSessionId: string
+            role: TerminalSupervision['role']
+            state?: TerminalSupervision['state']
+        },
+        original: TerminalSupervision | undefined
+    ): NonNullable<Metadata> {
+        const supervision = this.requireTerminalSupervisionMatch(metadata, expected.peerSessionId, expected.role)
+        if (expected.state && supervision.state !== expected.state) {
+            throw new Error('Terminal supervision changed during rollback')
+        }
+        if (!original) {
+            const { terminalSupervision, ...rest } = metadata
+            return rest
+        }
+        return {
             ...metadata,
-            terminalSupervision: metadata.terminalSupervision ? {
-                ...metadata.terminalSupervision,
-                events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
-            } : metadata.terminalSupervision
-        }))
+            terminalSupervision: this.cloneTerminalSupervision(original)
+        }
+    }
+
+    private appendTerminalSupervisionEventToMetadata(
+        metadata: NonNullable<Metadata>,
+        peerSessionId: string,
+        role: TerminalSupervision['role'],
+        event: TerminalSupervisionEvent
+    ): NonNullable<Metadata> {
+        const supervision = this.requireTerminalSupervisionMatch(metadata, peerSessionId, role)
+        return {
+            ...metadata,
+            terminalSupervision: {
+                ...supervision,
+                events: this.appendTerminalSupervisionEvent(supervision, event)
+            }
+        }
+    }
+
+    private cloneTerminalSupervision(supervision: TerminalSupervision | undefined): TerminalSupervision | undefined {
+        if (!supervision) {
+            return undefined
+        }
+        return {
+            ...supervision,
+            events: [...(supervision.events ?? [])]
+        }
+    }
+
+    private toErrorMessage(error: unknown): string {
+        return error instanceof Error ? error.message : String(error)
     }
 
     private pickCliSocketForSession(sessionId: string, namespace: string) {

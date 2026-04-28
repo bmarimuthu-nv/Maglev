@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
+import { getStickyFilePreviewStorageKey } from '@/lib/storage-session'
 import TerminalPage from './terminal'
 
 const writeMock = vi.fn()
 const closeSessionMock = vi.fn()
 const updateSessionMock = vi.fn()
 const getTerminalSupervisionTargetMock = vi.fn()
+const replayMock = vi.fn()
+const takeOverMock = vi.fn()
 let mockTerminalSocketState: { status: 'idle' | 'connecting' | 'connected' | 'error'; error?: string } = { status: 'connected' }
+let mockTerminalAttachment: { owner: 'self' | 'other'; attachedAt: number | null; canTakeOver: boolean } | null = null
 const AUTO_SCROLL_KEY = 'maglev-auto-scroll'
 const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
 const PENDING_TERMINAL_FOCUS_KEY = 'maglev:pending-terminal-focus-session-id'
@@ -19,6 +24,7 @@ let allowMockTerminalTextareaFocus = true
 let mockTerminalTextarea: HTMLTextAreaElement | null = null
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame
 const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
+const originalWindowInnerWidth = window.innerWidth
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
@@ -33,7 +39,8 @@ vi.mock('@/lib/app-context', () => ({
             getTerminalSupervisionTarget: getTerminalSupervisionTargetMock
         },
         token: 'test-token',
-        baseUrl: 'http://localhost:3000'
+        baseUrl: 'http://localhost:3000',
+        scopeKey: 'test-scope'
     })
 }))
 
@@ -69,12 +76,16 @@ vi.mock('@/hooks/useTerminalSocket', () => ({
         state: mockTerminalSocketState.status === 'error'
             ? { status: 'error' as const, error: mockTerminalSocketState.error ?? 'error' }
             : { status: mockTerminalSocketState.status },
+        attachment: mockTerminalAttachment,
         connect: vi.fn(),
         write: writeMock,
         resize: vi.fn(),
         disconnect: vi.fn(),
         onOutput: vi.fn(),
-        onExit: vi.fn()
+        onExit: vi.fn(),
+        replay: replayMock,
+        reconnectView: vi.fn(),
+        takeOver: takeOverMock
     })
 }))
 
@@ -123,7 +134,12 @@ vi.mock('@/components/Terminal/TerminalView', () => ({
 }))
 
 vi.mock('@/components/FilePreviewPanel', () => ({
-    FilePreviewPanel: () => <div data-testid="file-preview-panel" />
+    FilePreviewPanel: (props: { filePath: string; onClose: () => void; presentation?: 'sidebar' | 'overlay' }) => (
+        <div data-testid="file-preview-panel" data-presentation={props.presentation ?? 'sidebar'}>
+            <span>{props.filePath}</span>
+            <button type="button" onClick={props.onClose}>Close preview</button>
+        </div>
+    )
 }))
 
 vi.mock('@/components/SplitTerminalPanel', () => ({
@@ -140,10 +156,21 @@ vi.mock('@/components/SplitTerminalPanel', () => ({
 }))
 
 function renderWithProviders() {
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: {
+                retry: false,
+                gcTime: 0
+            }
+        }
+    })
+
     return render(
-        <I18nProvider>
-            <TerminalPage />
-        </I18nProvider>
+        <QueryClientProvider client={queryClient}>
+            <I18nProvider>
+                <TerminalPage />
+            </I18nProvider>
+        </QueryClientProvider>
     )
 }
 
@@ -190,14 +217,24 @@ function setMatchMediaMock() {
     })
 }
 
+afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        writable: true,
+        value: originalWindowInnerWidth
+    })
+})
+
 describe('TerminalPage paste behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
         mockSessions = []
         mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = true
         mockTerminalTextarea = null
+        replayMock.mockReset()
         closeSessionMock.mockResolvedValue(undefined)
         setDefaultFileSearchMock()
         setDefaultSupervisionTargetMock()
@@ -237,6 +274,14 @@ describe('TerminalPage paste behavior', () => {
 
         expect(await screen.findByText('Paste input')).toBeInTheDocument()
     })
+
+    it('replays buffered terminal output when the terminal mounts', async () => {
+        renderWithProviders()
+
+        await waitFor(() => {
+            expect(replayMock).toHaveBeenCalled()
+        })
+    })
 })
 
 describe('TerminalPage auto-scroll wheel detection', () => {
@@ -244,6 +289,7 @@ describe('TerminalPage auto-scroll wheel detection', () => {
         cleanup()
         vi.clearAllMocks()
         mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
         mockSessions = []
         mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = true
@@ -324,11 +370,63 @@ describe('TerminalPage auto-scroll wheel detection', () => {
     })
 })
 
+describe('TerminalPage terminal takeover status', () => {
+    beforeEach(() => {
+        cleanup()
+        vi.clearAllMocks()
+        mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
+        mockSessions = []
+        mockSessionMetadata = { path: '/tmp/project' }
+        allowMockTerminalTextareaFocus = true
+        mockTerminalTextarea = null
+        closeSessionMock.mockResolvedValue(undefined)
+        setDefaultFileSearchMock()
+        setDefaultSupervisionTargetMock()
+        setMatchMediaMock()
+    })
+
+    afterEach(() => {
+        cleanup()
+    })
+
+    it('shows when this browser owns the terminal and since when', () => {
+        mockTerminalAttachment = {
+            owner: 'self',
+            attachedAt: Date.UTC(2026, 3, 28, 20, 30, 0),
+            canTakeOver: false
+        }
+
+        renderWithProviders()
+
+        expect(screen.getByText(/Attached here since/i)).toBeInTheDocument()
+    })
+
+    it('shows reclaim UI when another browser owns the terminal', () => {
+        mockTerminalSocketState = {
+            status: 'error',
+            error: 'Terminal moved to another browser.'
+        }
+        mockTerminalAttachment = {
+            owner: 'other',
+            attachedAt: Date.UTC(2026, 3, 28, 20, 31, 0),
+            canTakeOver: true
+        }
+
+        renderWithProviders()
+        fireEvent.click(screen.getByRole('button', { name: 'Reclaim terminal' }))
+
+        expect(screen.getByText(/Another browser has this terminal since/i)).toBeInTheDocument()
+        expect(takeOverMock).toHaveBeenCalledTimes(1)
+    })
+})
+
 describe('TerminalPage split child restore', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
         mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
         allowMockTerminalTextareaFocus = true
         mockTerminalTextarea = null
         closeSessionMock.mockResolvedValue(undefined)
@@ -339,6 +437,7 @@ describe('TerminalPage split child restore', () => {
     })
 
     afterEach(() => {
+        localStorage.removeItem('maglev:splitTerminalWidth')
         cleanup()
     })
 
@@ -379,11 +478,66 @@ describe('TerminalPage split child restore', () => {
     })
 })
 
+describe('TerminalPage file preview viewport behavior', () => {
+    beforeEach(() => {
+        cleanup()
+        vi.clearAllMocks()
+        mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
+        mockSessions = []
+        mockSessionMetadata = { path: '/tmp/project' }
+        allowMockTerminalTextareaFocus = true
+        mockTerminalTextarea = null
+        closeSessionMock.mockResolvedValue(undefined)
+        setDefaultFileSearchMock()
+        setDefaultSupervisionTargetMock()
+        setMatchMediaMock()
+        localStorage.setItem(
+            getStickyFilePreviewStorageKey('test-scope', 'session-1'),
+            '/tmp/project/src/example.ts'
+        )
+    })
+
+    afterEach(() => {
+        localStorage.removeItem(getStickyFilePreviewStorageKey('test-scope', 'session-1'))
+        cleanup()
+    })
+
+    it('renders the preview as a full-screen dialog on compact viewports', () => {
+        Object.defineProperty(window, 'innerWidth', {
+            configurable: true,
+            writable: true,
+            value: 640
+        })
+
+        renderWithProviders()
+
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
+        expect(screen.getByTestId('file-preview-panel')).toHaveAttribute('data-presentation', 'overlay')
+        expect(screen.queryByLabelText('Resize file preview')).not.toBeInTheDocument()
+    })
+
+    it('renders the preview as a resizable sidebar on wider viewports', () => {
+        Object.defineProperty(window, 'innerWidth', {
+            configurable: true,
+            writable: true,
+            value: 1280
+        })
+
+        renderWithProviders()
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(screen.getByLabelText('Resize file preview')).toBeInTheDocument()
+        expect(screen.getByTestId('file-preview-panel')).toHaveAttribute('data-presentation', 'sidebar')
+    })
+})
+
 describe('TerminalPage open file dialog', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
         mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
         mockSessions = []
         mockSessionMetadata = { path: '/tmp/project' }
         closeSessionMock.mockResolvedValue(undefined)
@@ -481,7 +635,7 @@ describe('TerminalPage open file dialog', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
 
         expect(screen.getByText('Recent files')).toBeInTheDocument()
-        expect(screen.getByText('src/nested/helper.ts')).toBeInTheDocument()
+        expect(screen.getAllByText('src/nested/helper.ts').length).toBeGreaterThan(0)
     })
 })
 
@@ -490,6 +644,7 @@ describe('TerminalPage split close behavior', () => {
         cleanup()
         vi.clearAllMocks()
         mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
         mockSessions = [
             {
                 id: 'split-session-1',
@@ -508,6 +663,20 @@ describe('TerminalPage split close behavior', () => {
 
     afterEach(() => {
         cleanup()
+    })
+
+    it('clamps split width to leave room for the primary terminal on smaller viewports', () => {
+        Object.defineProperty(window, 'innerWidth', {
+            configurable: true,
+            writable: true,
+            value: 700
+        })
+        localStorage.setItem('maglev:splitTerminalWidth', '880')
+
+        renderWithProviders()
+
+        const splitShell = screen.getByTestId('split-terminal-panel').parentElement
+        expect(splitShell).toHaveStyle({ width: '340px' })
     })
 
     it('closes the split session instead of only hiding the panel', async () => {
@@ -546,6 +715,7 @@ describe('TerminalPage new session focus handoff', () => {
         vi.clearAllMocks()
         vi.useFakeTimers()
         mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
         mockSessions = []
         mockSessionMetadata = { path: '/tmp/project' }
         allowMockTerminalTextareaFocus = false
@@ -592,6 +762,7 @@ describe('TerminalPage new session focus handoff', () => {
             flavor: 'shell'
         }
         mockTerminalSocketState = { status: 'idle' }
+        mockTerminalAttachment = null
 
         renderWithProviders()
 
@@ -607,6 +778,7 @@ describe('TerminalPage new session focus handoff', () => {
             shellTerminalState: 'ready'
         }
         mockTerminalSocketState = { status: 'connecting' }
+        mockTerminalAttachment = null
 
         renderWithProviders()
 
@@ -620,6 +792,7 @@ describe('TerminalPage supervisor bridge help', () => {
         cleanup()
         vi.clearAllMocks()
         mockTerminalSocketState = { status: 'connected' }
+        mockTerminalAttachment = null
         mockSessions = []
         mockSessionMetadata = {
             path: '/tmp/project',

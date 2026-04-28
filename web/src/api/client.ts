@@ -305,7 +305,8 @@ export class ApiClient {
         sessionId: string,
         query: string,
         limit?: number,
-        mode?: 'fuzzy' | 'glob'
+        mode?: 'fuzzy' | 'glob',
+        signal?: AbortSignal
     ): Promise<FileSearchResponse> {
         const params = new URLSearchParams()
         if (query) {
@@ -318,7 +319,9 @@ export class ApiClient {
             params.set('mode', mode)
         }
         const qs = params.toString()
-        return await this.request<FileSearchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/files${qs ? `?${qs}` : ''}`)
+        return await this.request<FileSearchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/files${qs ? `?${qs}` : ''}`, {
+            signal
+        })
     }
 
     async readSessionFile(sessionId: string, path: string): Promise<FileReadResponse> {
@@ -341,10 +344,21 @@ export class ApiClient {
         content: string,
         expectedHash?: string | null
     ): Promise<WriteFileResponse> {
-        return await this.request<WriteFileResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/file`, {
-            method: 'POST',
-            body: JSON.stringify({ path, content, expectedHash })
-        })
+        try {
+            return await this.request<WriteFileResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/file`, {
+                method: 'POST',
+                body: JSON.stringify({ path, content, expectedHash })
+            })
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 409 && error.body) {
+                try {
+                    return JSON.parse(error.body) as WriteFileResponse
+                } catch {
+                    // Fall through to the original transport error below.
+                }
+            }
+            throw error
+        }
     }
 
     async createSessionFileReviewThread(

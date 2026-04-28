@@ -18,6 +18,18 @@ import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
 import { useTranslation } from '@/lib/use-translation'
 import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
 import { clearPendingTerminalFocus, hasPendingTerminalFocus } from '@/lib/pending-terminal-focus'
+import {
+    readLocalStorageItem,
+    readLocalStorageJson,
+    readLocalStorageNumber,
+    removeLocalStorageItem,
+    writeLocalStorageItem,
+    writeLocalStorageJson,
+} from '@/lib/storage-local'
+import {
+    getLegacyStickyFilePreviewStorageKey,
+    getStickyFilePreviewStorageKey,
+} from '@/lib/storage-session'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { FilePreviewPanel } from '@/components/FilePreviewPanel'
 import { SplitTerminalPanel } from '@/components/SplitTerminalPanel'
@@ -33,6 +45,7 @@ import {
 } from '@/components/ui/dialog'
 
 const TERMINAL_TAKEOVER_MESSAGE = 'Terminal is attached in another browser. Reconnect here to take over.'
+const TERMINAL_MOVED_MESSAGE = 'Terminal moved to another browser.'
 const SPLIT_TERMINAL_WIDTH_KEY = 'maglev:splitTerminalWidth'
 const SPLIT_TERMINAL_DEFAULT_WIDTH = 480
 const SPLIT_TERMINAL_MIN_WIDTH = 280
@@ -40,9 +53,11 @@ const SPLIT_TERMINAL_MAX_WIDTH = 900
 const FILE_PREVIEW_WIDTH_KEY = 'maglev:filePreviewWidth'
 const FILE_PREVIEW_DEFAULT_WIDTH = 480
 const FILE_PREVIEW_MIN_WIDTH = 280
+const COMPACT_SECONDARY_PANEL_MIN_WIDTH = 220
+const PRIMARY_PANEL_MIN_WIDTH = 360
+const MOBILE_FILE_PREVIEW_BREAKPOINT = 1024
 const RECENT_OPEN_FILES_LIMIT = 20
 const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
-const STICKY_FILE_PREVIEW_KEY = 'maglev:sticky-file-preview'
 
 type StartupState =
     | 'creating-session'
@@ -51,84 +66,96 @@ type StartupState =
     | 'focusing-terminal'
     | 'failed'
 
-function getFilePreviewMaxWidth(): number {
+function getViewportSecondaryPanelCapacity(): number {
     if (typeof window === 'undefined') {
-        return 1200
+        return SPLIT_TERMINAL_MAX_WIDTH
     }
-    return Math.max(720, Math.floor(window.innerWidth * 0.72))
+    return Math.max(COMPACT_SECONDARY_PANEL_MIN_WIDTH, window.innerWidth - PRIMARY_PANEL_MIN_WIDTH)
+}
+
+function clampPanelWidth(width: number, minWidth: number, maxWidth: number): number {
+    const effectiveMinWidth = Math.min(minWidth, maxWidth)
+    return Math.max(effectiveMinWidth, Math.min(maxWidth, width))
+}
+
+function isCompactFilePreviewViewport(): boolean {
+    if (typeof window === 'undefined') {
+        return false
+    }
+    return window.innerWidth < MOBILE_FILE_PREVIEW_BREAKPOINT
+}
+
+function getFilePreviewMaxWidth(): number {
+    return Math.min(1200, getViewportSecondaryPanelCapacity())
+}
+
+function clampFilePreviewWidth(width: number): number {
+    return clampPanelWidth(width, FILE_PREVIEW_MIN_WIDTH, getFilePreviewMaxWidth())
+}
+
+function getSplitTerminalMaxWidth(): number {
+    return Math.min(SPLIT_TERMINAL_MAX_WIDTH, getViewportSecondaryPanelCapacity())
+}
+
+function clampSplitTerminalWidth(width: number): number {
+    return clampPanelWidth(width, SPLIT_TERMINAL_MIN_WIDTH, getSplitTerminalMaxWidth())
+}
+
+function formatAttachmentSince(attachedAt: number | null): string | null {
+    if (!attachedAt) {
+        return null
+    }
+    try {
+        return new Intl.DateTimeFormat(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+            month: 'short',
+            day: 'numeric'
+        }).format(new Date(attachedAt))
+    } catch {
+        return null
+    }
 }
 
 function loadRecentOpenFiles(): FileSearchItem[] {
-    if (typeof window === 'undefined') {
+    const parsed = readLocalStorageJson<unknown>(RECENT_OPEN_FILES_KEY)
+    if (!Array.isArray(parsed)) {
         return []
     }
 
-    try {
-        const raw = localStorage.getItem(RECENT_OPEN_FILES_KEY)
-        if (!raw) {
-            return []
-        }
-        const parsed = JSON.parse(raw)
-        if (!Array.isArray(parsed)) {
-            return []
-        }
-        return parsed.filter((item): item is FileSearchItem => (
-            item !== null
-            && typeof item === 'object'
-            && typeof item.fileName === 'string'
-            && typeof item.filePath === 'string'
-            && typeof item.fullPath === 'string'
-            && (item.fileType === 'file' || item.fileType === 'folder')
-        ))
-    } catch {
-        return []
-    }
+    return parsed.filter((item): item is FileSearchItem => (
+        item !== null
+        && typeof item === 'object'
+        && typeof item.fileName === 'string'
+        && typeof item.filePath === 'string'
+        && typeof item.fullPath === 'string'
+        && (item.fileType === 'file' || item.fileType === 'folder')
+    ))
 }
 
 function saveRecentOpenFiles(files: FileSearchItem[]): void {
-    if (typeof window === 'undefined') {
-        return
-    }
-
-    try {
-        localStorage.setItem(RECENT_OPEN_FILES_KEY, JSON.stringify(files.slice(0, RECENT_OPEN_FILES_LIMIT)))
-    } catch {
-        // ignore
-    }
+    writeLocalStorageJson(RECENT_OPEN_FILES_KEY, files.slice(0, RECENT_OPEN_FILES_LIMIT))
 }
 
-function getStickyFilePreviewStorageKey(baseUrl: string, sessionId: string): string {
-    return `${STICKY_FILE_PREVIEW_KEY}:${baseUrl}:${sessionId}`
+function loadStickyFilePreview(scopeKey: string, baseUrl: string, sessionId: string): string | null {
+    const nextKey = getStickyFilePreviewStorageKey(scopeKey, sessionId)
+    const nextValue = readLocalStorageItem(nextKey)
+    if (nextValue && nextValue.trim().length > 0) {
+        return nextValue
+    }
+
+    const legacyValue = readLocalStorageItem(getLegacyStickyFilePreviewStorageKey(baseUrl, sessionId))
+    return legacyValue && legacyValue.trim().length > 0 ? legacyValue : null
 }
 
-function loadStickyFilePreview(baseUrl: string, sessionId: string): string | null {
-    if (typeof window === 'undefined') {
-        return null
+function saveStickyFilePreview(scopeKey: string, baseUrl: string, sessionId: string, filePath: string | null): void {
+    const storageKey = getStickyFilePreviewStorageKey(scopeKey, sessionId)
+    if (filePath && filePath.trim().length > 0) {
+        writeLocalStorageItem(storageKey, filePath)
+    } else {
+        removeLocalStorageItem(storageKey)
     }
-
-    try {
-        const raw = localStorage.getItem(getStickyFilePreviewStorageKey(baseUrl, sessionId))
-        return raw && raw.trim().length > 0 ? raw : null
-    } catch {
-        return null
-    }
-}
-
-function saveStickyFilePreview(baseUrl: string, sessionId: string, filePath: string | null): void {
-    if (typeof window === 'undefined') {
-        return
-    }
-
-    try {
-        const storageKey = getStickyFilePreviewStorageKey(baseUrl, sessionId)
-        if (filePath && filePath.trim().length > 0) {
-            localStorage.setItem(storageKey, filePath)
-        } else {
-            localStorage.removeItem(storageKey)
-        }
-    } catch {
-        // ignore
-    }
+    removeLocalStorageItem(getLegacyStickyFilePreviewStorageKey(baseUrl, sessionId))
 }
 
 function globPatternToRegExp(pattern: string): RegExp {
@@ -420,23 +447,19 @@ export default function TerminalPage() {
     const [openFileSubmittedQuery, setOpenFileSubmittedQuery] = useState('')
     const [openFileActiveIndex, setOpenFileActiveIndex] = useState(0)
     const [recentOpenFiles, setRecentOpenFiles] = useState<FileSearchItem[]>(() => loadRecentOpenFiles())
-    const [previewFilePath, setPreviewFilePath] = useState<string | null>(() => loadStickyFilePreview(baseUrl, sessionId))
+    const [previewFilePath, setPreviewFilePath] = useState<string | null>(() => loadStickyFilePreview(scopeKey, baseUrl, sessionId))
+    const [isCompactPreviewViewport, setIsCompactPreviewViewport] = useState(() => isCompactFilePreviewViewport())
     const [previewPanelWidth, setPreviewPanelWidth] = useState(() => {
-        try {
-            const saved = localStorage.getItem(FILE_PREVIEW_WIDTH_KEY)
-            const maxWidth = getFilePreviewMaxWidth()
-            return saved ? Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(maxWidth, Number(saved))) : FILE_PREVIEW_DEFAULT_WIDTH
-        } catch { return FILE_PREVIEW_DEFAULT_WIDTH }
+        const saved = readLocalStorageNumber(FILE_PREVIEW_WIDTH_KEY)
+        return clampFilePreviewWidth(saved ?? FILE_PREVIEW_DEFAULT_WIDTH)
     })
     const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
     const [pendingSplitStartupSessionId, setPendingSplitStartupSessionId] = useState<string | null>(null)
     const [closingSplitSessionId, setClosingSplitSessionId] = useState<string | null>(null)
     const [mainTerminalFocused, setMainTerminalFocused] = useState(false)
     const [splitPanelWidth, setSplitPanelWidth] = useState(() => {
-        try {
-            const saved = localStorage.getItem(SPLIT_TERMINAL_WIDTH_KEY)
-            return saved ? Math.max(SPLIT_TERMINAL_MIN_WIDTH, Math.min(SPLIT_TERMINAL_MAX_WIDTH, Number(saved))) : SPLIT_TERMINAL_DEFAULT_WIDTH
-        } catch { return SPLIT_TERMINAL_DEFAULT_WIDTH }
+        const saved = readLocalStorageNumber(SPLIT_TERMINAL_WIDTH_KEY)
+        return clampSplitTerminalWidth(saved ?? SPLIT_TERMINAL_DEFAULT_WIDTH)
     })
 
     // Auto-restore split pane: only restore real terminal split children, not review-owned companion shells.
@@ -571,6 +594,7 @@ export default function TerminalPage() {
 
     const {
         state: terminalState,
+        attachment,
         connect,
         reconnectView,
         write,
@@ -646,7 +670,17 @@ export default function TerminalPage() {
     )
 
     const errorMessage = terminalState.status === 'error' ? terminalState.error : null
-    const canTakeOver = errorMessage === TERMINAL_TAKEOVER_MESSAGE
+    const canTakeOver = Boolean(attachment?.canTakeOver)
+    const attachedHere = attachment?.owner === 'self'
+    const attachedElsewhere = attachment?.owner === 'other'
+    const attachmentSinceLabel = formatAttachmentSince(attachment?.attachedAt ?? null)
+    const takeoverStatusMessage = attachedElsewhere
+        ? `Another browser has this terminal${attachmentSinceLabel ? ` since ${attachmentSinceLabel}` : ''}.`
+        : null
+    const attachedHereMessage = attachedHere
+        ? `Attached here${attachmentSinceLabel ? ` since ${attachmentSinceLabel}` : ''}.`
+        : null
+    const takeoverActionLabel = errorMessage === TERMINAL_MOVED_MESSAGE ? 'Reclaim terminal' : 'Take over here'
 
     const handleResize = useCallback(
         (cols: number, rows: number) => {
@@ -697,12 +731,12 @@ export default function TerminalPage() {
     }, [sessionId])
 
     useEffect(() => {
-        setPreviewFilePath(loadStickyFilePreview(baseUrl, sessionId))
-    }, [baseUrl, sessionId])
+        setPreviewFilePath(loadStickyFilePreview(scopeKey, baseUrl, sessionId))
+    }, [baseUrl, scopeKey, sessionId])
 
     useEffect(() => {
-        saveStickyFilePreview(baseUrl, sessionId, previewFilePath)
-    }, [baseUrl, previewFilePath, sessionId])
+        saveStickyFilePreview(scopeKey, baseUrl, sessionId, previewFilePath)
+    }, [baseUrl, previewFilePath, scopeKey, sessionId])
 
     useEffect(() => {
         setPendingNewSessionFocus(hasPendingTerminalFocus(sessionId))
@@ -1173,7 +1207,7 @@ export default function TerminalPage() {
 
         const onMove = (e: globalThis.PointerEvent) => {
             const delta = startX - e.clientX
-            const next = Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(getFilePreviewMaxWidth(), startWidth + delta))
+            const next = clampFilePreviewWidth(startWidth + delta)
             setPreviewPanelWidth(next)
             try { localStorage.setItem(FILE_PREVIEW_WIDTH_KEY, String(next)) } catch { /* ignore */ }
         }
@@ -1188,18 +1222,26 @@ export default function TerminalPage() {
     }, [previewPanelWidth])
 
     useEffect(() => {
-        const syncPreviewWidth = () => {
+        const syncViewportLayout = () => {
+            setIsCompactPreviewViewport(isCompactFilePreviewViewport())
             setPreviewPanelWidth((current) => {
-                const next = Math.max(FILE_PREVIEW_MIN_WIDTH, Math.min(getFilePreviewMaxWidth(), current))
+                const next = clampFilePreviewWidth(current)
                 if (next !== current) {
                     try { localStorage.setItem(FILE_PREVIEW_WIDTH_KEY, String(next)) } catch { /* ignore */ }
                 }
                 return next
             })
+            setSplitPanelWidth((current) => {
+                const next = clampSplitTerminalWidth(current)
+                if (next !== current) {
+                    try { localStorage.setItem(SPLIT_TERMINAL_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+                }
+                return next
+            })
         }
 
-        window.addEventListener('resize', syncPreviewWidth)
-        return () => window.removeEventListener('resize', syncPreviewWidth)
+        window.addEventListener('resize', syncViewportLayout)
+        return () => window.removeEventListener('resize', syncViewportLayout)
     }, [])
 
     const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -1209,7 +1251,7 @@ export default function TerminalPage() {
 
         const onMove = (e: globalThis.PointerEvent) => {
             const delta = startX - e.clientX
-            const next = Math.max(SPLIT_TERMINAL_MIN_WIDTH, Math.min(SPLIT_TERMINAL_MAX_WIDTH, startWidth + delta))
+            const next = clampSplitTerminalWidth(startWidth + delta)
             setSplitPanelWidth(next)
             try { localStorage.setItem(SPLIT_TERMINAL_WIDTH_KEY, String(next)) } catch { /* ignore */ }
         }
@@ -1589,6 +1631,8 @@ export default function TerminalPage() {
     const sessionLabel = `Session ${sessionId}`
 
     const previewPanelOpen = !splitSessionId && Boolean(previewFilePath && loadedSessionId)
+    const previewDialogOpen = previewPanelOpen && isCompactPreviewViewport
+    const previewSidebarOpen = previewPanelOpen && !isCompactPreviewViewport
 
     return (
         <div className="relative flex h-full min-h-0 bg-[var(--app-bg)]">
@@ -1738,10 +1782,21 @@ export default function TerminalPage() {
                 </div>
             ) : null}
 
+            {attachedHereMessage && terminalState.status === 'connected' ? (
+                <div className="w-full px-3 pt-3">
+                    <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
+                        {attachedHereMessage}
+                    </div>
+                </div>
+            ) : null}
+
             {errorMessage ? (
                 <div className="w-full px-3 pt-3">
                     <div className="rounded-md border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-xs text-[var(--app-badge-error-text)]">
-                        <div>{errorMessage}</div>
+                        <div>{takeoverStatusMessage ?? errorMessage}</div>
+                        {takeoverStatusMessage && errorMessage !== TERMINAL_TAKEOVER_MESSAGE ? (
+                            <div className="mt-1 text-[11px] opacity-80">{errorMessage}</div>
+                        ) : null}
                         {canTakeOver ? (
                             <div className="mt-2">
                                 <Button
@@ -1751,7 +1806,7 @@ export default function TerminalPage() {
                                     onClick={takeOver}
                                     className="border-[var(--app-badge-error-border)] bg-transparent text-[var(--app-badge-error-text)] hover:bg-[var(--app-badge-error-bg)]"
                                 >
-                                    Take over here
+                                    {takeoverActionLabel}
                                 </Button>
                             </div>
                         ) : null}
@@ -2353,7 +2408,7 @@ export default function TerminalPage() {
             </Dialog>
             </div>
 
-            {previewPanelOpen && previewFilePath && loadedSessionId ? (
+            {previewSidebarOpen && previewFilePath && loadedSessionId ? (
                 <div className="relative flex h-full shrink-0 border-l border-[var(--app-border)]" style={{ width: `${previewPanelWidth}px` }}>
                     <div
                         role="separator"
@@ -2368,10 +2423,38 @@ export default function TerminalPage() {
                         sessionId={loadedSessionId}
                         filePath={previewFilePath}
                         api={api}
+                        presentation="sidebar"
                         onClose={() => setPreviewFilePath(null)}
                     />
                 </div>
             ) : null}
+
+            <Dialog
+                open={previewDialogOpen}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setPreviewFilePath(null)
+                    }
+                }}
+            >
+                {previewDialogOpen && previewFilePath && loadedSessionId ? (
+                    <DialogContent className="left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 rounded-none border-0 p-0">
+                        <DialogHeader className="sr-only">
+                            <DialogTitle>File preview</DialogTitle>
+                            <DialogDescription>
+                                Review, annotate, or edit the selected workspace file.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <FilePreviewPanel
+                            sessionId={loadedSessionId}
+                            filePath={previewFilePath}
+                            api={api}
+                            presentation="overlay"
+                            onClose={() => setPreviewFilePath(null)}
+                        />
+                    </DialogContent>
+                ) : null}
+            </Dialog>
         </div>
     )
 }

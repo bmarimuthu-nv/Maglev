@@ -23,6 +23,47 @@ type HubDaemonState = {
     startedAt: string
 }
 
+type HubHealthSnapshot = {
+    status: string
+    protocolVersion: string
+    serverTime?: string
+    uptimeMs?: number
+    remoteMode?: boolean
+    sync?: {
+        connected?: boolean
+        sessions?: {
+            total?: number
+            active?: number
+        }
+        machines?: {
+            total?: number
+            online?: number
+        }
+    }
+    sse?: {
+        connections?: {
+            total?: number
+            visible?: number
+        }
+    }
+}
+
+type HubHealthProbeResult =
+    | {
+        ok: true
+        baseUrl: string
+        healthUrl: string
+        snapshot: HubHealthSnapshot | null
+    }
+    | {
+        ok: false
+        baseUrl: string
+        healthUrl: string | null
+        reason: 'invalid-url' | 'timeout' | 'connection-refused' | 'http-error' | 'network-error'
+        detail: string
+        status?: number
+    }
+
 function parseHubArgs(args: string[]): ParsedHubArgs {
     const result: ParsedHubArgs = {}
 
@@ -311,26 +352,159 @@ function getHubApiBaseUrl(args: string[]): string {
     return `http://${normalizedHost}:${normalizedPort}`
 }
 
-async function waitForHubReady(baseUrl: string, timeoutMs: number = 15_000): Promise<void> {
+function getErrorDetail(error: unknown): string {
+    if (!(error instanceof Error)) {
+        return 'unknown error'
+    }
+
+    const details = [error.name, error.message]
+    const cause = (error as Error & { cause?: unknown }).cause
+    if (cause instanceof Error) {
+        details.push(cause.name, cause.message)
+        const code = (cause as Error & { code?: string }).code
+        if (code) {
+            details.push(code)
+        }
+    }
+    const code = (error as Error & { code?: string }).code
+    if (code) {
+        details.push(code)
+    }
+
+    return details.filter(Boolean).join(': ')
+}
+
+function classifyHubHealthError(error: unknown): Pick<Extract<HubHealthProbeResult, { ok: false }>, 'reason' | 'detail'> {
+    const detail = getErrorDetail(error)
+    const normalizedDetail = detail.toLowerCase()
+
+    if (normalizedDetail.includes('timeout')) {
+        return { reason: 'timeout', detail }
+    }
+    if (normalizedDetail.includes('econnrefused') || normalizedDetail.includes('connection refused')) {
+        return { reason: 'connection-refused', detail }
+    }
+
+    return { reason: 'network-error', detail }
+}
+
+async function probeHubHealth(baseUrl: string, timeoutMs: number = 1500): Promise<HubHealthProbeResult> {
+    let healthUrl: string
+
+    try {
+        healthUrl = new URL('/health', baseUrl).toString()
+    } catch (error) {
+        return {
+            ok: false,
+            baseUrl,
+            healthUrl: null,
+            reason: 'invalid-url',
+            detail: getErrorDetail(error)
+        }
+    }
+
+    try {
+        const response = await fetch(healthUrl, {
+            signal: AbortSignal.timeout(timeoutMs)
+        })
+        if (response.ok) {
+            let snapshot: HubHealthSnapshot | null = null
+            try {
+                const payload = await response.json()
+                if (payload && typeof payload === 'object') {
+                    snapshot = payload as HubHealthSnapshot
+                }
+            } catch {
+                snapshot = null
+            }
+            return {
+                ok: true,
+                baseUrl,
+                healthUrl,
+                snapshot
+            }
+        }
+        return {
+            ok: false,
+            baseUrl,
+            healthUrl,
+            reason: 'http-error',
+            status: response.status,
+            detail: `HTTP ${response.status}`
+        }
+    } catch (error) {
+        return {
+            ok: false,
+            baseUrl,
+            healthUrl,
+            ...classifyHubHealthError(error)
+        }
+    }
+}
+
+function describeHubReadinessFailure(result: Extract<HubHealthProbeResult, { ok: false }>): string {
+    switch (result.reason) {
+        case 'invalid-url':
+            return `invalid hub URL ${result.baseUrl}`
+        case 'connection-refused':
+            return `nothing is listening at ${result.healthUrl ?? `${result.baseUrl}/health`}`
+        case 'timeout':
+            return `timed out waiting for ${result.healthUrl ?? `${result.baseUrl}/health`}`
+        case 'http-error':
+            return `expected /health to return 200 OK, got HTTP ${result.status ?? 'unknown'}`
+        case 'network-error':
+            return `network error while checking ${result.healthUrl ?? `${result.baseUrl}/health`}: ${result.detail}`
+    }
+}
+
+function formatHubStatusLines(snapshot: HubHealthSnapshot | null): string[] {
+    if (!snapshot) {
+        return []
+    }
+
+    const lines: string[] = []
+    if (typeof snapshot.uptimeMs === 'number') {
+        lines.push(`  uptimeMs: ${snapshot.uptimeMs}`)
+    }
+    if (typeof snapshot.serverTime === 'string') {
+        lines.push(`  serverTime: ${snapshot.serverTime}`)
+    }
+    if (typeof snapshot.remoteMode === 'boolean') {
+        lines.push(`  remoteMode: ${snapshot.remoteMode}`)
+    }
+
+    const sync = snapshot.sync
+    if (sync) {
+        if (typeof sync.connected === 'boolean') {
+            lines.push(`  syncConnected: ${sync.connected}`)
+        }
+        lines.push(
+            `  sessions: ${sync.sessions?.active ?? 0} active / ${sync.sessions?.total ?? 0} total`,
+            `  machines: ${sync.machines?.online ?? 0} online / ${sync.machines?.total ?? 0} total`
+        )
+    }
+
+    if (snapshot.sse?.connections) {
+        lines.push(`  sse: ${snapshot.sse.connections.visible ?? 0} visible / ${snapshot.sse.connections.total ?? 0} total`)
+    }
+
+    return lines
+}
+
+async function waitForHubReady(baseUrl: string, timeoutMs: number = 15_000): Promise<Extract<HubHealthProbeResult, { ok: true }>> {
     const deadline = Date.now() + timeoutMs
-    let lastError: string | null = null
+    let lastFailure: Extract<HubHealthProbeResult, { ok: false }> | null = null
 
     while (Date.now() < deadline) {
-        try {
-            const response = await fetch(`${baseUrl}/health`, {
-                signal: AbortSignal.timeout(1_500)
-            })
-            if (response.ok) {
-                return
-            }
-            lastError = `HTTP ${response.status}`
-        } catch (error) {
-            lastError = error instanceof Error ? error.message : 'unknown error'
+        const probeResult = await probeHubHealth(baseUrl)
+        if (probeResult.ok) {
+            return probeResult
         }
+        lastFailure = probeResult
         await new Promise((resolve) => setTimeout(resolve, 250))
     }
 
-    throw new Error(`Hub did not become ready at ${baseUrl} (${lastError ?? 'timed out'})`)
+    throw new Error(`Hub did not become ready: ${lastFailure ? describeHubReadinessFailure(lastFailure) : `timed out waiting for ${baseUrl}/health`}`)
 }
 
 async function runCliCommandAndWait(args: string[], env: NodeJS.ProcessEnv, outputFd?: number): Promise<void> {
@@ -480,7 +654,11 @@ function mergeDaemonArgs(storedArgs: string[] | undefined, overrideArgs: string[
 export const __test__ = {
     parseHubArgs,
     filterDaemonStartArgs,
-    mergeDaemonArgs
+    mergeDaemonArgs,
+    classifyHubHealthError,
+    probeHubHealth,
+    describeHubReadinessFailure,
+    formatHubStatusLines
 }
 
 async function resolveHubStartupArgs(args: string[]): Promise<string[]> {
@@ -506,7 +684,9 @@ async function startHubDaemon(commandArgs: string[]): Promise<void> {
     const machineId = ensureMachineIdForHub(daemonName)
     const daemonArgs = ['hub', 'daemon-run', '--name', daemonName, ...passthroughArgs]
     const logPath = getDaemonLogPath(daemonName)
+    const baseUrl = getHubApiBaseUrl(passthroughArgs)
     const fd = openSync(logPath, 'a')
+    let readyHealthUrl: string | null = null
     try {
         // Always clear the namespaced runner first so a stale runner cannot shadow this hub start.
         await stopRunnerForHub(['--name', daemonName, ...passthroughArgs], fd)
@@ -533,17 +713,22 @@ async function startHubDaemon(commandArgs: string[]): Promise<void> {
         pruneHubLogs(daemonName, 3)
 
         try {
+            const ready = await waitForHubReady(baseUrl)
+            readyHealthUrl = ready.healthUrl
             await ensureRunnerForHub(['--name', daemonName, ...passthroughArgs], fd)
         } catch (error) {
             await killProcess(child.pid, true)
             clearDaemonState(daemonName)
-            throw error
+            const detail = error instanceof Error ? error.message : 'Unknown error'
+            throw new Error(`${detail}. Check logs: ${logPath}`)
         }
     } finally {
         closeSync(fd)
     }
 
     console.log(chalk.green(`Started hub daemon "${daemonName}"`))
+    console.log(chalk.green(`Ready: ${baseUrl}`))
+    console.log(chalk.gray(`Health: ${readyHealthUrl ?? `${baseUrl}/health`}`))
     console.log(chalk.gray(`Logs: ${logPath}`))
 }
 
@@ -574,7 +759,7 @@ async function restartHubDaemon(commandArgs: string[]): Promise<void> {
     await startHubDaemon(['--name', daemonName, ...passthroughArgs])
 }
 
-function statusHubDaemon(commandArgs: string[]): void {
+async function statusHubDaemon(commandArgs: string[]): Promise<void> {
     const daemonName = getDaemonNameFromArgs(commandArgs)
     const state = readDaemonState(daemonName)
     if (!state) {
@@ -590,6 +775,25 @@ function statusHubDaemon(commandArgs: string[]): void {
     console.log(`  pid: ${state.pid}`)
     console.log(`  log: ${state.logPath}`)
     console.log(`  started: ${state.startedAt}`)
+    const baseUrl = getHubApiBaseUrl(state.args ?? [])
+    console.log(`  url: ${baseUrl}`)
+
+    const health = await probeHubHealth(baseUrl).catch((error) => ({
+        ok: false as const,
+        baseUrl,
+        healthUrl: `${baseUrl}/health`,
+        ...classifyHubHealthError(error)
+    }))
+
+    if (!health.ok) {
+        console.log(`  health: unavailable (${describeHubReadinessFailure(health)})`)
+        return
+    }
+
+    console.log(`  health: ok (${health.healthUrl})`)
+    for (const line of formatHubStatusLines(health.snapshot)) {
+        console.log(line)
+    }
 }
 
 function logsHubDaemon(commandArgs: string[]): void {
@@ -642,7 +846,7 @@ async function runHubDaemonCommand(commandArgs: string[]): Promise<void> {
             await restartHubDaemon(passthroughArgs)
             return
         case 'status':
-            statusHubDaemon(passthroughArgs)
+            await statusHubDaemon(passthroughArgs)
             return
         case 'logs':
             logsHubDaemon(passthroughArgs)

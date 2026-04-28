@@ -7,7 +7,7 @@ import { useAppContext } from '@/lib/app-context'
 import { queryKeys } from '@/lib/query-keys'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
 import { isBinaryContent } from '@/lib/file-utils'
-import type { FileReviewThread } from '@/types/api'
+import type { FileReviewThread, WriteFileConflict } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { SourceReviewFileCard } from '@/components/review/SourceReviewFileCard'
 
@@ -84,15 +84,72 @@ function normalizeSourceLines(content: string): string[] {
     return lines.length > 0 ? lines : ['']
 }
 
+type DraftSnapshot = {
+    draft: string
+    updatedAt: number
+}
+
+function buildDraftStorageKey(scopeKey: string, sessionId: string, filePath: string): string {
+    return `maglev:file-preview-draft:${scopeKey}:${sessionId}:${filePath}`
+}
+
+function loadDraftSnapshot(key: string): DraftSnapshot | null {
+    try {
+        const raw = window.sessionStorage.getItem(key)
+        if (!raw) {
+            return null
+        }
+        const parsed = JSON.parse(raw) as Partial<DraftSnapshot>
+        if (typeof parsed.draft !== 'string') {
+            return null
+        }
+        return {
+            draft: parsed.draft,
+            updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now()
+        }
+    } catch {
+        return null
+    }
+}
+
+function saveDraftSnapshot(key: string, snapshot: DraftSnapshot): void {
+    try {
+        window.sessionStorage.setItem(key, JSON.stringify(snapshot))
+    } catch {
+        // Ignore browser storage failures and keep editing locally.
+    }
+}
+
+function clearDraftSnapshot(key: string): void {
+    try {
+        window.sessionStorage.removeItem(key)
+    } catch {
+        // Ignore browser storage failures and keep the UI responsive.
+    }
+}
+
+function getConflictMessage(conflict: WriteFileConflict): string {
+    switch (conflict.type) {
+        case 'hash_mismatch':
+            return 'This file changed on disk after you opened it.'
+        case 'missing_file':
+            return 'This file was deleted after you opened it.'
+        case 'already_exists':
+            return 'This file now exists, so it cannot be created as new without overwriting it.'
+    }
+}
+
 export function FilePreviewPanel(props: {
     sessionId: string
     filePath: string
     api: ApiClient | null
     onClose: () => void
+    presentation?: 'sidebar' | 'overlay'
 }) {
     const { scopeKey } = useAppContext()
-    const { sessionId, filePath, api, onClose } = props
+    const { sessionId, filePath, api, onClose, presentation = 'sidebar' } = props
     const queryClient = useQueryClient()
+    const isOverlay = presentation === 'overlay'
 
     const fileQuery = useQuery({
         queryKey: queryKeys.sessionFile(scopeKey, sessionId, filePath),
@@ -129,12 +186,15 @@ export function FilePreviewPanel(props: {
     const sourceLines = useMemo(() => normalizeSourceLines(content), [content])
     const fileName = filePath.split('/').pop() ?? filePath
     const buildPreviewLink = useCallback((line: number) => `${window.location.href.split('#')[0]}#L${line}`, [])
+    const draftStorageKey = useMemo(() => buildDraftStorageKey(scopeKey, sessionId, filePath), [filePath, scopeKey, sessionId])
 
     const [viewMode, setViewMode] = useState<'rendered' | 'source'>('rendered')
     const [panelMode, setPanelMode] = useState<'read' | 'review' | 'edit'>('read')
     const [draft, setDraft] = useState('')
     const [isSaving, setIsSaving] = useState(false)
     const [saveError, setSaveError] = useState<string | null>(null)
+    const [saveConflict, setSaveConflict] = useState<WriteFileConflict | null>(null)
+    const [draftRecovered, setDraftRecovered] = useState(false)
     const [reviewError, setReviewError] = useState<string | null>(null)
     const [reviewSaving, setReviewSaving] = useState(false)
     const [composerLine, setComposerLine] = useState<number | null>(null)
@@ -143,6 +203,7 @@ export function FilePreviewPanel(props: {
     const codeViewRef = useRef<CodeLinesViewHandle | null>(null)
     const reviewViewRef = useRef<CodeLinesViewHandle | null>(null)
     const editViewRef = useRef<CodeEditSurfaceHandle | null>(null)
+    const restoredDraftKeyRef = useRef<string | null>(null)
     const isEditing = panelMode === 'edit'
 
     useEffect(() => {
@@ -150,10 +211,13 @@ export function FilePreviewPanel(props: {
         setPanelMode('read')
         setDraft('')
         setSaveError(null)
+        setSaveConflict(null)
+        setDraftRecovered(false)
         setReviewError(null)
         setComposerLine(null)
         setComposerText('')
         setCollapsedResolvedThreadIds({})
+        restoredDraftKeyRef.current = null
     }, [filePath])
 
     useEffect(() => {
@@ -163,12 +227,16 @@ export function FilePreviewPanel(props: {
         setViewMode('source')
         setDraft('')
         setSaveError(null)
+        setSaveConflict(null)
     }, [panelMode])
 
     const startEditing = useCallback(() => {
         setDraft(content)
         setPanelMode('edit')
         setViewMode('source')
+        setSaveError(null)
+        setSaveConflict(null)
+        setDraftRecovered(false)
         setReviewError(null)
     }, [content])
 
@@ -176,18 +244,68 @@ export function FilePreviewPanel(props: {
         setPanelMode('read')
         setDraft('')
         setSaveError(null)
-    }, [])
+        setSaveConflict(null)
+        setDraftRecovered(false)
+        clearDraftSnapshot(draftStorageKey)
+    }, [draftStorageKey])
 
-    const saveFile = useCallback(async () => {
+    useEffect(() => {
+        if (!fileQuery.data?.success || binary || isEditing || restoredDraftKeyRef.current === draftStorageKey) {
+            return
+        }
+        restoredDraftKeyRef.current = draftStorageKey
+
+        const snapshot = loadDraftSnapshot(draftStorageKey)
+        if (!snapshot) {
+            return
+        }
+        if (snapshot.draft === content) {
+            clearDraftSnapshot(draftStorageKey)
+            return
+        }
+
+        setDraft(snapshot.draft)
+        setPanelMode('edit')
+        setViewMode('source')
+        setSaveError(null)
+        setSaveConflict(null)
+        setReviewError(null)
+        setDraftRecovered(true)
+    }, [binary, content, draftStorageKey, fileQuery.data, isEditing])
+
+    useEffect(() => {
+        if (!isEditing) {
+            return
+        }
+        if (draft === content) {
+            clearDraftSnapshot(draftStorageKey)
+            return
+        }
+        saveDraftSnapshot(draftStorageKey, {
+            draft,
+            updatedAt: Date.now()
+        })
+    }, [content, draft, draftStorageKey, isEditing])
+
+    const saveFile = useCallback(async (overrideExpectedHash?: string | null) => {
         if (!api || isSaving) return
         setIsSaving(true)
         setSaveError(null)
+        setSaveConflict(null)
         try {
-            const result = await api.writeSessionFile(sessionId, filePath, encodeBase64(draft), fileHash)
+            const expectedHash = overrideExpectedHash === undefined ? fileHash : overrideExpectedHash
+            const result = await api.writeSessionFile(sessionId, filePath, encodeBase64(draft), expectedHash)
             if (!result.success) {
+                if (result.conflict) {
+                    setSaveConflict(result.conflict)
+                    return
+                }
                 throw new Error(result.error ?? 'Failed to save file')
             }
+            clearDraftSnapshot(draftStorageKey)
+            setDraftRecovered(false)
             setPanelMode('read')
+            setDraft('')
             await fileQuery.refetch()
             await reviewThreadsQuery.refetch()
         } catch (error) {
@@ -195,7 +313,18 @@ export function FilePreviewPanel(props: {
         } finally {
             setIsSaving(false)
         }
-    }, [api, draft, fileHash, filePath, fileQuery, isSaving, reviewThreadsQuery, sessionId])
+    }, [api, draft, draftStorageKey, fileHash, filePath, fileQuery, isSaving, reviewThreadsQuery, sessionId])
+
+    const discardDraft = useCallback(async () => {
+        clearDraftSnapshot(draftStorageKey)
+        setDraft('')
+        setSaveError(null)
+        setSaveConflict(null)
+        setDraftRecovered(false)
+        setPanelMode('read')
+        await fileQuery.refetch()
+        await reviewThreadsQuery.refetch()
+    }, [draftStorageKey, fileQuery, reviewThreadsQuery])
 
     const invalidateReviewThreads = useCallback(async () => {
         await queryClient.invalidateQueries({ queryKey: queryKeys.sessionFileReviewThreads(scopeKey, sessionId, filePath) })
@@ -223,6 +352,8 @@ export function FilePreviewPanel(props: {
             return
         }
         setSaveError(null)
+        setSaveConflict(null)
+        setDraftRecovered(false)
         setReviewError(null)
         await Promise.all([
             fileQuery.refetch(),
@@ -312,8 +443,8 @@ export function FilePreviewPanel(props: {
     }, [api, runReviewMutation, sessionId])
 
     return (
-        <div className="flex h-full w-full flex-col overflow-hidden">
-            <div className="border-b border-[var(--app-border)] px-3 py-2.5">
+        <div className={`flex h-full w-full flex-col overflow-hidden ${isOverlay ? 'bg-[var(--app-surface-raised)]' : ''}`}>
+            <div className={`border-b border-[var(--app-border)] ${isOverlay ? 'px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))]' : 'px-3 py-2.5'}`}>
                 <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                         <div className="truncate text-[13px] font-semibold text-[var(--app-fg)]" title={filePath}>
@@ -443,6 +574,7 @@ export function FilePreviewPanel(props: {
                         Cancel
                     </button>
                     {saveError ? <span className="text-[11px] text-[var(--app-badge-error-text)]">{saveError}</span> : null}
+                    {draftRecovered ? <span className="text-[11px] text-[var(--app-hint)]">Recovered unsaved draft from this browser session</span> : null}
                     {isDirty ? <span className="text-[11px] text-[var(--app-hint)]">Unsaved changes</span> : null}
                 </div>
             ) : panelMode === 'review' && !binary ? (
@@ -461,7 +593,30 @@ export function FilePreviewPanel(props: {
                 </div>
             ) : null}
 
-            <div className="flex-1 overflow-auto">
+            {isEditing && saveConflict ? (
+                <div className="flex flex-wrap items-center gap-2 border-b border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] px-4 py-3 text-[11px] text-[var(--app-badge-error-text)]">
+                    <span className="font-semibold">{getConflictMessage(saveConflict)}</span>
+                    <span className="text-[var(--app-badge-error-text)]/85">Your draft is still intact.</span>
+                    <button
+                        type="button"
+                        onClick={() => void saveFile(saveConflict.currentHash)}
+                        disabled={isSaving}
+                        className="rounded-full bg-[var(--app-button)] px-3 py-1.5 font-semibold text-[var(--app-button-text)] disabled:opacity-50"
+                    >
+                        Overwrite with my draft
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => void discardDraft()}
+                        disabled={isSaving}
+                        className="rounded-full border border-[var(--app-badge-error-border)] px-3 py-1.5 font-semibold text-[var(--app-badge-error-text)] hover:bg-white/40 disabled:opacity-50"
+                    >
+                        Discard draft
+                    </button>
+                </div>
+            ) : null}
+
+            <div className={`flex-1 overflow-auto ${isOverlay ? 'pb-[env(safe-area-inset-bottom)]' : ''}`}>
                 {fileQuery.isLoading ? (
                     <div className="p-4">
                         <div className="rounded-[24px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-4 py-6 text-sm text-[var(--app-hint)]">

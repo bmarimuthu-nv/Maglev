@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { createConfiguration } from '../../configuration'
 import type { Store } from '../../store'
 import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
+import { MemoryRateLimiter } from '../middleware/rateLimit'
 import { createAuthRoutes } from './auth'
 import { signBrokerSessionToken, BROKER_SESSION_HEADER } from '../brokerSession'
 
@@ -33,6 +34,12 @@ function createApp(options?: {
         start: () => Promise<unknown>
         poll: (deviceCode: string) => Promise<unknown>
     } | null
+    rateLimiter?: MemoryRateLimiter
+    rateLimits?: Record<string, {
+        bucket: string
+        max: number
+        windowMs: number
+    }>
 }) {
     const app = new Hono<WebAppEnv>()
     if (options?.useMiddleware) {
@@ -40,7 +47,9 @@ function createApp(options?: {
     }
     app.route('/api', createAuthRoutes(JWT_SECRET, {} as Store, {
         remoteMode: options?.remoteMode,
-        gitHubDeviceAuth: options?.gitHubDeviceAuth as never
+        gitHubDeviceAuth: options?.gitHubDeviceAuth as never,
+        rateLimiter: options?.rateLimiter,
+        rateLimits: options?.rateLimits as never
     }))
     return app
 }
@@ -182,5 +191,69 @@ describe('auth routes', () => {
         expect(response.status).toBe(200)
         expect(typeof body.token).toBe('string')
         expect(decodeJwt(String(body.token)).ns).toBe('hub-devbox-a')
+    })
+
+    it('rate limits repeated access-token auth attempts from the same forwarded client', async () => {
+        const app = createApp({
+            rateLimiter: new MemoryRateLimiter(),
+            rateLimits: {
+                auth: {
+                    bucket: 'auth-test',
+                    max: 2,
+                    windowMs: 60_000
+                }
+            }
+        })
+
+        const requestInit = {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-forwarded-for': '203.0.113.10'
+            },
+            body: JSON.stringify({ accessToken: 'wrong-token' })
+        } satisfies RequestInit
+
+        const first = await app.request('/api/auth', requestInit)
+        const second = await app.request('/api/auth', requestInit)
+        const third = await app.request('/api/auth', requestInit)
+
+        expect(first.status).toBe(401)
+        expect(second.status).toBe(401)
+        expect(third.status).toBe(429)
+        expect(await third.json()).toEqual({ error: 'Rate limit exceeded' })
+    })
+
+    it('keeps auth rate limiting isolated by practical client key', async () => {
+        const app = createApp({
+            rateLimiter: new MemoryRateLimiter(),
+            rateLimits: {
+                auth: {
+                    bucket: 'auth-test',
+                    max: 1,
+                    windowMs: 60_000
+                }
+            }
+        })
+
+        const first = await app.request('/api/auth', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-forwarded-for': '203.0.113.10'
+            },
+            body: JSON.stringify({ accessToken: 'wrong-token' })
+        })
+        const second = await app.request('/api/auth', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-forwarded-for': '203.0.113.11'
+            },
+            body: JSON.stringify({ accessToken: 'wrong-token' })
+        })
+
+        expect(first.status).toBe(401)
+        expect(second.status).toBe(401)
     })
 })

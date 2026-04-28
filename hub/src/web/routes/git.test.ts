@@ -83,4 +83,42 @@ describe('git routes', () => {
             ]
         })
     })
+
+    it('maps structured file conflicts to HTTP 409', async () => {
+        const session = createSession()
+        const app = createApp({
+            resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+            writeSessionFile: async () => ({
+                success: false,
+                error: 'File changed on disk since this preview was loaded',
+                conflict: {
+                    type: 'hash_mismatch' as const,
+                    expectedHash: 'stale-hash',
+                    currentHash: 'fresh-hash',
+                    currentContent: Buffer.from('const value = 1\n', 'utf8').toString('base64')
+                }
+            })
+        })
+
+        const response = await app.request('/api/sessions/session-1/file', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                path: 'src/example.ts',
+                content: Buffer.from('const value = 2\n', 'utf8').toString('base64'),
+                expectedHash: 'stale-hash'
+            })
+        })
+
+        expect(response.status).toBe(409)
+        await expect(response.json()).resolves.toMatchObject({
+            success: false,
+            error: 'File changed on disk since this preview was loaded',
+            conflict: {
+                type: 'hash_mismatch',
+                expectedHash: 'stale-hash',
+                currentHash: 'fresh-hash'
+            }
+        })
+    })
 })

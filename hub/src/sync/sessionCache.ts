@@ -6,14 +6,23 @@ import { EventPublisher } from './eventPublisher'
 
 export class SessionCache {
     private static readonly SESSION_TIMEOUT_MS = 30_000
-    private static readonly DEAD_SESSION_CLEANUP_MS = 60_000
+    private static readonly DEFAULT_STALE_SESSION_ARCHIVE_MS = 24 * 60 * 60 * 1000
+    private static readonly METADATA_UPDATE_MAX_ATTEMPTS = 3
     private readonly sessions: Map<string, Session> = new Map()
     private readonly lastBroadcastAtBySessionId: Map<string, number> = new Map()
+    private readonly staleSessionArchiveMs: number
 
     constructor(
         private readonly store: Store,
-        private readonly publisher: EventPublisher
+        private readonly publisher: EventPublisher,
+        options?: {
+            staleSessionArchiveMs?: number
+        }
     ) {
+        this.staleSessionArchiveMs = Math.max(
+            0,
+            options?.staleSessionArchiveMs ?? SessionCache.DEFAULT_STALE_SESSION_ARCHIVE_MS
+        )
     }
 
     getSessions(): Session[] {
@@ -192,7 +201,48 @@ export class SessionCache {
     }
 
     private shouldRetainInactiveSession(session: Session): boolean {
-        return session.metadata?.flavor === 'shell' && session.metadata?.pinned === true
+        return session.metadata?.flavor === 'shell'
+            && (session.metadata?.pinned === true || session.metadata?.autoRespawn === true)
+    }
+
+    private archiveInactiveSession(sessionId: string, now: number, archiveReason: string): void {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) {
+                return
+            }
+            if (session.metadata?.lifecycleState === 'archived') {
+                return
+            }
+
+            const currentMetadata = session.metadata ?? { path: '', host: '' }
+            const nextMetadata = {
+                ...currentMetadata,
+                lifecycleState: 'archived',
+                lifecycleStateSince: now,
+                archivedBy: 'hub',
+                archiveReason
+            }
+
+            const result = this.store.sessions.updateSessionMetadata(
+                session.id,
+                nextMetadata,
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+
+            if (result.result === 'success') {
+                this.refreshSession(session.id)
+                return
+            }
+
+            if (result.result === 'error') {
+                return
+            }
+
+            this.refreshSession(session.id)
+        }
     }
 
     expireInactive(now: number = Date.now()): void {
@@ -213,7 +263,7 @@ export class SessionCache {
             }
 
             const lastSeenAt = Math.max(session.activeAt, session.updatedAt, session.createdAt)
-            if (now - lastSeenAt <= SessionCache.DEAD_SESSION_CLEANUP_MS) {
+            if (now - lastSeenAt <= this.staleSessionArchiveMs) {
                 continue
             }
 
@@ -221,14 +271,7 @@ export class SessionCache {
                 continue
             }
 
-            const deleted = this.store.sessions.deleteSession(session.id, session.namespace)
-            if (!deleted) {
-                continue
-            }
-
-            this.sessions.delete(session.id)
-            this.lastBroadcastAtBySessionId.delete(session.id)
-            this.publisher.emit({ type: 'session-removed', sessionId: session.id, namespace: session.namespace })
+            this.archiveInactiveSession(session.id, now, 'Inactive session auto-archived')
         }
     }
 
@@ -289,32 +332,15 @@ export class SessionCache {
     async updateSessionMetadataFields(
         sessionId: string,
         mutate: (metadata: NonNullable<Session['metadata']>) => NonNullable<Session['metadata']>
-    ): Promise<void> {
-        const session = this.sessions.get(sessionId)
-        if (!session) {
-            throw new Error('Session not found')
-        }
+    ): Promise<Session> {
+        return this.commitSessionMetadata(sessionId, mutate)
+    }
 
-        const currentMetadata = session.metadata ?? { path: '', host: '' }
-        const newMetadata = mutate(currentMetadata)
-
-        const result = this.store.sessions.updateSessionMetadata(
-            sessionId,
-            newMetadata,
-            session.metadataVersion,
-            session.namespace,
-            { touchUpdatedAt: false }
-        )
-
-        if (result.result === 'error') {
-            throw new Error('Failed to update session metadata')
-        }
-
-        if (result.result === 'version-mismatch') {
-            throw new Error('Session was modified concurrently. Please try again.')
-        }
-
-        this.refreshSession(sessionId)
+    async replaceSessionMetadata(
+        sessionId: string,
+        metadata: NonNullable<Session['metadata']>
+    ): Promise<Session> {
+        return this.commitSessionMetadata(sessionId, () => metadata)
     }
 
     async deleteSession(sessionId: string): Promise<void> {
@@ -336,6 +362,45 @@ export class SessionCache {
         this.lastBroadcastAtBySessionId.delete(sessionId)
 
         this.publisher.emit({ type: 'session-removed', sessionId, namespace: session.namespace })
+    }
+
+    private async commitSessionMetadata(
+        sessionId: string,
+        mutate: (metadata: NonNullable<Session['metadata']>) => NonNullable<Session['metadata']>
+    ): Promise<Session> {
+        for (let attempt = 0; attempt < SessionCache.METADATA_UPDATE_MAX_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) {
+                throw new Error('Session not found')
+            }
+
+            const currentMetadata = session.metadata ?? { path: '', host: '' }
+            const newMetadata = mutate(currentMetadata)
+
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                newMetadata,
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+
+            if (result.result === 'success') {
+                const refreshed = this.refreshSession(sessionId)
+                if (!refreshed) {
+                    throw new Error('Failed to refresh session metadata')
+                }
+                return refreshed
+            }
+
+            if (result.result === 'error') {
+                throw new Error('Failed to update session metadata')
+            }
+
+            this.refreshSession(sessionId)
+        }
+
+        throw new Error('Session was modified concurrently. Please try again.')
     }
 
     async mergeSessions(oldSessionId: string, newSessionId: string, namespace: string): Promise<void> {

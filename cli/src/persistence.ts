@@ -44,6 +44,11 @@ export interface RunnerLocallyPersistedState {
   startTime: string;
   startedWithCliVersion: string;
   startedWithCliMtimeMs?: number;
+  status?: string;
+  acceptingNewSessions?: boolean;
+  activeSpawnCount?: number;
+  restartRequestedAt?: number;
+  restartReason?: string;
   lastHeartbeat?: string;
   runnerLogPath?: string;
 }

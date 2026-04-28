@@ -41,8 +41,17 @@ export default {
   // Sessions page
   'sessions.count': '{n} sessions in {m} projects',
   'sessions.new': 'New Session',
+  'sessions.filteredCount': '{n} shown of {m} sessions in {g} projects',
+  'sessions.manage': 'Manage',
+  'sessions.manage.cleanStopped': 'Clean stopped',
+  'sessions.manage.cleaningStopped': 'Cleaning stopped…',
 
   // Session list
+  'session.filter.active': 'Active',
+  'session.filter.stopped': 'Stopped',
+  'session.filter.archived': 'Archived',
+  'session.filter.searchPlaceholder': 'Search name, branch, path, or startup command',
+  'session.filter.empty': 'No sessions match the current filters.',
   'session.item.path': 'path',
   'session.item.agent': 'agent',
   'session.item.model': 'model',
@@ -67,6 +76,7 @@ export default {
   'session.action.copy': 'Copy',
   'session.action.openFolder': 'Open Folder',
   'session.group.clearAll': 'Clear all',
+  'session.group.cleanup': 'Clean group',
 
   // Dialogs
   'dialog.edit.title': 'Edit Session',
@@ -98,6 +108,14 @@ export default {
   'dialog.clearGroup.description': 'Close and delete all {count} sessions in "{name}"? Active sessions will be disconnected. This action cannot be undone.',
   'dialog.clearGroup.confirm': 'Clear all',
   'dialog.clearGroup.confirming': 'Clearing…',
+  'dialog.cleanupStopped.title': 'Clean Stopped Sessions',
+  'dialog.cleanupStopped.description': 'Delete {deleteCount} stopped sessions and skip {skipCount} retained sessions? Pinned and auto-respawn shells stay untouched.',
+  'dialog.cleanupStopped.confirm': 'Clean stopped',
+  'dialog.cleanupStopped.confirming': 'Cleaning…',
+  'dialog.cleanupGroup.title': 'Clean Group Sessions',
+  'dialog.cleanupGroup.description': 'Archive {archiveCount} active and delete {deleteCount} stopped sessions in "{name}". {skipCount} retained sessions will be skipped.',
+  'dialog.cleanupGroup.confirm': 'Clean group',
+  'dialog.cleanupGroup.confirming': 'Cleaning…',
   'dialog.error.default': 'Operation failed. Please try again.',
 
   // Common buttons

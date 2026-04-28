@@ -18,6 +18,7 @@ import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createPushRoutes } from './routes/push'
 import { createHubRoutes } from './routes/hub'
+import { createMetricsRoutes } from './routes/metrics'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer } from 'bun'
@@ -29,6 +30,7 @@ import type { Store } from '../store'
 import type { GitHubDeviceAuthService } from '../github/deviceAuth'
 import { BROKER_SESSION_HEADER } from './brokerSession'
 import { loadHubLaunchFolders } from '../hubConfig'
+import { createHubHealthSnapshot, logObservabilityEvent } from './observability'
 
 function findWebappDistDir(): { distDir: string; indexHtmlPath: string } {
     const candidates = [
@@ -89,6 +91,7 @@ function createWebApp(options: {
     embeddedAssetMap: Map<string, EmbeddedWebAsset> | null
     remoteMode?: boolean
     gitHubDeviceAuth?: GitHubDeviceAuthService | null
+    startedAtMs: number
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -113,7 +116,25 @@ function createWebApp(options: {
     }
 
     // Health check endpoint (no auth required)
-    app.get('/health', (c) => c.json({ status: 'ok', protocolVersion: PROTOCOL_VERSION }))
+    app.get('/health', (c) => {
+        try {
+            return c.json(createHubHealthSnapshot({
+                syncEngine: options.getSyncEngine(),
+                sseManager: options.getSseManager(),
+                remoteMode: Boolean(options.remoteMode),
+                startedAtMs: options.startedAtMs
+            }))
+        } catch (error) {
+            logObservabilityEvent('error', 'health-request-failed', {
+                path: c.req.path,
+                message: error instanceof Error ? error.message : 'unknown error'
+            })
+            return c.json({
+                status: 'error',
+                protocolVersion: PROTOCOL_VERSION
+            }, 500)
+        }
+    })
 
     const corsOrigins = options.corsOrigins ?? configuration.corsOrigins
     const corsOriginOption = corsOrigins.includes('*') ? '*' : corsOrigins
@@ -142,6 +163,7 @@ function createWebApp(options: {
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createGitRoutes(options.getSyncEngine))
     app.route('/api', createHubRoutes(options.getSyncEngine, loadHubLaunchFolders))
+    app.route('/api', createMetricsRoutes(options.getSyncEngine, options.getSseManager, options.startedAtMs))
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
     if (options.embeddedAssetMap) {
         const embeddedAssetMap = options.embeddedAssetMap
@@ -240,6 +262,7 @@ export async function startWebServer(options: {
 }): Promise<BunServer<WebSocketData>> {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
+    const startedAtMs = Date.now()
     const app = createWebApp({
         getSyncEngine: options.getSyncEngine,
         getSseManager: options.getSseManager,
@@ -250,7 +273,8 @@ export async function startWebServer(options: {
         corsOrigins: options.corsOrigins,
         embeddedAssetMap,
         remoteMode: options.remoteMode,
-        gitHubDeviceAuth: options.gitHubDeviceAuth
+        gitHubDeviceAuth: options.gitHubDeviceAuth,
+        startedAtMs
     })
 
     const socketHandler = options.socketEngine.handler()

@@ -19,6 +19,10 @@ export type SessionMetadataSummary = {
     host: string
     branch?: string
     childRole?: 'review-terminal' | 'split-terminal'
+    lifecycleState?: string
+    lifecycleStateSince?: number
+    archivedBy?: string
+    archiveReason?: string
     version?: string
     name?: string
     os?: string
@@ -41,6 +45,10 @@ export type RunnerState = {
     pid?: number
     httpPort?: number
     startedAt?: number
+    acceptingNewSessions?: boolean
+    activeSpawnCount?: number
+    restartRequestedAt?: number
+    restartReason?: string
     shutdownRequestedAt?: number
     shutdownSource?: string
     lastSpawnError?: {
@@ -254,10 +262,18 @@ export type FileReviewThreadsResponse = {
     error?: string
 }
 
+export type WriteFileConflict = {
+    type: 'hash_mismatch' | 'missing_file' | 'already_exists'
+    expectedHash: string | null
+    currentHash: string | null
+    currentContent: string | null
+}
+
 export type WriteFileResponse = {
     success: boolean
     hash?: string
     error?: string
+    conflict?: WriteFileConflict
 }
 
 export type UploadFileResponse = {

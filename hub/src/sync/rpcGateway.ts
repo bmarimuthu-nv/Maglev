@@ -20,6 +20,12 @@ export type RpcWriteFileResponse = {
     success: boolean
     hash?: string
     error?: string
+    conflict?: {
+        type: 'hash_mismatch' | 'missing_file' | 'already_exists'
+        expectedHash: string | null
+        currentHash: string | null
+        currentContent: string | null
+    }
 }
 
 export type RpcUploadFileResponse = {

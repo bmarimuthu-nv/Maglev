@@ -1,4 +1,4 @@
-import { TerminalOpenPayloadSchema } from '@maglev/protocol'
+import { TerminalOpenPayloadSchema, type TerminalStatusPayload } from '@maglev/protocol'
 import { z } from 'zod'
 import type { TerminalRegistry, TerminalRegistryEntry } from '../terminalRegistry'
 import type { SocketServer, SocketWithData } from '../socketTypes'
@@ -38,6 +38,21 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
 
     const emitTerminalError = (terminalId: string, message: string) => {
         socket.emit('terminal:error', { terminalId, message })
+    }
+
+    const emitTerminalStatus = (
+        targetSocket: SocketWithData,
+        entry: TerminalRegistryEntry,
+        owner: TerminalStatusPayload['owner'],
+        canTakeOver: boolean
+    ) => {
+        targetSocket.emit('terminal:status', {
+            sessionId: entry.sessionId,
+            terminalId: entry.terminalId,
+            owner,
+            attachedAt: entry.attachedAt,
+            canTakeOver
+        } satisfies TerminalStatusPayload)
     }
 
     const resolveEntryForSocket = (terminalId: string): TerminalRegistryEntry | null => {
@@ -107,6 +122,7 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
         const existing = terminalRegistry.get(terminalId)
         if (existing) {
             if (existing.socketId && existing.socketId !== socket.id && !force) {
+                emitTerminalStatus(socket, existing, 'other', true)
                 emitTerminalError(terminalId, TERMINAL_TAKEOVER_MESSAGE)
                 return
             }
@@ -118,10 +134,14 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
                 return
             }
             if (previousSocketId) {
-                io.of('/terminal').sockets.get(previousSocketId)?.emit('terminal:error', {
-                    terminalId,
-                    message: TERMINAL_MOVED_MESSAGE
-                })
+                const previousSocket = io.of('/terminal').sockets.get(previousSocketId)
+                if (previousSocket) {
+                    emitTerminalStatus(previousSocket as SocketWithData, reattached, 'other', true)
+                    previousSocket.emit('terminal:error', {
+                        terminalId,
+                        message: TERMINAL_MOVED_MESSAGE
+                    })
+                }
             }
             const cliSocket = cliNamespace.sockets.get(cliSocketId)
             if (!cliSocket) {
@@ -129,6 +149,7 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
                 emitTerminalError(terminalId, 'CLI is not connected for this session.')
                 return
             }
+            emitTerminalStatus(socket, reattached, 'self', false)
             cliSocket.emit('terminal:open', {
                 sessionId,
                 terminalId,
@@ -162,6 +183,7 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
             return
         }
 
+        emitTerminalStatus(socket, entry, 'self', false)
         cliSocket.emit('terminal:open', {
             sessionId,
             terminalId,

@@ -3,6 +3,7 @@ export type TerminalRegistryEntry = {
     sessionId: string
     socketId: string | null
     cliSocketId: string
+    attachedAt: number | null
     idleTimer: ReturnType<typeof setTimeout> | null
 }
 
@@ -34,6 +35,7 @@ export class TerminalRegistry {
             sessionId,
             socketId,
             cliSocketId,
+            attachedAt: Date.now(),
             idleTimer: null
         }
 
@@ -70,6 +72,7 @@ export class TerminalRegistry {
             this.removeFromIndex(this.terminalsBySocket, entry.socketId, terminalId)
         }
         entry.socketId = socketId
+        entry.attachedAt = Date.now()
         this.addToIndex(this.terminalsBySocket, socketId, terminalId)
         this.scheduleIdle(entry)
         return entry
@@ -114,6 +117,7 @@ export class TerminalRegistry {
                 continue
             }
             entry.socketId = null
+            entry.attachedAt = null
             entries.push(entry)
         }
         this.terminalsBySocket.delete(socketId)

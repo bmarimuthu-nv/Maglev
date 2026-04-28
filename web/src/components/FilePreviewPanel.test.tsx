@@ -68,7 +68,11 @@ function createApi(overrides?: Partial<{
     }
 }
 
-function renderPreview(api: ReturnType<typeof createApi>, filePath: string) {
+function renderPreview(
+    api: ReturnType<typeof createApi>,
+    filePath: string,
+    presentation: 'sidebar' | 'overlay' = 'sidebar'
+) {
     const queryClient = new QueryClient({
         defaultOptions: {
             queries: {
@@ -93,6 +97,7 @@ function renderPreview(api: ReturnType<typeof createApi>, filePath: string) {
                     filePath={filePath}
                     api={api as never}
                     onClose={vi.fn()}
+                    presentation={presentation}
                 />
             </AppContextProvider>
         </QueryClientProvider>
@@ -123,6 +128,7 @@ describe('FilePreviewPanel', () => {
     afterEach(() => {
         vi.clearAllMocks()
         vi.unstubAllGlobals()
+        window.sessionStorage.clear()
         cleanup()
     })
 
@@ -153,7 +159,7 @@ describe('FilePreviewPanel', () => {
 
         renderPreview(api, '/repo/src/example.ts')
 
-        expect(await screen.findByText('example.ts')).toBeInTheDocument()
+        expect(await screen.findByText('/repo/src/example.ts')).toBeInTheDocument()
         expect(await screen.findByPlaceholderText('Search in file')).toBeInTheDocument()
         expect(screen.getByText('2 lines')).toBeInTheDocument()
 
@@ -207,6 +213,149 @@ describe('FilePreviewPanel', () => {
 
         await waitFor(() => {
             expect(screen.queryByTestId('markdown-renderer')).not.toBeInTheDocument()
+        })
+    })
+
+    it('keeps the draft and shows overwrite or discard actions on save conflict', async () => {
+        const api = createApi({
+            readSessionFile: vi.fn().mockResolvedValue({
+                success: true,
+                content: encodeBase64('const value = 1\n'),
+                hash: 'file-hash'
+            }),
+            getSessionFileReviewThreads: vi.fn().mockResolvedValue({
+                success: true,
+                threads: []
+            }),
+            writeSessionFile: vi.fn()
+                .mockResolvedValueOnce({
+                    success: false,
+                    error: 'File changed on disk since this preview was loaded',
+                    conflict: {
+                        type: 'hash_mismatch',
+                        expectedHash: 'file-hash',
+                        currentHash: 'fresh-hash',
+                        currentContent: encodeBase64('const value = 9\n')
+                    }
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    hash: 'saved-hash'
+                })
+        })
+
+        renderPreview(api, '/repo/src/example.ts')
+
+        expect(await screen.findByText('/repo/src/example.ts')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+
+        const editor = screen.getByRole('textbox')
+        fireEvent.change(editor, { target: { value: 'const value = 2\n' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+        expect(await screen.findByText('This file changed on disk after you opened it.')).toBeInTheDocument()
+        expect(screen.getByText('Your draft is still intact.')).toBeInTheDocument()
+        expect(api.writeSessionFile).toHaveBeenNthCalledWith(
+            1,
+            'session-1',
+            '/repo/src/example.ts',
+            encodeBase64('const value = 2\n'),
+            'file-hash'
+        )
+        expect(screen.getByRole('textbox')).toHaveValue('const value = 2\n')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Overwrite with my draft' }))
+
+        await waitFor(() => {
+            expect(api.writeSessionFile).toHaveBeenNthCalledWith(
+                2,
+                'session-1',
+                '/repo/src/example.ts',
+                encodeBase64('const value = 2\n'),
+                'fresh-hash'
+            )
+        })
+    })
+
+    it('restores an unsaved draft from sessionStorage for the same session and file', async () => {
+        window.sessionStorage.setItem(
+            'maglev:file-preview-draft:test-scope:session-1:/repo/src/example.ts',
+            JSON.stringify({
+                draft: 'const recovered = true\n',
+                updatedAt: Date.now()
+            })
+        )
+
+        const api = createApi({
+            readSessionFile: vi.fn().mockResolvedValue({
+                success: true,
+                content: encodeBase64('const value = 1\n'),
+                hash: 'file-hash'
+            }),
+            getSessionFileReviewThreads: vi.fn().mockResolvedValue({
+                success: true,
+                threads: []
+            })
+        })
+
+        renderPreview(api, '/repo/src/example.ts')
+
+        expect(await screen.findByText('Recovered unsaved draft from this browser session')).toBeInTheDocument()
+        expect(screen.getByRole('textbox')).toHaveValue('const recovered = true\n')
+    })
+
+    it('keeps conflict recovery actions working in overlay presentation', async () => {
+        const api = createApi({
+            readSessionFile: vi.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    content: encodeBase64('const value = 1\n'),
+                    hash: 'old-hash'
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    content: encodeBase64('const value = 3\n'),
+                    hash: 'fresh-hash'
+                }),
+            getSessionFileReviewThreads: vi.fn().mockResolvedValue({
+                success: true,
+                threads: []
+            }),
+            writeSessionFile: vi.fn()
+                .mockResolvedValueOnce({
+                    success: false,
+                    conflict: {
+                        type: 'hash_mismatch',
+                        currentHash: 'fresh-hash'
+                    }
+                })
+                .mockResolvedValueOnce({
+                    success: true
+                })
+        })
+
+        renderPreview(api, '/repo/src/example.ts', 'overlay')
+
+        expect(await screen.findByText('/repo/src/example.ts')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+        fireEvent.change(screen.getByRole('textbox'), {
+            target: { value: 'const value = 2\n' }
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+        expect(await screen.findByText('This file changed on disk after you opened it.')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Overwrite with my draft' }))
+
+        await waitFor(() => {
+            expect(api.writeSessionFile).toHaveBeenNthCalledWith(
+                2,
+                'session-1',
+                '/repo/src/example.ts',
+                encodeBase64('const value = 2\n'),
+                'fresh-hash'
+            )
         })
     })
 })

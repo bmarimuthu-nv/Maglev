@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { buildCloneRequest, getGroupBranchHint, getSessionRows, getSessionSubgroups, isVisibleInSessionList, reconcileOrder } from './SessionList'
+import { buildCloneRequest, filterSessionSummaries, getGroupBranchHint, getSessionLifecycleStatus, getSessionRows, getSessionSubgroups, isVisibleInSessionList, matchesSessionSearch, reconcileOrder } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -211,7 +211,7 @@ describe('getSessionSubgroups', () => {
 
         const subgroups = getSessionSubgroups('/repo', rows)
 
-        expect(subgroups.map((subgroup) => subgroup.label)).toEqual(['', 'feature/a', 'feature/b'])
+        expect(subgroups.map((subgroup) => subgroup.label)).toEqual(['default', 'feature/a', 'feature/b'])
         expect(subgroups[0]?.rows.map((row) => row.sessions[0].id)).toEqual(['folder-session'])
         expect(subgroups[1]?.rows.map((row) => row.sessions[0].id)).toEqual(['worktree-a'])
         expect(subgroups[2]?.rows.map((row) => row.sessions[0].id)).toEqual(['worktree-b'])
@@ -226,11 +226,11 @@ describe('getSessionSubgroups', () => {
         const subgroups = getSessionSubgroups('/repo', rows)
 
         expect(subgroups).toHaveLength(1)
-        expect(subgroups[0]?.label).toBe('')
+        expect(subgroups[0]?.label).toBe('default')
         expect(subgroups[0]?.rows.map((row) => row.sessions[0].id)).toEqual(['a', 'b'])
     })
 
-    it('does not show plain git branch text in the folder subgroup label when no worktree metadata exists', () => {
+    it('shows plain git branch text in the subgroup label when no worktree metadata exists', () => {
         const rows = getSessionRows([
             makeSession({ id: 'a', metadata: { path: '/repo', branch: 'feature/plain-repo' } }),
         ])
@@ -238,7 +238,7 @@ describe('getSessionSubgroups', () => {
         const subgroups = getSessionSubgroups('/repo', rows)
 
         expect(subgroups).toHaveLength(1)
-        expect(subgroups[0]?.label).toBe('')
+        expect(subgroups[0]?.label).toBe('feature/plain-repo')
     })
 })
 
@@ -333,5 +333,62 @@ describe('buildCloneRequest', () => {
             autoRespawn: undefined,
             startupCommand: 'claude'
         })
+    })
+})
+
+describe('session lifecycle filtering', () => {
+    it('classifies archived inactive sessions separately from stopped sessions', () => {
+        expect(getSessionLifecycleStatus(makeSession({
+            id: 'active',
+            active: true,
+            metadata: { path: '/repo', lifecycleState: 'archived' }
+        }))).toBe('active')
+
+        expect(getSessionLifecycleStatus(makeSession({
+            id: 'archived',
+            active: false,
+            metadata: { path: '/repo', lifecycleState: 'archived' }
+        }))).toBe('archived')
+
+        expect(getSessionLifecycleStatus(makeSession({
+            id: 'stopped',
+            active: false,
+            metadata: { path: '/repo' }
+        }))).toBe('stopped')
+    })
+
+    it('searches name, branch, path, and startup command', () => {
+        const session = makeSession({
+            id: 'searchable',
+            metadata: {
+                path: '/repo/service-a',
+                name: 'Worker shell',
+                branch: 'feature/session-filters',
+                startupCommand: 'codex --profile fast'
+            }
+        })
+
+        expect(matchesSessionSearch(session, 'worker')).toBe(true)
+        expect(matchesSessionSearch(session, 'session-filters')).toBe(true)
+        expect(matchesSessionSearch(session, 'service-a')).toBe(true)
+        expect(matchesSessionSearch(session, 'profile fast')).toBe(true)
+        expect(matchesSessionSearch(session, 'does-not-match')).toBe(false)
+    })
+
+    it('filters archived sessions independently of stopped sessions', () => {
+        const sessions = [
+            makeSession({ id: 'active', active: true, metadata: { path: '/repo' } }),
+            makeSession({ id: 'stopped', active: false, metadata: { path: '/repo' } }),
+            makeSession({ id: 'archived', active: false, metadata: { path: '/repo', lifecycleState: 'archived' } }),
+        ]
+
+        const filtered = filterSessionSummaries(sessions, {
+            active: true,
+            stopped: false,
+            archived: true,
+            search: ''
+        })
+
+        expect(filtered.map((session) => session.id)).toEqual(['active', 'archived'])
     })
 })

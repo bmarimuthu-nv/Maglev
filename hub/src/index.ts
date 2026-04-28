@@ -229,7 +229,8 @@ async function main() {
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager, {
         boundMachineId: config.boundMachineId,
         terminalStateCache: socketServer.terminalStateCache,
-        terminalSupervisionHumanOverrideMs: config.terminalSupervisionHumanOverrideMs
+        terminalSupervisionHumanOverrideMs: config.terminalSupervisionHumanOverrideMs,
+        staleSessionArchiveMs: config.staleSessionArchiveMs
     })
 
     const notificationChannels: NotificationChannel[] = [

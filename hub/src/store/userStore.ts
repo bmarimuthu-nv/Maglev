@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 
+import { durableWrite } from './durableWrite'
 import type { StoredUser } from './types'
 import { addUser, getUser, getUsersByPlatform, getUsersByPlatformAndNamespace, removeUser } from './users'
 
@@ -23,10 +24,10 @@ export class UserStore {
     }
 
     addUser(platform: string, platformUserId: string, namespace: string): StoredUser {
-        return addUser(this.db, platform, platformUserId, namespace)
+        return durableWrite(this.db, () => addUser(this.db, platform, platformUserId, namespace))
     }
 
     removeUser(platform: string, platformUserId: string): boolean {
-        return removeUser(this.db, platform, platformUserId)
+        return durableWrite(this.db, () => removeUser(this.db, platform, platformUserId))
     }
 }

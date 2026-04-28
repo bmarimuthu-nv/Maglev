@@ -101,6 +101,8 @@ export class Store {
         const db = new Database(this.dbPath, { create: true, readwrite: true, strict: true })
         this.db = db
         this.db.exec('PRAGMA journal_mode = WAL')
+        // Most hub writes are ephemeral cache state, so NORMAL keeps the hot path cheap.
+        // Critical record writes (push subscriptions, user bindings, terminal pairs) opt into FULL per call.
         this.db.exec('PRAGMA synchronous = NORMAL')
         this.db.exec('PRAGMA foreign_keys = ON')
         this.db.exec('PRAGMA busy_timeout = 5000')

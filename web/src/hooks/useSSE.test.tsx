@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { ApiError } from '@/api/client'
 import { useSSE } from './useSSE'
 
 class MockEventSource {
@@ -27,12 +28,15 @@ class MockEventSource {
 
 function createWrapper() {
     const queryClient = new QueryClient()
-    return function Wrapper(props: { children: ReactNode }) {
-        return (
-            <QueryClientProvider client={queryClient}>
-                {props.children}
-            </QueryClientProvider>
-        )
+    return {
+        queryClient,
+        Wrapper(props: { children: ReactNode }) {
+            return (
+                <QueryClientProvider client={queryClient}>
+                    {props.children}
+                </QueryClientProvider>
+            )
+        }
     }
 }
 
@@ -41,22 +45,22 @@ describe('useSSE', () => {
 
     beforeEach(() => {
         MockEventSource.instances = []
-        vi.stubGlobal('EventSource', MockEventSource)
+        ;(globalThis as typeof globalThis & { EventSource: typeof EventSource }).EventSource = MockEventSource as unknown as typeof EventSource
     })
 
     afterEach(() => {
-        vi.unstubAllGlobals()
         globalThis.EventSource = originalEventSource
+        vi.useRealTimers()
     })
 
     it('ignores stale disconnects from a torn down subscription', () => {
         const onConnect = vi.fn()
         const onDisconnect = vi.fn()
-        const wrapper = createWrapper()
-        const initialProps: { all?: boolean; sessionId?: string } = { all: true }
+        const { Wrapper } = createWrapper()
+        const initialProps: { all?: boolean; sessionIds?: string[] } = { all: true }
 
         const { rerender } = renderHook(
-            (subscription: { all?: boolean; sessionId?: string }) => useSSE({
+            (subscription: { all?: boolean; sessionIds?: string[] }) => useSSE({
                 enabled: true,
                 token: 'token',
                 baseUrl: 'http://localhost:3000',
@@ -67,7 +71,7 @@ describe('useSSE', () => {
             }),
             {
                 initialProps,
-                wrapper
+                wrapper: Wrapper
             }
         )
 
@@ -76,7 +80,7 @@ describe('useSSE', () => {
         first?.onopen?.(new Event('open'))
         expect(onConnect).toHaveBeenCalledTimes(1)
 
-        rerender({ sessionId: 'session-1' })
+        rerender({ sessionIds: ['session-1'] })
 
         const second = MockEventSource.instances[1]
         expect(second).toBeDefined()
@@ -89,17 +93,17 @@ describe('useSSE', () => {
     })
 
     it('does not leak the page query string into the events subscription URL', () => {
-        const wrapper = createWrapper()
+        const { Wrapper } = createWrapper()
 
         renderHook(
             () => useSSE({
                 enabled: true,
                 token: 'token',
                 baseUrl: 'http://localhost:3000/app?tab=directories&path=abc',
-                subscription: { sessionId: 'session-1' },
+                subscription: { sessionIds: ['session-1'] },
                 onEvent: vi.fn()
             }),
-            { wrapper }
+            { wrapper: Wrapper }
         )
 
         const first = MockEventSource.instances[0]
@@ -109,5 +113,70 @@ describe('useSSE', () => {
         expect(first?.url).not.toContain('tab=directories')
         expect(first?.url).not.toContain('path=abc')
         expect(first?.url).not.toContain('session-1?')
+    })
+
+    it('invalidates subscribed queries when an existing event source reconnects after disconnect', () => {
+        const { Wrapper, queryClient } = createWrapper()
+        const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue()
+
+        renderHook(
+            () => useSSE({
+                enabled: true,
+                token: 'token',
+                baseUrl: 'http://localhost:3000',
+                subscription: {
+                    sessionIds: ['session-1'],
+                    machineId: 'machine-1'
+                },
+                onEvent: vi.fn(),
+                onDisconnect: vi.fn()
+            }),
+            { wrapper: Wrapper }
+        )
+
+        const eventSource = MockEventSource.instances[0]
+        expect(eventSource).toBeDefined()
+
+        eventSource?.onopen?.(new Event('open'))
+        invalidateQueries.mockClear()
+
+        eventSource?.onerror?.(new Event('error'))
+        eventSource?.onopen?.(new Event('open'))
+
+        expect(invalidateQueries).toHaveBeenCalledWith({
+            queryKey: ['sessions', 'http://localhost:3000']
+        })
+        expect(invalidateQueries).toHaveBeenCalledWith({
+            queryKey: ['session', 'http://localhost:3000', 'session-1']
+        })
+        expect(invalidateQueries).toHaveBeenCalledWith({
+            queryKey: ['hub-config', 'http://localhost:3000']
+        })
+    })
+
+    it('does not fall back to raw token auth when ticket creation is rate limited', () => {
+        vi.useFakeTimers()
+        const { Wrapper } = createWrapper()
+
+        renderHook(
+            () => useSSE({
+                enabled: true,
+                token: 'token',
+                baseUrl: 'http://localhost:3000',
+                api: {
+                    createEventsTicket: async () => {
+                        throw new ApiError('rate limited', 429)
+                    }
+                } as never,
+                onEvent: vi.fn(),
+                onError: vi.fn()
+            }),
+            { wrapper: Wrapper }
+        )
+
+        expect(MockEventSource.instances).toHaveLength(0)
+        vi.runOnlyPendingTimers()
+        expect(MockEventSource.instances).toHaveLength(0)
+        vi.useRealTimers()
     })
 })
