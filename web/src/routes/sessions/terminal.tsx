@@ -2213,14 +2213,14 @@ export default function TerminalPage() {
                         {notesError ? (
                             <div className="text-xs text-red-500">{notesError}</div>
                         ) : null}
-                        <button
+                        <Button
                             type="button"
-                            className="inline-flex items-center justify-center rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="w-full"
                             disabled={notesSetupSaving}
                             onClick={() => void handleNotesSetup()}
                         >
                             {notesSetupSaving ? 'Creating…' : 'Create notes'}
-                        </button>
+                        </Button>
                     </div>
                 </DialogContent>
             </Dialog>
