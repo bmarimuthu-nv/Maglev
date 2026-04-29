@@ -24,7 +24,7 @@ import { SyncingBanner } from '@/components/SyncingBanner'
 import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
-import { ToastProvider, useToast } from '@/lib/toast-context'
+import { ToastProvider, useToastActions } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
 
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
@@ -361,7 +361,7 @@ function AuthenticatedAppShell(props: {
     onSseDisconnect: (reason: string) => void
 }) {
     const pathname = useLocation({ select: (location) => location.pathname })
-    const { addToast } = useToast()
+    const { addToast } = useToastActions()
     const { sessions, isLoading: sessionsLoading } = useSessions(props.api)
 
     const handleSseEvent = useCallback(() => {}, [])

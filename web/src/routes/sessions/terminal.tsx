@@ -671,14 +671,10 @@ export default function TerminalPage() {
 
     const errorMessage = terminalState.status === 'error' ? terminalState.error : null
     const canTakeOver = Boolean(attachment?.canTakeOver)
-    const attachedHere = attachment?.owner === 'self'
     const attachedElsewhere = attachment?.owner === 'other'
     const attachmentSinceLabel = formatAttachmentSince(attachment?.attachedAt ?? null)
     const takeoverStatusMessage = attachedElsewhere
         ? `Another browser has this terminal${attachmentSinceLabel ? ` since ${attachmentSinceLabel}` : ''}.`
-        : null
-    const attachedHereMessage = attachedHere
-        ? `Attached here${attachmentSinceLabel ? ` since ${attachmentSinceLabel}` : ''}.`
         : null
     const takeoverActionLabel = errorMessage === TERMINAL_MOVED_MESSAGE ? 'Reclaim terminal' : 'Take over here'
 
@@ -1758,14 +1754,6 @@ export default function TerminalPage() {
                 </div>
             </div>
 
-            {session.active ? null : (
-                <div className="px-3 pt-3">
-                    <div className="w-full rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
-                        Session is inactive. Terminal is unavailable.
-                    </div>
-                </div>
-            )}
-
             {isRespawningPinnedShell ? (
                 <div className="px-3 pt-3">
                     <div className="w-full rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
@@ -1778,14 +1766,6 @@ export default function TerminalPage() {
                 <div className="px-3 pt-3">
                     <div className="w-full rounded-md border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-sm text-[var(--app-badge-error-text)]">
                         {pinnedShellRespawnError}
-                    </div>
-                </div>
-            ) : null}
-
-            {attachedHereMessage && terminalState.status === 'connected' ? (
-                <div className="w-full px-3 pt-3">
-                    <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
-                        {attachedHereMessage}
                     </div>
                 </div>
             ) : null}
@@ -1840,7 +1820,7 @@ export default function TerminalPage() {
                 <div className="flex-1 min-w-0 overflow-hidden">
                     <div className="h-full w-full p-3">
                         <div
-                            className={`h-full w-full overflow-hidden rounded-xl border bg-[var(--app-bg)] transition-[border-color,box-shadow] duration-150 ${
+                            className={`relative h-full w-full overflow-hidden rounded-xl border bg-[var(--app-bg)] transition-[border-color,box-shadow] duration-150 ${
                                 splitSessionId
                                     ? mainTerminalFocused
                                         ? 'border-[var(--app-link)] shadow-[0_0_0_1px_var(--app-link),0_12px_32px_rgba(37,99,235,0.10)]'
@@ -1860,6 +1840,16 @@ export default function TerminalPage() {
                                 className="h-full w-full"
                                 suppressFocus={keyboardVisible}
                             />
+                            {session.active ? null : (
+                                <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex justify-center">
+                                    <div
+                                        role="status"
+                                        className="max-w-md rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)]/95 px-3 py-1.5 text-xs font-medium text-[var(--app-hint)] shadow-[var(--app-panel-shadow)] backdrop-blur"
+                                    >
+                                        Session is inactive. Terminal is unavailable.
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

@@ -390,7 +390,7 @@ describe('TerminalPage terminal takeover status', () => {
         cleanup()
     })
 
-    it('shows when this browser owns the terminal and since when', () => {
+    it('does not show an informational banner when this browser owns the terminal', () => {
         mockTerminalAttachment = {
             owner: 'self',
             attachedAt: Date.UTC(2026, 3, 28, 20, 30, 0),
@@ -399,7 +399,7 @@ describe('TerminalPage terminal takeover status', () => {
 
         renderWithProviders()
 
-        expect(screen.getByText(/Attached here since/i)).toBeInTheDocument()
+        expect(screen.queryByText(/Attached here since/i)).not.toBeInTheDocument()
     })
 
     it('shows reclaim UI when another browser owns the terminal', () => {

@@ -4,7 +4,7 @@ import type { ApiClient } from '@/api/client'
 import { useAppContext } from '@/lib/app-context'
 import { queryKeys } from '@/lib/query-keys'
 import { cleanupSessionScopedStorage } from '@/lib/storage-session'
-import { useToast } from '@/lib/toast-context'
+import { useToastActions } from '@/lib/toast-context'
 
 export type SessionCleanupPlan = {
     archive: SessionSummary[]
@@ -70,7 +70,7 @@ export function useCloseSessionsBatch(api: ApiClient | null): {
 } {
     const { scopeKey, baseUrl } = useAppContext()
     const queryClient = useQueryClient()
-    const { addToast } = useToast()
+    const { addToast } = useToastActions()
 
     const mutation = useMutation({
         mutationFn: async (target: SessionCleanupTarget): Promise<SessionCleanupResult> => {

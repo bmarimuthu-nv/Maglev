@@ -393,6 +393,7 @@ type ReviewFileCardProps = {
 function ReviewFileCard(props: ReviewFileCardProps) {
     const hunks = useMemo(() => groupDiffHunks(props.file.lines), [props.file.lines])
     const [pageIndex, setPageIndex] = useState(0)
+    const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
     const totalRenderableLines = useMemo(
         () => hunks.reduce((count, hunk) => count + hunk.lines.length, 0),
         [hunks]
@@ -436,6 +437,31 @@ function ReviewFileCard(props: ReviewFileCardProps) {
     useEffect(() => {
         setPageIndex(0)
     }, [props.file.filePath, paged])
+
+    const focusComposerTextarea = useCallback(() => {
+        const focus = () => {
+            const textarea = composerTextareaRef.current
+            if (!textarea) {
+                return
+            }
+            textarea.focus()
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+        }
+
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(focus)
+            return
+        }
+
+        focus()
+    }, [])
+
+    useEffect(() => {
+        if (!props.composerAnchorKey) {
+            return
+        }
+        focusComposerTextarea()
+    }, [focusComposerTextarea, props.composerAnchorKey])
 
     return (
         <div className={`overflow-hidden rounded-[22px] border bg-[var(--code-bg)] shadow-[0_18px_44px_-34px_rgba(22,14,8,0.42)] ${
@@ -542,14 +568,24 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                             : highlighted
                                                 ? 'bg-[var(--code-line-selected)]'
                                                 : 'bg-[var(--code-bg)]'
+                                    const lineSurfaceClass = line.kind === 'context' && highlighted
+                                        ? 'bg-[var(--code-line-selected)]'
+                                        : diffSurfaceClass
                                     const rowSelectionClass = highlighted
                                         ? 'shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--review-accent)_38%,transparent)]'
                                         : ''
+                                    const rowInteractionClass = highlighted
+                                        ? rowSelectionClass
+                                        : line.kind === 'context'
+                                            ? 'hover:bg-[var(--code-line-hover)]'
+                                            : ''
 
                                     return (
                                         <div key={`${props.file.filePath}-${hunkIndex}-${lineIndex}`} className={highlighted ? 'border-l-2 border-l-[var(--review-accent)]/60' : ''}>
                                             <div className={`grid grid-cols-[28px_52px_52px_18px_minmax(0,1fr)] items-start font-mono text-[12.5px] font-normal leading-[1.6] antialiased ${
-                                                highlighted ? rowSelectionClass : 'hover:bg-[var(--code-line-hover)]'
+                                                lineSurfaceClass
+                                            } ${
+                                                rowInteractionClass
                                             }`}>
                                                 <button
                                                     type="button"
@@ -557,6 +593,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                     onClick={() => {
                                                         if (anchorKey) {
                                                             props.setComposerAnchorKey(anchorKey)
+                                                            focusComposerTextarea()
                                                         }
                                                     }}
                                                     className={`mx-auto mt-1.5 h-5 w-5 rounded-full border text-[10px] transition-colors disabled:opacity-30 ${
@@ -567,13 +604,13 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                 >
                                                     +
                                                 </button>
-                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${line.kind === 'context' && highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass}`}>
+                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${lineSurfaceClass}`}>
                                                     {'oldLine' in line ? line.oldLine : ''}
                                                 </div>
-                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${line.kind === 'context' && highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass}`}>
+                                                <div className={`border-r border-[var(--code-border)] px-2 py-1.5 text-right tabular-nums text-[var(--app-hint)] ${lineSurfaceClass}`}>
                                                     {'newLine' in line ? line.newLine : ''}
                                                 </div>
-                                                <div className={`px-1 py-1.5 text-center select-none ${line.kind === 'context' && highlighted ? 'bg-[var(--code-line-selected)]' : diffSurfaceClass} ${
+                                                <div className={`px-1 py-1.5 text-center select-none ${lineSurfaceClass} ${
                                                     line.kind === 'add'
                                                         ? 'text-[var(--app-diff-added-text)]'
                                                         : line.kind === 'delete'
@@ -593,6 +630,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                             {showComposer && anchor ? (
                                                 <div className="border-t border-[var(--code-border)] bg-[var(--app-surface-raised)] px-4 py-3">
                                                     <textarea
+                                                        ref={composerTextareaRef}
                                                         value={props.composerText}
                                                         onChange={(event) => props.setComposerText(event.target.value)}
                                                         placeholder="Add review comment"
