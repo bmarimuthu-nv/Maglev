@@ -353,6 +353,7 @@ export default function FilesPage() {
     const explorerHistoryRef = useRef<ExplorerHistoryEntry[]>([])
     const [railView, setRailView] = useState<ExplorerRailView>('files')
     const [searchQuery, setSearchQuery] = useState('')
+    const [submittedSearchQuery, setSubmittedSearchQuery] = useState('')
     const [recentPaths, setRecentPaths] = useState<string[]>([])
     const [openTabs, setOpenTabs] = useState<ExplorerTab[]>([])
     const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -360,7 +361,9 @@ export default function FilesPage() {
     const searchPath = typeof search.path === 'string' ? decodePath(search.path) : ''
     const highlightedLine = typeof search.line === 'number' ? search.line : undefined
 
-    const shouldSearch = Boolean(searchQuery.trim())
+    const normalizedSearchQuery = searchQuery.trim()
+    const normalizedSubmittedSearchQuery = submittedSearchQuery.trim()
+    const shouldSearch = Boolean(normalizedSubmittedSearchQuery)
 
     useEffect(() => {
         const currentEntry: ExplorerHistoryEntry = {}
@@ -382,14 +385,14 @@ export default function FilesPage() {
         explorerHistoryRef.current = [...explorerHistoryRef.current, currentEntry].slice(-50)
     }, [highlightedLine, searchPath])
 
-    const searchInventory = useSessionFileSearch(api, sessionId, '', {
+    const searchInventory = useSessionFileSearch(api, sessionId, normalizedSubmittedSearchQuery, {
         enabled: shouldSearch,
         limit: 5000
     })
 
     const rankedSearchResults = useMemo(
-        () => shouldSearch ? rankFiles(searchInventory.files, searchQuery).slice(0, 200) : [],
-        [searchInventory.files, searchQuery, shouldSearch]
+        () => shouldSearch ? rankFiles(searchInventory.files, normalizedSubmittedSearchQuery).slice(0, 200) : [],
+        [normalizedSubmittedSearchQuery, searchInventory.files, shouldSearch]
     )
 
     const subtitle = session?.metadata?.path ?? sessionId
@@ -509,6 +512,10 @@ export default function FilesPage() {
         openFileTab(path)
     }, [openFileTab])
 
+    const submitSearch = useCallback(() => {
+        setSubmittedSearchQuery(normalizedSearchQuery)
+    }, [normalizedSearchQuery])
+
     const handleExplorerBack = useCallback(() => {
         if (explorerHistoryRef.current.length <= 1) {
             return
@@ -562,10 +569,10 @@ export default function FilesPage() {
         }
         if (shouldSearch) {
             void queryClient.invalidateQueries({
-                queryKey: queryKeys.sessionFiles(scopeKey, sessionId, '')
+                queryKey: queryKeys.sessionFiles(scopeKey, sessionId, normalizedSubmittedSearchQuery)
             })
         }
-    }, [activeTab?.path, queryClient, scopeKey, sessionId, shouldSearch])
+    }, [activeTab?.path, normalizedSubmittedSearchQuery, queryClient, scopeKey, sessionId, shouldSearch])
 
     const handleStartEdit = useCallback(() => {
         if (!activeTab) {
@@ -701,7 +708,19 @@ export default function FilesPage() {
                                 <SearchIcon className="text-[var(--app-hint)]" />
                                 <input
                                     value={searchQuery}
-                                    onChange={(event) => setSearchQuery(event.target.value)}
+                                    onChange={(event) => {
+                                        const next = event.target.value
+                                        setSearchQuery(next)
+                                        if (!next.trim()) {
+                                            setSubmittedSearchQuery('')
+                                        }
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter') {
+                                            event.preventDefault()
+                                            submitSearch()
+                                        }
+                                    }}
                                     placeholder="Go to file"
                                     className="w-full bg-transparent text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none"
                                     autoCapitalize="none"
@@ -714,7 +733,7 @@ export default function FilesPage() {
                         </div>
 
                         <div className="min-h-0 flex-1 overflow-y-auto rounded-[30px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-3 shadow-[0_24px_56px_-42px_rgba(48,33,24,0.35)]">
-                            {searchQuery ? (
+                            {submittedSearchQuery ? (
                                 searchInventory.isLoading ? (
                                     <EmptyRailState title="Searching files" body="Scanning the session workspace for matching files and folders." />
                                 ) : searchInventory.error ? (
