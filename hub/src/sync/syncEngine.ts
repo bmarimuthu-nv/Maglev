@@ -725,6 +725,17 @@ export class SyncEngine {
         }
 
         if (spawnResult.sessionId !== access.sessionId) {
+            const previousRespawnIds = metadata.respawnedFromSessionIds ?? []
+            const respawnedFromSessionIds = Array.from(new Set([
+                ...previousRespawnIds,
+                access.sessionId
+            ]))
+            await this.sessionCache.updateSessionMetadataFields(spawnResult.sessionId, (nextMetadata) => ({
+                ...nextMetadata,
+                respawnedFromSessionId: access.sessionId,
+                respawnedFromSessionIds
+            }))
+
             try {
                 await this.sessionCache.mergeSessions(access.sessionId, spawnResult.sessionId, namespace)
             } catch (error) {

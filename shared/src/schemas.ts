@@ -113,6 +113,8 @@ export const MetadataSchema = z.object({
     startupCommand: z.string().optional(),
     shellTerminalId: z.string().optional(),
     shellTerminalState: z.enum(['ready', 'stale']).optional(),
+    respawnedFromSessionId: z.string().optional(),
+    respawnedFromSessionIds: z.array(z.string()).optional(),
     terminalSupervision: TerminalSupervisionSchema.optional(),
     terminalPair: TerminalPairLinkSchema.optional()
 })

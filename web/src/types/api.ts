@@ -36,6 +36,8 @@ export type SessionMetadataSummary = {
     pinned?: boolean
     autoRespawn?: boolean
     startupCommand?: string
+    respawnedFromSessionId?: string
+    respawnedFromSessionIds?: string[]
 }
 
 export type AgentType = 'shell'

@@ -1036,6 +1036,80 @@ describe('session model', () => {
         }
     })
 
+    it('marks respawned pinned shells with their replaced session lineage', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            { boundMachineId: 'current-machine' }
+        )
+
+        try {
+            const oldSession = engine.getOrCreateSession(
+                'old-shell',
+                {
+                    path: '/tmp/project',
+                    host: 'old-host',
+                    machineId: 'stale-machine',
+                    flavor: 'shell',
+                    pinned: true,
+                    respawnedFromSessionIds: ['original-shell'],
+                    shellTerminalId: 'term-1'
+                },
+                null,
+                'default'
+            )
+
+            engine.getOrCreateMachine(
+                'current-machine',
+                { host: 'new-host', platform: 'linux', maglevCliVersion: '0.1.0' },
+                null,
+                'default'
+            )
+            engine.handleMachineAlive({ machineId: 'current-machine', time: Date.now() })
+
+            ;(engine as any).rpcGateway.spawnSession = async () => {
+                const replacement = engine.getOrCreateSession(
+                    'new-shell',
+                    {
+                        path: '/tmp/project',
+                        host: 'new-host',
+                        machineId: 'current-machine',
+                        flavor: 'shell',
+                        shellTerminalId: 'term-2'
+                    },
+                    null,
+                    'default'
+                )
+                engine.handleSessionAlive({ sid: replacement.id, time: Date.now(), thinking: false })
+                return { type: 'success', sessionId: replacement.id }
+            }
+            ;(engine as any).waitForSessionActive = async () => true
+
+            const result = await engine.respawnPinnedShellSession(oldSession.id, 'default')
+
+            expect(result.type).toBe('success')
+            if (result.type !== 'success') {
+                return
+            }
+            expect(engine.getSession(oldSession.id)).toBeUndefined()
+            const replacement = engine.getSession(result.sessionId)
+            expect(replacement?.metadata).toMatchObject({
+                respawnedFromSessionId: oldSession.id,
+                respawnedFromSessionIds: ['original-shell', oldSession.id],
+                pinned: true
+            })
+            expect(toSessionSummary(replacement!).metadata).toMatchObject({
+                respawnedFromSessionId: oldSession.id,
+                respawnedFromSessionIds: ['original-shell', oldSession.id]
+            })
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('auto-respawn implies pinned when shell options are updated', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(

@@ -17,6 +17,7 @@ import { REVIEW_FILE_PATH, createEmptyReviewFile, parseReviewFile, type ReviewCo
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
 import { resolveLanguageFromPath, useShikiLines } from '@/lib/shiki'
 import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
+import { findRespawnedSession } from '@/lib/session-respawn'
 
 const REVIEW_SPLIT_TERMINAL_WIDTH_KEY = 'maglev:reviewSplitTerminalWidth'
 const REVIEW_SPLIT_TERMINAL_DEFAULT_WIDTH = 560
@@ -691,6 +692,10 @@ export default function ReviewPage() {
 
     const summary = summaryQuery.data?.success ? summaryQuery.data : null
     const workspacePath = session?.metadata?.path ?? null
+    const respawnedSession = useMemo(
+        () => findRespawnedSession(allSessions, sessionId),
+        [allSessions, sessionId]
+    )
     const fileCardRefs = useRef<Record<string, HTMLDivElement | null>>({})
     const diffFiles = useMemo(() => normalizeReviewFiles(summary?.files ?? []), [summary?.files])
     const selectedPath = selectedPathFromSearch || diffFiles[0]?.filePath || ''
@@ -707,6 +712,23 @@ export default function ReviewPage() {
             enabled: Boolean(api && session?.active && expandedFilePaths.has(file.filePath))
         }))
     })
+
+    useEffect(() => {
+        if (!respawnedSession || respawnedSession.id === sessionId) {
+            return
+        }
+
+        void navigate({
+            to: '/sessions/$sessionId/review',
+            params: { sessionId: respawnedSession.id },
+            search: {
+                mode,
+                ...(selectedPathFromSearch ? { path: selectedPathFromSearch } : {}),
+                ...(highlightedThreadId ? { threadId: highlightedThreadId } : {})
+            },
+            replace: true
+        })
+    }, [highlightedThreadId, mode, navigate, respawnedSession, selectedPathFromSearch, sessionId])
 
     useEffect(() => {
         if (!api || !workspacePath) {

@@ -20,6 +20,8 @@ export type SessionSummaryMetadata = {
     startupCommand?: string
     shellTerminalId?: string
     shellTerminalState?: 'ready' | 'stale'
+    respawnedFromSessionId?: string
+    respawnedFromSessionIds?: string[]
     terminalSupervision?: TerminalSupervision
     terminalPair?: TerminalPairLink
 }
@@ -54,6 +56,8 @@ export function toSessionSummary(session: Session): SessionSummary {
         startupCommand: session.metadata.startupCommand,
         shellTerminalId: session.metadata.shellTerminalId,
         shellTerminalState: session.metadata.shellTerminalState,
+        respawnedFromSessionId: session.metadata.respawnedFromSessionId,
+        respawnedFromSessionIds: session.metadata.respawnedFromSessionIds,
         terminalSupervision: session.metadata.terminalSupervision,
         terminalPair: session.metadata.terminalPair
     } : null
