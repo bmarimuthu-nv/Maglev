@@ -86,6 +86,22 @@ function MoonIcon() {
     )
 }
 
+function ChevronDownIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+        </svg>
+    )
+}
+
+function CheckIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+        </svg>
+    )
+}
+
 function CommentIcon() {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -134,6 +150,8 @@ type ParsedDiffHunk = {
 const REVIEW_PAGE_LINE_LIMIT = 400
 const REVIEW_PAGED_LINE_THRESHOLD = 600
 
+type ReviewToolbarMenuId = 'diff' | 'review' | 'view' | 'workspace'
+
 type ReviewSidebarFile = {
     kind: 'file'
     key: string
@@ -159,6 +177,68 @@ type ReviewSidebarTreeNode = {
     path: string
     folders: Map<string, ReviewSidebarTreeNode>
     files: ParsedFileDiff[]
+}
+
+function ReviewToolbarMenu(props: {
+    id: ReviewToolbarMenuId
+    label: string
+    value?: string
+    open: boolean
+    align?: 'left' | 'right'
+    onToggle: (id: ReviewToolbarMenuId) => void
+    children: ReactNode
+}) {
+    const menuId = `review-toolbar-${props.id}-menu`
+
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={props.open}
+                aria-controls={menuId}
+                onClick={() => props.onToggle(props.id)}
+                className="inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+            >
+                <span>{props.label}</span>
+                {props.value ? <span className="max-w-32 truncate text-[var(--app-hint)]">{props.value}</span> : null}
+                <ChevronDownIcon />
+            </button>
+            {props.open ? (
+                <div
+                    id={menuId}
+                    role="menu"
+                    className={`absolute top-full z-40 mt-1 min-w-56 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg ${props.align === 'right' ? 'right-0' : 'left-0'}`}
+                >
+                    {props.children}
+                </div>
+            ) : null}
+        </div>
+    )
+}
+
+function ReviewToolbarMenuItem(props: {
+    children: ReactNode
+    active?: boolean
+    disabled?: boolean
+    onClick: () => void
+}) {
+    return (
+        <button
+            type="button"
+            role="menuitem"
+            disabled={props.disabled}
+            onClick={props.onClick}
+            className="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left text-xs text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+            <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[var(--app-link)]">
+                {props.active ? <CheckIcon /> : null}
+            </span>
+            <span className="min-w-0">
+                <span className="block font-medium">{props.children}</span>
+            </span>
+        </button>
+    )
 }
 
 function groupDiffHunks(lines: ParsedDiffLine[]): ParsedDiffHunk[] {
@@ -671,6 +751,8 @@ export default function ReviewPage() {
     const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
     const [pendingSplitStartupSessionId, setPendingSplitStartupSessionId] = useState<string | null>(null)
     const [closingSplitSessionId, setClosingSplitSessionId] = useState<string | null>(null)
+    const [openToolbarMenu, setOpenToolbarMenu] = useState<ReviewToolbarMenuId | null>(null)
+    const toolbarMenuRef = useRef<HTMLDivElement>(null)
     const [splitPanelWidth, setSplitPanelWidth] = useState(() => {
         try {
             const saved = localStorage.getItem(REVIEW_SPLIT_TERMINAL_WIDTH_KEY)
@@ -688,6 +770,35 @@ export default function ReviewPage() {
         }
     })
     const initializedExpandedRef = useRef(false)
+
+    const toggleToolbarMenu = useCallback((id: ReviewToolbarMenuId) => {
+        setOpenToolbarMenu((current) => current === id ? null : id)
+    }, [])
+
+    useEffect(() => {
+        if (!openToolbarMenu) {
+            return
+        }
+
+        const handlePointerDown = (event: PointerEvent) => {
+            if (toolbarMenuRef.current?.contains(event.target as Node)) {
+                return
+            }
+            setOpenToolbarMenu(null)
+        }
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setOpenToolbarMenu(null)
+            }
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [openToolbarMenu])
 
     const summaryQuery = useQuery({
         queryKey: ['review-summary', scopeKey, sessionId, mode, reviewBaseMode],
@@ -1180,6 +1291,14 @@ export default function ReviewPage() {
 
     const splitSessionStarting = splitSessionId !== null && pendingSplitStartupSessionId === splitSessionId
     const effectiveReviewScheme = reviewAppearance === 'system' ? colorScheme : reviewAppearance
+    const reviewModeLabel = mode === 'branch' ? 'Branch diff' : 'Uncommitted'
+    const workspaceShellLabel = splitSessionId
+        ? closingSplitSessionId === splitSessionId
+            ? 'Closing shell'
+            : splitSessionStarting
+                ? 'Starting shell'
+                : 'Shell open'
+        : 'No shell'
     const toggleReviewAppearance = useCallback(() => {
         setReviewAppearance(effectiveReviewScheme === 'dark' ? 'light' : 'dark')
     }, [effectiveReviewScheme, setReviewAppearance])
@@ -1207,113 +1326,155 @@ export default function ReviewPage() {
                         <div className="truncate font-semibold text-[var(--app-fg)]">Review</div>
                         <div className="truncate text-xs text-[var(--app-hint)]">{subtitle}</div>
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            void reloadReviewFile()
-                            void summaryQuery.refetch()
-                            void Promise.all(patchQueries.map((query) => query.refetch()))
-                        }}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                        title="Refresh review"
-                    >
-                        <RefreshIcon />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={toggleReviewAppearance}
-                        className="inline-flex h-8 items-center justify-center gap-2 rounded-full border border-[var(--app-border)] px-3 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
-                        title={effectiveReviewScheme === 'dark' ? 'Switch review to light mode' : 'Switch review to dark mode'}
-                    >
-                        {effectiveReviewScheme === 'dark' ? <SunIcon /> : <MoonIcon />}
-                        <span>{effectiveReviewScheme === 'dark' ? 'Light' : 'Dark'}</span>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            if (splitSessionId) {
-                                void handleCloseSplit()
-                            } else {
-                                void handleOpenSplitTerminal()
-                            }
-                        }}
-                        disabled={splitSessionId !== null && closingSplitSessionId === splitSessionId}
-                        className={`inline-flex h-8 items-center justify-center gap-2 rounded-full border px-3 text-xs font-medium transition-colors ${
-                            splitSessionId
-                                ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-button-text)]'
-                                : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
-                        } disabled:cursor-not-allowed disabled:opacity-60`}
-                        title={splitSessionId ? 'Close review shell' : 'Open a review shell in this workspace'}
-                    >
-                        <TerminalIcon />
-                        <span>{
-                            splitSessionId
-                                ? closingSplitSessionId === splitSessionId
-                                    ? 'Closing…'
-                                    : splitSessionStarting
-                                        ? 'Starting…'
-                                        : 'Close shell'
-                                : 'Review shell'
-                        }</span>
-                    </button>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            void navigate({
-                                to: '/sessions/$sessionId/review',
-                                params: { sessionId },
-                                search: { mode: 'branch', path: selectedPath || undefined, threadId: highlightedThreadId || undefined }
-                            })
-                        }}
-                        className={`rounded-full border px-3 py-1 ${mode === 'branch' ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-button-text)]' : 'border-[var(--app-border)] text-[var(--app-fg)]'}`}
+                <div ref={toolbarMenuRef} className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    <ReviewToolbarMenu
+                        id="diff"
+                        label="Diff"
+                        value={reviewModeLabel}
+                        open={openToolbarMenu === 'diff'}
+                        onToggle={toggleToolbarMenu}
                     >
-                        Branch diff
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            void navigate({
-                                to: '/sessions/$sessionId/review',
-                                params: { sessionId },
-                                search: { mode: 'working', path: selectedPath || undefined, threadId: highlightedThreadId || undefined }
-                            })
-                        }}
-                        className={`rounded-full border px-3 py-1 ${mode === 'working' ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-button-text)]' : 'border-[var(--app-border)] text-[var(--app-fg)]'}`}
+                        <ReviewToolbarMenuItem
+                            active={mode === 'branch'}
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                void navigate({
+                                    to: '/sessions/$sessionId/review',
+                                    params: { sessionId },
+                                    search: { mode: 'branch', path: selectedPath || undefined, threadId: highlightedThreadId || undefined }
+                                })
+                            }}
+                        >
+                            Branch diff
+                        </ReviewToolbarMenuItem>
+                        <ReviewToolbarMenuItem
+                            active={mode === 'working'}
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                void navigate({
+                                    to: '/sessions/$sessionId/review',
+                                    params: { sessionId },
+                                    search: { mode: 'working', path: selectedPath || undefined, threadId: highlightedThreadId || undefined }
+                                })
+                            }}
+                        >
+                            Uncommitted only
+                        </ReviewToolbarMenuItem>
+                    </ReviewToolbarMenu>
+                    <ReviewToolbarMenu
+                        id="review"
+                        label="Review"
+                        value={isReloadingReviewFile ? 'Refreshing' : undefined}
+                        open={openToolbarMenu === 'review'}
+                        onToggle={toggleToolbarMenu}
                     >
-                        Uncommitted only
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            void copy(REVIEW_FILE_PATH)
-                        }}
-                        className="rounded-full border border-[var(--app-border)] px-3 py-1 text-[var(--app-fg)]"
+                        <ReviewToolbarMenuItem
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                void reloadReviewFile()
+                                void summaryQuery.refetch()
+                                void Promise.all(patchQueries.map((query) => query.refetch()))
+                            }}
+                        >
+                            <span className="inline-flex items-center gap-2"><RefreshIcon /> Refresh review</span>
+                        </ReviewToolbarMenuItem>
+                        <ReviewToolbarMenuItem
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                void copy(REVIEW_FILE_PATH)
+                            }}
+                        >
+                            {copied ? 'Copied review path' : 'Copy review file path'}
+                        </ReviewToolbarMenuItem>
+                        <ReviewToolbarMenuItem
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                openSessionExplorerWindow(baseUrl, sessionId, { tab: 'directories', path: REVIEW_FILE_PATH })
+                            }}
+                        >
+                            Open review file
+                        </ReviewToolbarMenuItem>
+                    </ReviewToolbarMenu>
+                    <ReviewToolbarMenu
+                        id="view"
+                        label="View"
+                        value={effectiveReviewScheme}
+                        open={openToolbarMenu === 'view'}
+                        onToggle={toggleToolbarMenu}
                     >
-                        {copied ? 'Copied review path' : 'Copy review file path'}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => openSessionExplorerWindow(baseUrl, sessionId, { tab: 'directories', path: REVIEW_FILE_PATH })}
-                        className="rounded-full border border-[var(--app-border)] px-3 py-1 text-[var(--app-fg)]"
+                        <ReviewToolbarMenuItem
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                setExpandedFilePaths(new Set(diffFiles.map((file) => file.filePath)))
+                            }}
+                        >
+                            Expand all files
+                        </ReviewToolbarMenuItem>
+                        <ReviewToolbarMenuItem
+                            disabled={commentCountsByFile.size === 0}
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                setExpandedFilePaths(new Set(
+                                    diffFiles
+                                        .map((file) => file.filePath)
+                                        .filter((filePath) => (commentCountsByFile.get(filePath) ?? 0) > 0)
+                                ))
+                            }}
+                        >
+                            Expand files with comments
+                        </ReviewToolbarMenuItem>
+                        <ReviewToolbarMenuItem
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                setExpandedFilePaths(new Set())
+                            }}
+                        >
+                            Collapse all files
+                        </ReviewToolbarMenuItem>
+                        <ReviewToolbarMenuItem
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                toggleReviewAppearance()
+                            }}
+                        >
+                            <span className="inline-flex items-center gap-2">
+                                {effectiveReviewScheme === 'dark' ? <SunIcon /> : <MoonIcon />}
+                                {effectiveReviewScheme === 'dark' ? 'Light mode' : 'Dark mode'}
+                            </span>
+                        </ReviewToolbarMenuItem>
+                    </ReviewToolbarMenu>
+                    <ReviewToolbarMenu
+                        id="workspace"
+                        label="Workspace"
+                        value={workspaceShellLabel}
+                        open={openToolbarMenu === 'workspace'}
+                        align="right"
+                        onToggle={toggleToolbarMenu}
                     >
-                        Open review file
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setExpandedFilePaths(new Set(diffFiles.map((file) => file.filePath)))}
-                        className="rounded-full border border-[var(--app-border)] px-3 py-1 text-[var(--app-fg)]"
-                    >
-                        Expand all
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setExpandedFilePaths(new Set())}
-                        className="rounded-full border border-[var(--app-border)] px-3 py-1 text-[var(--app-fg)]"
-                    >
-                        Collapse all
-                    </button>
+                        <ReviewToolbarMenuItem
+                            disabled={splitSessionId !== null && closingSplitSessionId === splitSessionId}
+                            onClick={() => {
+                                setOpenToolbarMenu(null)
+                                if (splitSessionId) {
+                                    void handleCloseSplit()
+                                } else {
+                                    void handleOpenSplitTerminal()
+                                }
+                            }}
+                        >
+                            <span className="inline-flex items-center gap-2">
+                                <TerminalIcon />
+                                {splitSessionId
+                                    ? closingSplitSessionId === splitSessionId
+                                        ? 'Closing shell'
+                                        : splitSessionStarting
+                                            ? 'Starting shell'
+                                            : 'Close review shell'
+                                    : 'Open review shell'}
+                            </span>
+                        </ReviewToolbarMenuItem>
+                    </ReviewToolbarMenu>
                     <span className="text-[var(--app-hint)]">
                         {summary?.currentBranch ? `HEAD: ${summary.currentBranch}` : 'No branch info'}
                     </span>
