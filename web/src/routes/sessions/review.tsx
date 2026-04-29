@@ -1360,6 +1360,10 @@ export default function ReviewPage() {
                     >
                         <BackIcon />
                     </button>
+                    <div className="min-w-0 flex-1">
+                        <div className="truncate font-semibold text-[var(--app-fg)]">Review</div>
+                        <div className="truncate text-xs text-[var(--app-hint)]">{subtitle}</div>
+                    </div>
                     <button
                         type="button"
                         disabled={splitSessionId !== null && closingSplitSessionId === splitSessionId}
@@ -1380,10 +1384,6 @@ export default function ReviewPage() {
                         <TerminalIcon />
                         <span className="hidden sm:inline">{reviewShellActionLabel}</span>
                     </button>
-                    <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold text-[var(--app-fg)]">Review</div>
-                        <div className="truncate text-xs text-[var(--app-hint)]">{subtitle}</div>
-                    </div>
                 </div>
                 <div ref={toolbarMenuRef} className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                     <ReviewToolbarMenu
