@@ -375,7 +375,7 @@ describe('session lifecycle filtering', () => {
         expect(matchesSessionSearch(session, 'does-not-match')).toBe(false)
     })
 
-    it('filters archived sessions independently of stopped sessions', () => {
+    it('keeps active, stopped, and archived sessions when applying search', () => {
         const sessions = [
             makeSession({ id: 'active', active: true, metadata: { path: '/repo' } }),
             makeSession({ id: 'stopped', active: false, metadata: { path: '/repo' } }),
@@ -383,12 +383,9 @@ describe('session lifecycle filtering', () => {
         ]
 
         const filtered = filterSessionSummaries(sessions, {
-            active: true,
-            stopped: false,
-            archived: true,
             search: ''
         })
 
-        expect(filtered.map((session) => session.id)).toEqual(['active', 'archived'])
+        expect(filtered.map((session) => session.id)).toEqual(['active', 'stopped', 'archived'])
     })
 })

@@ -154,6 +154,26 @@ function SettingsIcon(props: { className?: string }) {
     )
 }
 
+function SearchIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+        </svg>
+    )
+}
+
 function SessionsPage() {
     const { api, baseUrl, scopeKey } = useAppContext()
     const navigate = useNavigate()
@@ -165,6 +185,7 @@ function SessionsPage() {
     const [sidebarWidth, setSidebarWidth] = useState(SESSIONS_SIDEBAR_DEFAULT_WIDTH)
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
     const [hubMenuOpen, setHubMenuOpen] = useState(false)
+    const [sessionSearchVisible, setSessionSearchVisible] = useState(false)
     const hubLabel = getCurrentHubLabel(baseUrl)
 
     useEffect(() => {
@@ -331,6 +352,20 @@ function SessionsPage() {
                         </button>
                         <button
                             type="button"
+                            onClick={() => setSessionSearchVisible((visible) => !visible)}
+                            className={`rounded-full p-1 transition-colors ${
+                                sessionSearchVisible
+                                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
+                                    : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                            }`}
+                            title="Search sessions"
+                            aria-label="Search sessions"
+                            aria-pressed={sessionSearchVisible}
+                        >
+                            <SearchIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => {
                                 setMobileSidebarOpen(false)
                                 navigate({ to: '/sessions/new' })
@@ -371,6 +406,7 @@ function SessionsPage() {
                     onRefresh={handleRefresh}
                     isLoading={isLoading}
                     renderHeader={false}
+                    searchVisible={sessionSearchVisible}
                     api={api}
                 />
             </div>

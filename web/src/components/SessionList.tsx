@@ -102,9 +102,6 @@ type SessionListOrders = {
 }
 
 type SessionListFilters = {
-    active: boolean
-    stopped: boolean
-    archived: boolean
     search: string
 }
 
@@ -117,9 +114,6 @@ type CleanupSessionsTarget = {
 }
 
 const DEFAULT_SESSION_FILTERS: SessionListFilters = {
-    active: true,
-    stopped: true,
-    archived: false,
     search: ''
 }
 
@@ -139,9 +133,6 @@ function loadSessionListFilters(scopeKey: string): SessionListFilters {
 
     const candidate = parsed as Partial<SessionListFilters>
     return {
-        active: candidate.active ?? DEFAULT_SESSION_FILTERS.active,
-        stopped: candidate.stopped ?? DEFAULT_SESSION_FILTERS.stopped,
-        archived: candidate.archived ?? DEFAULT_SESSION_FILTERS.archived,
         search: typeof candidate.search === 'string' ? candidate.search : DEFAULT_SESSION_FILTERS.search
     }
 }
@@ -189,24 +180,7 @@ export function filterSessionSummaries(
     sessions: SessionSummary[],
     filters: SessionListFilters
 ): SessionSummary[] {
-    return sessions.filter((session) => {
-        const status = getSessionLifecycleStatus(session)
-        if (!filters[status]) {
-            return false
-        }
-        return matchesSessionSearch(session, filters.search)
-    })
-}
-
-function getSessionLifecycleCounts(sessions: SessionSummary[]): Record<SessionLifecycleStatus, number> {
-    return sessions.reduce<Record<SessionLifecycleStatus, number>>((counts, session) => {
-        counts[getSessionLifecycleStatus(session)] += 1
-        return counts
-    }, {
-        active: 0,
-        stopped: 0,
-        archived: 0
-    })
+    return sessions.filter((session) => matchesSessionSearch(session, filters.search))
 }
 
 function getGroupDisplayName(directory: string): string {
@@ -1016,11 +990,12 @@ export function SessionList(props: {
     onRefresh: () => void
     isLoading: boolean
     renderHeader?: boolean
+    searchVisible?: boolean
     api: ApiClient | null
     selectedSessionId?: string | null
 }) {
     const { t } = useTranslation()
-    const { renderHeader = true, api, selectedSessionId } = props
+    const { renderHeader = true, searchVisible = false, api, selectedSessionId } = props
     const { baseUrl, scopeKey } = useAppContext()
     const queryClient = useQueryClient()
     const sessionOrderStorageKey = useMemo(() => getSessionListOrderStorageKey(scopeKey), [scopeKey])
@@ -1029,14 +1004,11 @@ export function SessionList(props: {
         () => props.sessions.filter(isVisibleInSessionList),
         [props.sessions]
     )
-    const [filters, setFilters] = useState<SessionListFilters>(() => loadSessionListFilters(scopeKey))
+    const [filters, setFilters] = useState<SessionListFilters>(() => searchVisible ? loadSessionListFilters(scopeKey) : DEFAULT_SESSION_FILTERS)
+    const appliedFilters = searchVisible ? filters : DEFAULT_SESSION_FILTERS
     const filteredSessions = useMemo(
-        () => filterSessionSummaries(visibleSessions, filters),
-        [visibleSessions, filters]
-    )
-    const lifecycleCounts = useMemo(
-        () => getSessionLifecycleCounts(visibleSessions),
-        [visibleSessions]
+        () => filterSessionSummaries(visibleSessions, appliedFilters),
+        [visibleSessions, appliedFilters]
     )
     const groups = useMemo(
         () => groupSessionsByDirectory(filteredSessions),
@@ -1080,8 +1052,15 @@ export function SessionList(props: {
     }, [groups])
 
     useEffect(() => {
-        setFilters(loadSessionListFilters(scopeKey))
-    }, [scopeKey])
+        setFilters(searchVisible ? loadSessionListFilters(scopeKey) : DEFAULT_SESSION_FILTERS)
+    }, [scopeKey, searchVisible])
+
+    useEffect(() => {
+        if (searchVisible || !filters.search) {
+            return
+        }
+        setFilters(DEFAULT_SESSION_FILTERS)
+    }, [filters.search, searchVisible])
 
     useEffect(() => {
         saveSessionListFilters(scopeKey, filters)
@@ -1130,13 +1109,6 @@ export function SessionList(props: {
     const updateFilters = useCallback((next: SessionListFilters) => {
         setFilters(next)
     }, [])
-
-    const toggleFilter = useCallback((key: 'active' | 'stopped' | 'archived') => {
-        updateFilters({
-            ...filters,
-            [key]: !filters[key]
-        })
-    }, [filters, updateFilters])
 
     const setSearch = useCallback((search: string) => {
         updateFilters({
@@ -1827,16 +1799,12 @@ export function SessionList(props: {
             ) : null}
 
             <SessionListFilter
-                counts={lifecycleCounts}
                 filters={filters}
-                onToggle={toggleFilter}
                 onSearchChange={setSearch}
                 labels={{
-                    active: t('session.filter.active'),
-                    stopped: t('session.filter.stopped'),
-                    archived: t('session.filter.archived'),
                     searchPlaceholder: t('session.filter.searchPlaceholder')
                 }}
+                visible={searchVisible}
             />
 
             {filteredSessions.length > 0 ? (
