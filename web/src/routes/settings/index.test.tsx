@@ -56,6 +56,10 @@ describe('SettingsPage', () => {
         vi.clearAllMocks()
     })
 
+    afterEach(() => {
+        cleanup()
+    })
+
     it('renders the About section', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getByText('About')).toBeInTheDocument()
@@ -104,6 +108,19 @@ describe('SettingsPage', () => {
         const calledKeys = spyT.mock.calls.map((call) => call[0])
         expect(calledKeys).toContain('settings.display.appearance')
         expect(calledKeys).toContain('settings.display.appearance.system')
+    })
+
+    it('renders Review appearance as a dropdown', () => {
+        localStorage.removeItem('maglev-review-appearance')
+        renderWithProviders(<SettingsPage />)
+
+        const reviewAppearanceButton = screen.getByRole('button', { name: /Review appearance App default/ })
+        expect(reviewAppearanceButton).toHaveAttribute('aria-haspopup', 'listbox')
+
+        fireEvent.click(reviewAppearanceButton)
+
+        expect(screen.getByRole('listbox', { name: 'Review appearance' })).toBeInTheDocument()
+        expect(screen.getByRole('option', { name: 'Dark' })).toBeInTheDocument()
     })
 })
 

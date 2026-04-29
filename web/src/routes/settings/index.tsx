@@ -8,7 +8,7 @@ import { eventToShortcutLabel, getOpenFileShortcut, setOpenFileShortcut } from '
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { useTerminalCopyOnSelect } from '@/hooks/useTerminalCopyOnSelect'
 import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
-import { getReviewAppearanceOptions, useReviewAppearance } from '@/hooks/useReviewAppearance'
+import { getReviewAppearanceOptions, useReviewAppearance, type ReviewAppearancePreference } from '@/hooks/useReviewAppearance'
 import { PROTOCOL_VERSION } from '@maglev/protocol'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
@@ -79,9 +79,11 @@ export default function SettingsPage() {
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
     const [isFontOpen, setIsFontOpen] = useState(false)
+    const [isReviewAppearanceOpen, setIsReviewAppearanceOpen] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const appearanceContainerRef = useRef<HTMLDivElement>(null)
     const fontContainerRef = useRef<HTMLDivElement>(null)
+    const reviewAppearanceContainerRef = useRef<HTMLDivElement>(null)
     const { fontScale, setFontScale } = useFontScale()
     const { appearance, setAppearance } = useAppearance()
     const [openFileShortcut, setOpenFileShortcutState] = useState(() => getOpenFileShortcut())
@@ -98,6 +100,7 @@ export default function SettingsPage() {
     const currentAppearanceLabel = appearanceOptions.find((opt) => opt.value === appearance)?.labelKey ?? 'settings.display.appearance.system'
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
     const currentReviewBaseMode = reviewBaseModeOptions.find((opt) => opt.value === reviewBaseMode) ?? reviewBaseModeOptions[0]
+    const currentReviewAppearanceLabel = reviewAppearanceOptions.find((opt) => opt.value === reviewAppearance)?.label ?? 'App default'
 
     const handleLocaleChange = (newLocale: Locale) => {
         setLocale(newLocale)
@@ -114,6 +117,11 @@ export default function SettingsPage() {
         setIsFontOpen(false)
     }
 
+    const handleReviewAppearanceChange = (pref: ReviewAppearancePreference) => {
+        setReviewAppearance(pref)
+        setIsReviewAppearanceOpen(false)
+    }
+
     const handleOpenFileShortcutKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
         event.preventDefault()
         const next = eventToShortcutLabel(event.nativeEvent)
@@ -125,7 +133,7 @@ export default function SettingsPage() {
 
     // Close dropdown when clicking outside
     useEffect(() => {
-        if (!isOpen && !isAppearanceOpen && !isFontOpen) return
+        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isReviewAppearanceOpen) return
 
         const handleClickOutside = (event: MouseEvent) => {
             if (isOpen && containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -137,27 +145,35 @@ export default function SettingsPage() {
             if (isFontOpen && fontContainerRef.current && !fontContainerRef.current.contains(event.target as Node)) {
                 setIsFontOpen(false)
             }
+            if (
+                isReviewAppearanceOpen &&
+                reviewAppearanceContainerRef.current &&
+                !reviewAppearanceContainerRef.current.contains(event.target as Node)
+            ) {
+                setIsReviewAppearanceOpen(false)
+            }
         }
 
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [isOpen, isAppearanceOpen, isFontOpen])
+    }, [isOpen, isAppearanceOpen, isFontOpen, isReviewAppearanceOpen])
 
     // Close on escape key
     useEffect(() => {
-        if (!isOpen && !isAppearanceOpen && !isFontOpen) return
+        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isReviewAppearanceOpen) return
 
         const handleEscape = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 setIsOpen(false)
                 setIsAppearanceOpen(false)
                 setIsFontOpen(false)
+                setIsReviewAppearanceOpen(false)
             }
         }
 
         document.addEventListener('keydown', handleEscape)
         return () => document.removeEventListener('keydown', handleEscape)
-    }, [isOpen, isAppearanceOpen, isFontOpen])
+    }, [isOpen, isAppearanceOpen, isFontOpen, isReviewAppearanceOpen])
 
     return (
         <div className="flex h-full flex-col">
@@ -405,37 +421,53 @@ export default function SettingsPage() {
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
                             Review
                         </div>
-                        <div className="px-3 py-3 border-b border-[var(--app-divider)]">
-                            <div className="text-[var(--app-fg)]">Review appearance</div>
-                            <div className="mt-1 text-xs text-[var(--app-hint)]">
-                                Override light or dark mode inside review without changing the rest of Maglev
-                            </div>
-                            <div className="mt-3 space-y-2">
-                                {reviewAppearanceOptions.map((option) => {
-                                    const checked = reviewAppearance === option.value
-                                    return (
-                                        <button
-                                            key={option.value}
-                                            type="button"
-                                            onClick={() => setReviewAppearance(option.value)}
-                                            className={`flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
-                                                checked
-                                                    ? 'border-[var(--app-link)] bg-[var(--app-subtle-bg)]'
-                                                    : 'border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]'
-                                            }`}
-                                            aria-pressed={checked}
-                                        >
-                                            <div>
-                                                <div className={`text-sm font-medium ${checked ? 'text-[var(--app-link)]' : 'text-[var(--app-fg)]'}`}>
-                                                    {option.label}
-                                                </div>
-                                                <div className="mt-1 text-xs text-[var(--app-hint)]">{option.description}</div>
-                                            </div>
-                                            {checked ? <CheckIcon className="mt-0.5 shrink-0 text-[var(--app-link)]" /> : null}
-                                        </button>
-                                    )
-                                })}
-                            </div>
+                        <div ref={reviewAppearanceContainerRef} className="relative border-b border-[var(--app-divider)]">
+                            <button
+                                type="button"
+                                onClick={() => setIsReviewAppearanceOpen(!isReviewAppearanceOpen)}
+                                className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                aria-expanded={isReviewAppearanceOpen}
+                                aria-haspopup="listbox"
+                            >
+                                <span className="text-[var(--app-fg)]">Review appearance</span>
+                                <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <span>{currentReviewAppearanceLabel}</span>
+                                    <ChevronDownIcon className={`transition-transform ${isReviewAppearanceOpen ? 'rotate-180' : ''}`} />
+                                </span>
+                            </button>
+
+                            {isReviewAppearanceOpen && (
+                                <div
+                                    className="absolute right-3 top-full mt-1 min-w-[160px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg overflow-hidden z-50"
+                                    role="listbox"
+                                    aria-label="Review appearance"
+                                >
+                                    {reviewAppearanceOptions.map((option) => {
+                                        const isSelected = reviewAppearance === option.value
+                                        return (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                role="option"
+                                                aria-selected={isSelected}
+                                                onClick={() => handleReviewAppearanceChange(option.value)}
+                                                className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                                    isSelected
+                                                        ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                                                }`}
+                                            >
+                                                <span>{option.label}</span>
+                                                {isSelected && (
+                                                    <span className="ml-2 text-[var(--app-link)]">
+                                                        <CheckIcon />
+                                                    </span>
+                                                )}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            )}
                         </div>
                         <div className="px-3 py-3">
                             <div className="text-[var(--app-fg)]">Branch diff base</div>
