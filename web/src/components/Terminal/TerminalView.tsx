@@ -119,6 +119,32 @@ function configureTerminalTextarea(terminal: Terminal): void {
     textarea.setAttribute('data-enable-grammarly', 'false')
 }
 
+const TERMINAL_FIT_SETTLE_PASSES = 4
+
+function getNativeScrollElements(container: HTMLDivElement, terminal: Terminal): HTMLElement[] {
+    const elements: HTMLElement[] = [container]
+    if (terminal.element instanceof HTMLElement) {
+        elements.push(terminal.element)
+    }
+    return elements
+}
+
+function resetNativeScrollOffsets(container: HTMLDivElement, terminal: Terminal): void {
+    for (const element of getNativeScrollElements(container, terminal)) {
+        element.scrollTop = 0
+        element.scrollLeft = 0
+    }
+}
+
+function hasNativeTerminalOverflow(container: HTMLDivElement, terminal: Terminal): boolean {
+    for (const element of getNativeScrollElements(container, terminal)) {
+        if (element.scrollHeight - element.clientHeight > 1) return true
+        if (element.scrollWidth - element.clientWidth > 1) return true
+        if (element.scrollTop !== 0 || element.scrollLeft !== 0) return true
+    }
+    return false
+}
+
 export function TerminalView(props: {
     onMount?: (terminal: Terminal) => void
     onResize?: (cols: number, rows: number) => void
@@ -198,6 +224,39 @@ export function TerminalView(props: {
         terminal.open(container)
         ;(container as HTMLDivElement & { __xterm?: Terminal | null }).__xterm = terminal
         configureTerminalTextarea(terminal)
+
+        let scheduledFitFrame: number | null = null
+        let pendingFitPasses = 0
+        const fitTerminal = (remainingPasses = 0) => {
+            if (abortController.signal.aborted) return
+            resetNativeScrollOffsets(container, terminal)
+            fitAddon.fit()
+            resetNativeScrollOffsets(container, terminal)
+            onResizeRef.current?.(terminal.cols, terminal.rows)
+            if (remainingPasses > 0 && hasNativeTerminalOverflow(container, terminal)) {
+                scheduleFitTerminal(remainingPasses - 1)
+            }
+        }
+        const scheduleFitTerminal = (settlePasses = TERMINAL_FIT_SETTLE_PASSES) => {
+            pendingFitPasses = Math.max(pendingFitPasses, settlePasses)
+            if (scheduledFitFrame !== null || abortController.signal.aborted) {
+                return
+            }
+            scheduledFitFrame = requestAnimationFrame(() => {
+                scheduledFitFrame = null
+                const passes = pendingFitPasses
+                pendingFitPasses = 0
+                fitTerminal(passes)
+            })
+        }
+        const handleNativeScroll = () => {
+            resetNativeScrollOffsets(container, terminal)
+            scheduleFitTerminal()
+        }
+        for (const element of getNativeScrollElements(container, terminal)) {
+            element.addEventListener('scroll', handleNativeScroll, { signal: abortController.signal })
+        }
+
         const handlePointerDown = () => {
             if (suppressFocusRef.current) {
                 return
@@ -233,12 +292,15 @@ export function TerminalView(props: {
         container.addEventListener('focusout', handleFocusOut, { signal: abortController.signal })
 
         const observer = new ResizeObserver(() => {
-            requestAnimationFrame(() => {
-                fitAddon.fit()
-                onResizeRef.current?.(terminal.cols, terminal.rows)
-            })
+            scheduleFitTerminal()
         })
         observer.observe(container)
+        if (terminal.element instanceof HTMLElement) {
+            observer.observe(terminal.element)
+        }
+
+        window.addEventListener('resize', () => scheduleFitTerminal(), { signal: abortController.signal })
+        window.visualViewport?.addEventListener('resize', () => scheduleFitTerminal(), { signal: abortController.signal })
 
         const selectionDisposable = terminal.onSelectionChange(() => {
             if (!copyOnSelectRef.current) {
@@ -270,8 +332,7 @@ export function TerminalView(props: {
                     if (terminal.rows > 0) {
                         terminal.refresh(0, terminal.rows - 1)
                     }
-                    fitAddon.fit()
-                    onResizeRef.current?.(terminal.cols, terminal.rows)
+                    fitTerminal()
                 })
                 return
             }
@@ -280,8 +341,7 @@ export function TerminalView(props: {
             if (terminal.rows > 0) {
                 terminal.refresh(0, terminal.rows - 1)
             }
-            fitAddon.fit()
-            onResizeRef.current?.(terminal.cols, terminal.rows)
+            fitTerminal()
         }
 
         void ensureBuiltinFontLoaded().then(loaded => {
@@ -292,6 +352,10 @@ export function TerminalView(props: {
         // Cleanup on abort
         abortController.signal.addEventListener('abort', () => {
             observer.disconnect()
+            if (scheduledFitFrame !== null) {
+                cancelAnimationFrame(scheduledFitFrame)
+                scheduledFitFrame = null
+            }
             if (selectionCopyTimer) {
                 clearTimeout(selectionCopyTimer)
             }
@@ -304,8 +368,7 @@ export function TerminalView(props: {
         })
 
         requestAnimationFrame(() => {
-            fitAddon.fit()
-            onResizeRef.current?.(terminal.cols, terminal.rows)
+            fitTerminal()
             if (!suppressFocusRef.current) {
                 terminal.focus()
             }
