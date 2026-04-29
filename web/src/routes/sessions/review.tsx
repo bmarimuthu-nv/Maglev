@@ -13,7 +13,7 @@ import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { ReviewThreadCard } from '@/components/review/ReviewThreadCard'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
-import { REVIEW_FILE_PATH, createEmptyReviewFile, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
+import { REVIEW_FILE_PATH, countReviewCommentsByFile, createEmptyReviewFile, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
 import { resolveLanguageFromPath, useShikiLines } from '@/lib/shiki'
 import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
@@ -82,6 +82,14 @@ function MoonIcon() {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 3a6 6 0 1 0 9 9 9 9 0 1 1-9-9" />
+        </svg>
+    )
+}
+
+function CommentIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
         </svg>
     )
 }
@@ -654,6 +662,8 @@ export default function ReviewPage() {
     const [reviewError, setReviewError] = useState<string | null>(null)
     const [saveError, setSaveError] = useState<string | null>(null)
     const [isSaving, setIsSaving] = useState(false)
+    const isSavingRef = useRef(false)
+    const [isReloadingReviewFile, setIsReloadingReviewFile] = useState(false)
     const [composerAnchorKey, setComposerAnchorKey] = useState<string | null>(null)
     const [composerText, setComposerText] = useState('')
     const [collapsedResolvedThreadIds, setCollapsedResolvedThreadIds] = useState<Record<string, boolean>>({})
@@ -714,6 +724,61 @@ export default function ReviewPage() {
     })
 
     useEffect(() => {
+        isSavingRef.current = isSaving
+    }, [isSaving])
+
+    const reloadReviewFile = useCallback(async (options?: { quiet?: boolean }) => {
+        if (!api || !workspacePath) {
+            return
+        }
+        if (isSavingRef.current) {
+            return
+        }
+
+        if (!options?.quiet) {
+            setIsReloadingReviewFile(true)
+        }
+        try {
+            const result = await api.readSessionFile(sessionId, REVIEW_FILE_PATH)
+            if (!result.success) {
+                const errorMessage = result.error ?? 'Failed to load review file'
+                if (isMissingReviewFileError(errorMessage)) {
+                    setReviewFile(createEmptyReviewFile(workspacePath))
+                    setReviewHash(null)
+                    reviewHashRef.current = null
+                    setReviewError(null)
+                    return
+                }
+                setReviewError(errorMessage)
+                return
+            }
+
+            const decoded = result.content ? decodeBase64(result.content) : { ok: true, text: '' }
+            if (!decoded.ok) {
+                setReviewError('Failed to decode review file')
+                return
+            }
+
+            const parsed = parseReviewFile(decoded.text, workspacePath)
+            if (!parsed.ok) {
+                setReviewError(parsed.error)
+                return
+            }
+
+            setReviewFile(parsed.value)
+            setReviewHash(result.hash ?? null)
+            reviewHashRef.current = result.hash ?? null
+            setReviewError(null)
+        } catch (error) {
+            setReviewError(error instanceof Error ? error.message : 'Failed to load review file')
+        } finally {
+            if (!options?.quiet) {
+                setIsReloadingReviewFile(false)
+            }
+        }
+    }, [api, sessionId, workspacePath])
+
+    useEffect(() => {
         if (!respawnedSession || respawnedSession.id === sessionId) {
             return
         }
@@ -734,48 +799,25 @@ export default function ReviewPage() {
         if (!api || !workspacePath) {
             return
         }
-        let cancelled = false
-        void api.readSessionFile(sessionId, REVIEW_FILE_PATH)
-            .then((result) => {
-                if (cancelled) {
-                    return
-                }
-                if (!result.success) {
-                    const errorMessage = result.error ?? 'Failed to load review file'
-                    if (isMissingReviewFileError(errorMessage)) {
-                        setReviewFile(createEmptyReviewFile(workspacePath))
-                        setReviewHash(null)
-                        reviewHashRef.current = null
-                        setReviewError(null)
-                        return
-                    }
-                    setReviewError(errorMessage)
-                    return
-                }
-                const decoded = result.content ? decodeBase64(result.content) : { ok: true, text: '' }
-                if (!decoded.ok) {
-                    setReviewError('Failed to decode review file')
-                    return
-                }
-                const parsed = parseReviewFile(decoded.text, workspacePath)
-                if (!parsed.ok) {
-                    setReviewError(parsed.error)
-                    return
-                }
-                setReviewFile(parsed.value)
-                setReviewHash(result.hash ?? null)
-                reviewHashRef.current = result.hash ?? null
-                setReviewError(null)
-            })
-            .catch((error) => {
-                if (!cancelled) {
-                    setReviewError(error instanceof Error ? error.message : 'Failed to load review file')
-                }
-            })
-        return () => {
-            cancelled = true
+        void reloadReviewFile()
+    }, [api, reloadReviewFile, workspacePath])
+
+    useEffect(() => {
+        if (!api || !workspacePath) {
+            return
         }
-    }, [api, sessionId, workspacePath])
+
+        const interval = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') {
+                return
+            }
+            void reloadReviewFile({ quiet: true })
+        }, 5_000)
+
+        return () => {
+            window.clearInterval(interval)
+        }
+    }, [api, reloadReviewFile, workspacePath])
 
     useEffect(() => {
         if (!selectedPathFromSearch && diffFiles[0]?.filePath) {
@@ -835,6 +877,10 @@ export default function ReviewPage() {
     const relevantThreads = useMemo(
         () => reviewFile?.threads.filter((thread) => thread.diffMode === mode) ?? [],
         [mode, reviewFile?.threads]
+    )
+    const commentCountsByFile = useMemo(
+        () => countReviewCommentsByFile(relevantThreads),
+        [relevantThreads]
     )
 
     const anchorKeysByFile = useMemo(() => {
@@ -1164,11 +1210,12 @@ export default function ReviewPage() {
                     <button
                         type="button"
                         onClick={() => {
+                            void reloadReviewFile()
                             void summaryQuery.refetch()
                             void Promise.all(patchQueries.map((query) => query.refetch()))
                         }}
                         className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                        title="Refresh"
+                        title="Refresh review"
                     >
                         <RefreshIcon />
                     </button>
@@ -1281,6 +1328,7 @@ export default function ReviewPage() {
                         </span>
                     ) : null}
                     {isSaving ? <span className="text-[var(--app-hint)]">Saving…</span> : null}
+                    {isReloadingReviewFile ? <span className="text-[var(--app-hint)]">Refreshing comments…</span> : null}
                 </div>
             </div>
 
@@ -1309,17 +1357,24 @@ export default function ReviewPage() {
                             <div className="px-3 py-4 text-sm text-[var(--app-badge-error-text)]">{summaryQuery.data.error}</div>
                         ) : sidebarEntries.length ? (
                             <div className="py-1">
-                                {sidebarEntries.map((entry) => (
-                                    entry.kind === 'folder' ? (
-                                        <div
-                                            key={entry.key}
-                                            className="flex items-center gap-2 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--app-hint)]/85"
-                                            style={{ paddingLeft: `${12 + entry.depth * 18}px` }}
-                                        >
-                                            <span aria-hidden="true">▾</span>
-                                            <span className="truncate">{entry.name}</span>
-                                        </div>
-                                    ) : (
+                                {sidebarEntries.map((entry) => {
+                                    if (entry.kind === 'folder') {
+                                        return (
+                                            <div
+                                                key={entry.key}
+                                                className="flex items-center gap-2 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--app-hint)]/85"
+                                                style={{ paddingLeft: `${12 + entry.depth * 18}px` }}
+                                            >
+                                                <span aria-hidden="true">▾</span>
+                                                <span className="truncate">{entry.name}</span>
+                                            </div>
+                                        )
+                                    }
+
+                                    const commentCount = commentCountsByFile.get(entry.filePath) ?? 0
+                                    const commentLabel = `${commentCount} comment${commentCount === 1 ? '' : 's'}`
+
+                                    return (
                                         <button
                                             key={entry.key}
                                             type="button"
@@ -1339,7 +1394,18 @@ export default function ReviewPage() {
                                             style={{ paddingLeft: `${12 + entry.depth * 18}px` }}
                                         >
                                             <div className="min-w-0 flex-1">
-                                                <div className="truncate text-[13px] font-medium text-[var(--app-fg)]">{entry.name}</div>
+                                                <div className="flex min-w-0 items-center gap-1.5">
+                                                    <span className="truncate text-[13px] font-medium text-[var(--app-fg)]">{entry.name}</span>
+                                                    {commentCount > 0 ? (
+                                                        <span
+                                                            aria-label={commentLabel}
+                                                            title={commentLabel}
+                                                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--review-accent)]"
+                                                        >
+                                                            <CommentIcon />
+                                                        </span>
+                                                    ) : null}
+                                                </div>
                                                 {entry.oldPath ? (
                                                     <div className="truncate text-[10px] text-[var(--app-hint)]">renamed from {entry.oldPath}</div>
                                                 ) : null}
@@ -1350,7 +1416,7 @@ export default function ReviewPage() {
                                             </div>
                                         </button>
                                     )
-                                ))}
+                                })}
                             </div>
                         ) : (
                             <div className="px-3 py-4 text-sm text-[var(--app-hint)]">No tracked file changes</div>

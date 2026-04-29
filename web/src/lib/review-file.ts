@@ -5,7 +5,7 @@ export type ReviewMode = 'branch' | 'working'
 
 export type ReviewComment = {
     id: string
-    author: 'user' | 'agent'
+    author: string
     createdAt: number
     body: string
 }
@@ -38,7 +38,8 @@ function isComment(value: unknown): value is ReviewComment {
     if (!value || typeof value !== 'object') return false
     const candidate = value as Record<string, unknown>
     return typeof candidate.id === 'string'
-        && (candidate.author === 'user' || candidate.author === 'agent')
+        && typeof candidate.author === 'string'
+        && candidate.author.trim().length > 0
         && typeof candidate.createdAt === 'number'
         && typeof candidate.body === 'string'
 }
@@ -81,6 +82,20 @@ export function createEmptyReviewFile(workspacePath: string): ReviewFile {
         updatedAt: Date.now(),
         threads: []
     }
+}
+
+export function countReviewCommentsByFile(threads: ReviewThread[]): Map<string, number> {
+    const counts = new Map<string, number>()
+
+    for (const thread of threads) {
+        const commentCount = thread.comments.length
+        if (commentCount === 0) {
+            continue
+        }
+        counts.set(thread.filePath, (counts.get(thread.filePath) ?? 0) + commentCount)
+    }
+
+    return counts
 }
 
 export function parseReviewFile(content: string, workspacePath: string): { ok: true; value: ReviewFile } | { ok: false; error: string } {
