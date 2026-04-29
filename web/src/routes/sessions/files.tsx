@@ -33,6 +33,11 @@ type ExplorerHistoryEntry = {
 
 type ExplorerRailView = 'files' | 'open' | 'recent'
 
+type RegexSearchState = {
+    regex: RegExp | null
+    error: string | null
+}
+
 function BackIcon(props: { className?: string }) {
     return (
         <svg
@@ -187,6 +192,17 @@ function getCompactParentPath(path: string): string {
     return `${parts.slice(-2).join('/')}`
 }
 
+function compileSearchRegex(query: string): RegexSearchState {
+    try {
+        return { regex: new RegExp(query, 'i'), error: null }
+    } catch (error) {
+        return {
+            regex: null,
+            error: error instanceof Error ? error.message : 'Invalid regular expression'
+        }
+    }
+}
+
 function SearchResultRow(props: {
     file: {
         fileName: string
@@ -201,23 +217,23 @@ function SearchResultRow(props: {
 }) {
     const subtitle = props.file.filePath || 'project root'
     const icon = props.file.fileType === 'file'
-        ? <FileIcon fileName={props.file.fileName} size={22} />
-        : <FolderIcon className="text-[var(--app-fg)]/80" />
+        ? <FileIcon fileName={props.file.fileName} size={18} />
+        : <FolderIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
 
     return (
         <button
             type="button"
             onClick={props.onOpen}
-            className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors ${
+            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors ${
                 props.active
-                    ? 'bg-[var(--app-subtle-bg)] shadow-[0_14px_28px_-24px_rgba(255,255,255,0.10)]'
+                    ? 'bg-[var(--app-subtle-bg)]'
                     : 'hover:bg-[var(--app-subtle-bg)]'
-            } ${props.showDivider ? 'border-b border-[var(--app-divider)]/70' : ''}`}
+            } ${props.showDivider ? 'border-b border-[var(--app-divider)]/40' : ''}`}
         >
-            {icon}
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">{icon}</span>
             <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-[var(--app-fg)]">{props.file.fileName}</div>
-                <div className="truncate text-xs text-[var(--app-hint)]">{subtitle}</div>
+                <div className="truncate text-[13px] font-medium text-[var(--app-fg)]">{props.file.fileName}</div>
+                <div className="truncate text-[10px] text-[var(--app-hint)]">{subtitle}</div>
             </div>
             {props.metaLabel ? (
                 <span className="shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2 py-0.5 text-[10px] font-semibold text-[var(--app-hint)]">
@@ -239,7 +255,7 @@ function RailSwitch(props: {
     ]
 
     return (
-        <div className="grid grid-cols-3 gap-1 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1">
+        <div className="grid grid-cols-3 gap-1 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-0.5">
             {options.map((option) => {
                 const active = option.value === props.value
                 return (
@@ -247,9 +263,9 @@ function RailSwitch(props: {
                         key={option.value}
                         type="button"
                         onClick={() => props.onChange(option.value)}
-                        className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
+                        className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                             active
-                                ? 'bg-[var(--app-button)] text-[var(--app-button-text)] shadow-[0_14px_28px_-22px_var(--app-button-shadow)]'
+                                ? 'bg-[var(--app-button)] text-[var(--app-button-text)]'
                                 : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
                         }`}
                     >
@@ -267,7 +283,7 @@ function EmptyRailState(props: {
     body: string
 }) {
     return (
-        <div className="rounded-[24px] border border-dashed border-[var(--app-border)] bg-[var(--app-surface-raised)] px-4 py-8 text-center">
+        <div className="mx-3 my-4 rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-bg)] px-4 py-6 text-center">
             <div className="text-sm font-semibold text-[var(--app-fg)]">{props.title}</div>
             <div className="mt-1 text-xs text-[var(--app-hint)]">{props.body}</div>
         </div>
@@ -354,6 +370,7 @@ export default function FilesPage() {
     const [railView, setRailView] = useState<ExplorerRailView>('files')
     const [searchQuery, setSearchQuery] = useState('')
     const [submittedSearchQuery, setSubmittedSearchQuery] = useState('')
+    const [searchUsesRegex, setSearchUsesRegex] = useState(false)
     const [recentPaths, setRecentPaths] = useState<string[]>([])
     const [openTabs, setOpenTabs] = useState<ExplorerTab[]>([])
     const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -364,6 +381,13 @@ export default function FilesPage() {
     const normalizedSearchQuery = searchQuery.trim()
     const normalizedSubmittedSearchQuery = submittedSearchQuery.trim()
     const shouldSearch = Boolean(normalizedSubmittedSearchQuery)
+    const submittedRegex = useMemo(
+        () => searchUsesRegex && normalizedSubmittedSearchQuery
+            ? compileSearchRegex(normalizedSubmittedSearchQuery)
+            : { regex: null, error: null },
+        [normalizedSubmittedSearchQuery, searchUsesRegex]
+    )
+    const searchInventoryQuery = searchUsesRegex ? '' : normalizedSubmittedSearchQuery
 
     useEffect(() => {
         const currentEntry: ExplorerHistoryEntry = {}
@@ -385,14 +409,30 @@ export default function FilesPage() {
         explorerHistoryRef.current = [...explorerHistoryRef.current, currentEntry].slice(-50)
     }, [highlightedLine, searchPath])
 
-    const searchInventory = useSessionFileSearch(api, sessionId, normalizedSubmittedSearchQuery, {
-        enabled: shouldSearch,
+    const searchInventory = useSessionFileSearch(api, sessionId, searchInventoryQuery, {
+        enabled: shouldSearch && !submittedRegex.error,
         limit: 5000
     })
+    const searchError = submittedRegex.error ?? searchInventory.error
 
     const rankedSearchResults = useMemo(
-        () => shouldSearch ? rankFiles(searchInventory.files, normalizedSubmittedSearchQuery).slice(0, 200) : [],
-        [normalizedSubmittedSearchQuery, searchInventory.files, shouldSearch]
+        () => {
+            if (!shouldSearch || submittedRegex.error) {
+                return []
+            }
+            if (searchUsesRegex) {
+                const regex = submittedRegex.regex
+                if (!regex) {
+                    return []
+                }
+                return searchInventory.files
+                    .filter((file) => regex.test(file.fileName) || regex.test(file.fullPath))
+                    .sort((left, right) => left.fullPath.localeCompare(right.fullPath))
+                    .slice(0, 200)
+            }
+            return rankFiles(searchInventory.files, normalizedSubmittedSearchQuery).slice(0, 200)
+        },
+        [normalizedSubmittedSearchQuery, searchInventory.files, searchUsesRegex, shouldSearch, submittedRegex.error, submittedRegex.regex]
     )
 
     const subtitle = session?.metadata?.path ?? sessionId
@@ -569,10 +609,10 @@ export default function FilesPage() {
         }
         if (shouldSearch) {
             void queryClient.invalidateQueries({
-                queryKey: queryKeys.sessionFiles(scopeKey, sessionId, normalizedSubmittedSearchQuery)
+                queryKey: queryKeys.sessionFiles(scopeKey, sessionId, searchInventoryQuery)
             })
         }
-    }, [activeTab?.path, normalizedSubmittedSearchQuery, queryClient, scopeKey, sessionId, shouldSearch])
+    }, [activeTab?.path, queryClient, scopeKey, searchInventoryQuery, sessionId, shouldSearch])
 
     const handleStartEdit = useCallback(() => {
         if (!activeTab) {
@@ -699,13 +739,25 @@ export default function FilesPage() {
 
             <div className="min-h-0 flex-1 overflow-hidden px-3 pb-3 md:px-4 md:pb-4">
                 <div className="flex h-full min-h-0 flex-col gap-3 lg:flex-row">
-                    <aside className="flex min-h-0 w-full shrink-0 flex-col gap-3 lg:w-[320px] xl:w-[360px]">
-                        <div className="rounded-[28px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-4 shadow-[0_20px_48px_-38px_rgba(48,33,24,0.35)]">
-                            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--app-hint)]">
-                                Navigation
+                    <aside className="flex min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-[24px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] shadow-[0_24px_56px_-42px_rgba(48,33,24,0.35)] lg:w-[320px] xl:w-[360px]">
+                        <div className="border-b border-[var(--app-border)] px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm font-medium text-[var(--app-fg)]">Navigation</div>
+                                <div className="text-[11px] text-[var(--app-hint)]">
+                                    {railView === 'files' ? 'Tree' : railView === 'open' ? `${openTabs.length} open` : `${recentFileItems.length} recent`}
+                                </div>
                             </div>
-                            <div className="mt-2 flex items-center gap-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2.5">
-                                <SearchIcon className="text-[var(--app-hint)]" />
+                            <div className="mt-2 flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5">
+                                <button
+                                    type="button"
+                                    onClick={submitSearch}
+                                    disabled={!normalizedSearchQuery}
+                                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-40"
+                                    title="Search files"
+                                    aria-label="Search files"
+                                >
+                                    <SearchIcon />
+                                </button>
                                 <input
                                     value={searchQuery}
                                     onChange={(event) => {
@@ -726,22 +778,36 @@ export default function FilesPage() {
                                     autoCapitalize="none"
                                     autoCorrect="off"
                                 />
+                                <button
+                                    type="button"
+                                    onClick={() => setSearchUsesRegex((enabled) => !enabled)}
+                                    className={`flex h-6 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-semibold transition-colors ${
+                                        searchUsesRegex
+                                            ? 'bg-[var(--app-button)] text-[var(--app-button-text)]'
+                                            : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                                    }`}
+                                    title={searchUsesRegex ? 'Regex search enabled' : 'Use regex search'}
+                                    aria-label={searchUsesRegex ? 'Disable regex search' : 'Use regex search'}
+                                    aria-pressed={searchUsesRegex}
+                                >
+                                    .*
+                                </button>
                             </div>
-                            <div className="mt-3">
+                            <div className="mt-2">
                                 <RailSwitch value={railView} onChange={setRailView} />
                             </div>
                         </div>
 
-                        <div className="min-h-0 flex-1 overflow-y-auto rounded-[30px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-3 shadow-[0_24px_56px_-42px_rgba(48,33,24,0.35)]">
+                        <div className="min-h-0 flex-1 overflow-y-auto py-1">
                             {submittedSearchQuery ? (
                                 searchInventory.isLoading ? (
                                     <EmptyRailState title="Searching files" body="Scanning the session workspace for matching files and folders." />
-                                ) : searchInventory.error ? (
-                                    <EmptyRailState title="Search unavailable" body={searchInventory.error} />
+                                ) : searchError ? (
+                                    <EmptyRailState title="Search unavailable" body={searchError} />
                                 ) : rankedSearchResults.length === 0 ? (
                                     <EmptyRailState title="No matches found" body="Try a shorter file name, a different path fragment, or switch back to the tree." />
                                 ) : (
-                                    <div className="space-y-1">
+                                    <div>
                                         {rankedSearchResults.map((file, index) => (
                                             <SearchResultRow
                                                 key={`${file.fullPath}-${index}`}
@@ -763,7 +829,7 @@ export default function FilesPage() {
                                 />
                             ) : railView === 'open' ? (
                                 openTabs.length ? (
-                                    <div className="space-y-1">
+                                    <div>
                                         {openTabs.map((tab, index) => (
                                             <SearchResultRow
                                                 key={tab.id}
@@ -784,7 +850,7 @@ export default function FilesPage() {
                                     <EmptyRailState title="No open files yet" body="Files you open stay here for quick switching while you work." />
                                 )
                             ) : recentFileItems.length ? (
-                                <div className="space-y-1">
+                                <div>
                                     {recentFileItems.map((file, index) => (
                                         <SearchResultRow
                                             key={file.path}

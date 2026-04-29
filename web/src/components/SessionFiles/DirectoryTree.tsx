@@ -22,38 +22,19 @@ function ChevronIcon(props: { className?: string; collapsed: boolean }) {
     )
 }
 
-function FolderIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-        </svg>
-    )
-}
-
 function DirectorySkeleton(props: { depth: number; rows?: number }) {
     const rows = props.rows ?? 4
-    const indent = 12 + props.depth * 14
+    const indent = 12 + props.depth * 18
 
     return (
         <div className="animate-pulse">
             {Array.from({ length: rows }).map((_, index) => (
                 <div
                     key={`dir-skel-${props.depth}-${index}`}
-                    className="flex items-center gap-3 px-3 py-2"
+                    className="flex items-center gap-2 px-3 py-1.5"
                     style={{ paddingLeft: indent }}
                 >
-                    <div className="h-5 w-5 rounded bg-[var(--app-subtle-bg)]" />
+                    <div className="h-4 w-4 rounded bg-[var(--app-subtle-bg)]" />
                     <div className="h-3 w-40 rounded bg-[var(--app-subtle-bg)]" />
                 </div>
             ))}
@@ -62,10 +43,10 @@ function DirectorySkeleton(props: { depth: number; rows?: number }) {
 }
 
 function DirectoryErrorRow(props: { depth: number; message: string }) {
-    const indent = 12 + props.depth * 14
+    const indent = 12 + props.depth * 18
     return (
         <div
-            className="px-3 py-2 text-xs text-[var(--app-hint)] bg-amber-500/10"
+            className="bg-amber-500/10 px-3 py-2 text-xs text-[var(--app-hint)]"
             style={{ paddingLeft: indent }}
         >
             {props.message}
@@ -93,20 +74,19 @@ function DirectoryFileRow(props: {
             ref={activeButtonRef}
             type="button"
             onClick={() => props.onOpenFile(props.filePath)}
-            className={`relative flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors ${
+            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors ${
                 props.isActive
-                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)] shadow-[0_12px_28px_-24px_rgba(255,255,255,0.10)]'
+                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
                     : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
             }`}
             style={{ paddingLeft: props.childIndent }}
         >
-            {props.isActive ? (
-                <span className="absolute bottom-2 left-0 top-2 w-[3px] rounded-full bg-[var(--app-link)]" aria-hidden="true" />
-            ) : null}
-            <span className="h-4 w-4" />
-            <FileIcon fileName={props.fileName} size={22} />
+            <span className="h-4 w-4 shrink-0" />
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                <FileIcon fileName={props.fileName} size={18} />
+            </span>
             <div className="min-w-0 flex-1">
-                <div className={`truncate text-sm font-medium ${props.isActive ? 'text-[var(--app-fg)]' : ''}`}>
+                <div className="truncate text-[13px] font-medium text-[var(--app-fg)]">
                     {props.fileName}
                 </div>
             </div>
@@ -134,8 +114,8 @@ function DirectoryNode(props: {
     const files = useMemo(() => entries.filter((entry) => entry.type === 'file'), [entries])
     const childDepth = props.depth + 1
 
-    const indent = 12 + props.depth * 14
-    const childIndent = 12 + childDepth * 14
+    const indent = 12 + props.depth * 18
+    const childIndent = 12 + childDepth * 18
     const hasActiveDescendant = Boolean(props.activePath && (
         props.path === ''
             ? true
@@ -147,24 +127,15 @@ function DirectoryNode(props: {
             <button
                 type="button"
                 onClick={() => props.onToggle(props.path)}
-                className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors ${
+                className={`flex w-full items-center gap-2 px-3 py-1 text-left text-[11px] font-medium uppercase tracking-wide transition-colors ${
                     hasActiveDescendant
                         ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
-                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                        : 'text-[var(--app-hint)]/85 hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
                 }`}
                 style={{ paddingLeft: indent }}
             >
-                <ChevronIcon collapsed={!isExpanded} className={hasActiveDescendant ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'} />
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                    hasActiveDescendant ? 'bg-[var(--app-surface-raised)] text-[var(--app-fg)]' : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]/80'
-                }`}>
-                    <FolderIcon className="h-[18px] w-[18px]" />
-                </span>
-                <div className="min-w-0 flex-1">
-                    <div className={`truncate text-sm font-medium ${hasActiveDescendant ? 'text-[var(--app-fg)]' : ''}`}>
-                        {props.label}
-                    </div>
-                </div>
+                <ChevronIcon collapsed={!isExpanded} className={`h-3.5 w-3.5 shrink-0 ${hasActiveDescendant ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'}`} />
+                <span className="truncate">{props.label}</span>
             </button>
 
             {isExpanded ? (
@@ -270,7 +241,7 @@ export function DirectoryTree(props: {
     }, [])
 
     return (
-        <div className="rounded-[24px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-2 shadow-[0_18px_40px_-34px_rgba(48,33,24,0.35)]">
+        <div>
             <DirectoryNode
                 api={props.api}
                 sessionId={props.sessionId}
