@@ -76,10 +76,10 @@ describe('SettingsPage', () => {
     it('displays the website link with correct URL and security attributes', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getAllByText('Website').length).toBeGreaterThanOrEqual(1)
-        const links = screen.getAllByRole('link', { name: 'maglev.run' })
+        const links = screen.getAllByRole('link', { name: 'github.com/bmarimuthu-nv/Maglev' })
         expect(links.length).toBeGreaterThanOrEqual(1)
         const link = links[0]
-        expect(link).toHaveAttribute('href', 'https://maglev.run')
+        expect(link).toHaveAttribute('href', 'https://github.com/bmarimuthu-nv/Maglev')
         expect(link).toHaveAttribute('target', '_blank')
         expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     })

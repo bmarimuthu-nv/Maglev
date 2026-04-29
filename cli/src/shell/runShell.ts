@@ -61,8 +61,8 @@ export async function runShell(options?: {
             archiveReason: archiveReason ?? currentMetadata.archiveReason
         }))
     }
-    updateShellMetadataState('ready')
     session.ensureTerminal(terminalId, 120, 30, { createIfMissing: true })
+    updateShellMetadataState('ready')
     session.keepAlive(false, 'remote')
     const keepAliveInterval = setInterval(() => {
         const tmuxState = session.checkTerminalExists(terminalId)

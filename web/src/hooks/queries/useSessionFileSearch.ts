@@ -23,11 +23,11 @@ export function useSessionFileSearch(
 
     const result = useQuery({
         queryKey: [...queryKeys.sessionFiles(scopeKey, resolvedSessionId, query), mode],
-        queryFn: async () => {
+        queryFn: async ({ signal }) => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            const response = await api.searchSessionFiles(sessionId, query, limit, mode)
+            const response = await api.searchSessionFiles(sessionId, query, limit, mode, signal)
             if (!response.success) {
                 return { files: [], error: response.error ?? 'Failed to search files' }
             }
@@ -38,7 +38,9 @@ export function useSessionFileSearch(
     })
 
     const queryError = result.error instanceof Error
-        ? result.error.message
+        ? result.error.name === 'AbortError'
+            ? null
+            : result.error.message
         : result.error
             ? 'Failed to search files'
             : null
