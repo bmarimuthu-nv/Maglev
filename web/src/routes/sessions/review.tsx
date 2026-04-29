@@ -150,7 +150,7 @@ type ParsedDiffHunk = {
 const REVIEW_PAGE_LINE_LIMIT = 400
 const REVIEW_PAGED_LINE_THRESHOLD = 600
 
-type ReviewToolbarMenuId = 'diff' | 'review' | 'view' | 'workspace'
+type ReviewToolbarMenuId = 'diff' | 'review' | 'view'
 
 type ReviewSidebarFile = {
     kind: 'file'
@@ -1330,13 +1330,13 @@ export default function ReviewPage() {
     const splitSessionStarting = splitSessionId !== null && pendingSplitStartupSessionId === splitSessionId
     const effectiveReviewScheme = reviewAppearance === 'system' ? colorScheme : reviewAppearance
     const reviewModeLabel = mode === 'branch' ? 'Branch diff' : 'Uncommitted'
-    const workspaceShellLabel = splitSessionId
+    const reviewShellActionLabel = splitSessionId
         ? closingSplitSessionId === splitSessionId
             ? 'Closing shell'
             : splitSessionStarting
                 ? 'Starting shell'
-                : 'Shell open'
-        : 'No shell'
+                : 'Close review shell'
+        : 'Open review shell'
     const toggleReviewAppearance = useCallback(() => {
         setReviewAppearance(effectiveReviewScheme === 'dark' ? 'light' : 'dark')
     }, [effectiveReviewScheme, setReviewAppearance])
@@ -1359,6 +1359,26 @@ export default function ReviewPage() {
                         className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
                     >
                         <BackIcon />
+                    </button>
+                    <button
+                        type="button"
+                        disabled={splitSessionId !== null && closingSplitSessionId === splitSessionId}
+                        onClick={() => {
+                            if (splitSessionId) {
+                                void handleCloseSplit()
+                            } else {
+                                void handleOpenSplitTerminal()
+                            }
+                        }}
+                        className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                            splitSessionId
+                                ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
+                                : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                        }`}
+                        title={reviewShellActionLabel}
+                    >
+                        <TerminalIcon />
+                        <span className="hidden sm:inline">{reviewShellActionLabel}</span>
                     </button>
                     <div className="min-w-0 flex-1">
                         <div className="truncate font-semibold text-[var(--app-fg)]">Review</div>
@@ -1482,37 +1502,6 @@ export default function ReviewPage() {
                             </span>
                         </ReviewToolbarMenuItem>
                     </ReviewToolbarMenu>
-                    <ReviewToolbarMenu
-                        id="workspace"
-                        label="Workspace"
-                        value={workspaceShellLabel}
-                        open={openToolbarMenu === 'workspace'}
-                        align="right"
-                        onToggle={toggleToolbarMenu}
-                    >
-                        <ReviewToolbarMenuItem
-                            disabled={splitSessionId !== null && closingSplitSessionId === splitSessionId}
-                            onClick={() => {
-                                setOpenToolbarMenu(null)
-                                if (splitSessionId) {
-                                    void handleCloseSplit()
-                                } else {
-                                    void handleOpenSplitTerminal()
-                                }
-                            }}
-                        >
-                            <span className="inline-flex items-center gap-2">
-                                <TerminalIcon />
-                                {splitSessionId
-                                    ? closingSplitSessionId === splitSessionId
-                                        ? 'Closing shell'
-                                        : splitSessionStarting
-                                            ? 'Starting shell'
-                                            : 'Close review shell'
-                                    : 'Open review shell'}
-                            </span>
-                        </ReviewToolbarMenuItem>
-                    </ReviewToolbarMenu>
                     <span className="text-[var(--app-hint)]">
                         {summary?.currentBranch ? `HEAD: ${summary.currentBranch}` : 'No branch info'}
                     </span>
@@ -1599,7 +1588,7 @@ export default function ReviewPage() {
                                                         <span
                                                             aria-label={commentLabel}
                                                             title={commentLabel}
-                                                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--review-accent)]"
+                                                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--review-comment-accent)]"
                                                         >
                                                             <CommentIcon />
                                                         </span>
@@ -1610,8 +1599,8 @@ export default function ReviewPage() {
                                                 ) : null}
                                             </div>
                                             <div className="shrink-0 text-right text-[10px]">
-                                                <div className="text-[var(--app-diff-added-text)]">+{entry.added ?? '-'}</div>
-                                                <div className="text-[var(--app-diff-removed-text)]">-{entry.removed ?? '-'}</div>
+                                                <div className="text-[var(--review-added-count)]">+{entry.added ?? '-'}</div>
+                                                <div className="text-[var(--review-removed-count)]">-{entry.removed ?? '-'}</div>
                                             </div>
                                         </button>
                                     )

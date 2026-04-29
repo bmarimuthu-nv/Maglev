@@ -28,7 +28,7 @@ export function ReviewThreadCard(props: {
     const replies = props.thread.comments.slice(1)
 
     return (
-        <div className="rounded-2xl border border-[var(--review-thread-border)] bg-[var(--review-thread-bg)] shadow-[0_18px_34px_-28px_rgba(64,42,22,0.42)]">
+        <div className="rounded-2xl border border-[var(--review-thread-border)] bg-[var(--review-thread-bg)] shadow-[0_18px_34px_-28px_rgba(116,74,22,0.46)]">
             <div className="flex items-start justify-between gap-3 border-b border-[var(--code-border)] px-4 py-3">
                 <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -93,7 +93,7 @@ export function ReviewThreadCard(props: {
                         {replies.length > 0 ? (
                             <div className="mt-4 space-y-3 border-t border-[var(--code-border)] pt-4">
                                 {replies.map((comment) => (
-                                    <div key={comment.id} className="rounded-xl border border-[var(--code-border)] bg-[var(--app-surface-raised)] px-3 py-2.5">
+                                    <div key={comment.id} className="rounded-xl border border-[var(--review-thread-border)] bg-[var(--review-thread-inner-bg)] px-3 py-2.5">
                                         <div className="flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
                                             <span className="font-medium text-[var(--app-fg)]">{comment.author}</span>
                                             <span>{new Date(comment.createdAt).toLocaleString()}</span>
@@ -105,7 +105,7 @@ export function ReviewThreadCard(props: {
                         ) : null}
                     </div>
 
-                    <div className="border-t border-[var(--code-border)] bg-[var(--app-surface-raised)] px-4 py-3">
+                    <div className="border-t border-[var(--review-thread-border)] bg-[var(--review-thread-inner-bg)] px-4 py-3">
                         <textarea
                             value={reply}
                             onChange={(event) => setReply(event.target.value)}

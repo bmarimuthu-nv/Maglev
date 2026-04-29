@@ -49,8 +49,12 @@
     --code-line-annotated: rgba(21, 24, 29, 0.05);
     --review-accent: #475364;
     --review-accent-bg: rgba(71, 83, 100, 0.10);
-    --review-thread-bg: rgba(255, 255, 255, 0.98);
-    --review-thread-border: rgba(71, 83, 100, 0.18);
+    --review-thread-bg: #fff8ed;
+    --review-thread-inner-bg: #fffdf8;
+    --review-thread-border: rgba(194, 120, 43, 0.28);
+    --review-comment-accent: #ea8a00;
+    --review-added-count: #078641;
+    --review-removed-count: #d12b20;
     --app-inline-code-bg: rgba(21, 24, 29, 0.06);
     --app-panel-shadow: 0 24px 72px -42px rgba(16, 24, 40, 0.18);
 
@@ -124,8 +128,12 @@
     --code-line-annotated: rgba(255, 255, 255, 0.06);
     --review-accent: #d9e0e8;
     --review-accent-bg: rgba(217, 224, 232, 0.10);
-    --review-thread-bg: rgba(29, 34, 41, 0.96);
-    --review-thread-border: rgba(217, 224, 232, 0.22);
+    --review-thread-bg: #2a241a;
+    --review-thread-inner-bg: #322a1f;
+    --review-thread-border: rgba(251, 191, 36, 0.24);
+    --review-comment-accent: #fbbf24;
+    --review-added-count: #4ade80;
+    --review-removed-count: #fb7185;
     --app-inline-code-bg: rgba(255, 255, 255, 0.08);
     --app-panel-shadow: 0 32px 92px -48px rgba(0, 0, 0, 0.72);
 
@@ -193,8 +201,12 @@
     --code-line-annotated: rgba(21, 24, 29, 0.05);
     --review-accent: #303944;
     --review-accent-bg: rgba(71, 83, 100, 0.10);
-    --review-thread-bg: rgba(255, 255, 255, 0.98);
-    --review-thread-border: rgba(71, 83, 100, 0.18);
+    --review-thread-bg: #fff8ed;
+    --review-thread-inner-bg: #fffdf8;
+    --review-thread-border: rgba(194, 120, 43, 0.28);
+    --review-comment-accent: #ea8a00;
+    --review-added-count: #078641;
+    --review-removed-count: #d12b20;
     --app-inline-code-bg: rgba(21, 24, 29, 0.06);
     --app-panel-shadow: 0 24px 72px -42px rgba(16, 24, 40, 0.18);
     --app-diff-added-bg: #e6f4ec;
@@ -259,8 +271,12 @@
     --code-line-annotated: rgba(255, 255, 255, 0.06);
     --review-accent: #d9e0e8;
     --review-accent-bg: rgba(217, 224, 232, 0.10);
-    --review-thread-bg: rgba(29, 34, 41, 0.96);
-    --review-thread-border: rgba(217, 224, 232, 0.22);
+    --review-thread-bg: #2a241a;
+    --review-thread-inner-bg: #322a1f;
+    --review-thread-border: rgba(251, 191, 36, 0.24);
+    --review-comment-accent: #fbbf24;
+    --review-added-count: #4ade80;
+    --review-removed-count: #fb7185;
     --app-inline-code-bg: rgba(255, 255, 255, 0.08);
     --app-panel-shadow: 0 32px 92px -48px rgba(0, 0, 0, 0.72);
     --app-diff-added-bg: #163126;
