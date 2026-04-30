@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 
 type ReviewThreadComment = {
     id: string
@@ -13,6 +14,30 @@ type ReviewThreadLike = {
     comments: ReviewThreadComment[]
 }
 
+function ReviewCommentBody(props: { body: string }) {
+    return (
+        <MarkdownRenderer
+            content={props.body}
+            surface="plain"
+            className="text-[var(--app-fg)] [&_.aui-md-blockquote]:my-3 [&_.aui-md-h1]:mb-2 [&_.aui-md-h1]:mt-1 [&_.aui-md-h2]:mb-2 [&_.aui-md-h2]:mt-3 [&_.aui-md-h3]:mb-2 [&_.aui-md-h3]:mt-3 [&_.aui-md-ol]:my-2 [&_.aui-md-p]:my-2 [&_.aui-md-p:first-child]:mt-0 [&_.aui-md-p:last-child]:mb-0 [&_.aui-md-pre-wrapper]:my-2 [&_.aui-md-table-wrapper]:my-3 [&_.aui-md-ul]:my-2"
+        />
+    )
+}
+
+function ReviewCommentItem(props: { comment: ReviewThreadComment }) {
+    return (
+        <div className="px-4 py-3.5">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--app-hint)]">
+                <span className="font-semibold text-[var(--app-fg)]">{props.comment.author}</span>
+                <span>{new Date(props.comment.createdAt).toLocaleString()}</span>
+            </div>
+            <div className="mt-2">
+                <ReviewCommentBody body={props.comment.body} />
+            </div>
+        </div>
+    )
+}
+
 export function ReviewThreadCard(props: {
     thread: ReviewThreadLike
     collapsed: boolean
@@ -21,11 +46,11 @@ export function ReviewThreadCard(props: {
     onDelete: () => void
     onReply: (body: string) => boolean | void | Promise<boolean | void>
     disabled?: boolean
+    canCollapse?: boolean
     metaLabel?: string | null
 }) {
     const [reply, setReply] = useState('')
-    const rootComment = props.thread.comments[0]
-    const replies = props.thread.comments.slice(1)
+    const canCollapse = props.canCollapse ?? props.thread.status === 'resolved'
 
     return (
         <div className="rounded-2xl border border-[var(--review-thread-border)] bg-[var(--review-thread-bg)] shadow-[0_18px_34px_-28px_rgba(116,74,22,0.46)]">
@@ -45,15 +70,9 @@ export function ReviewThreadCard(props: {
                             </span>
                         ) : null}
                     </div>
-                    {rootComment ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--app-hint)]">
-                            <span className="font-semibold text-[var(--app-fg)]">{rootComment.author}</span>
-                            <span>{new Date(rootComment.createdAt).toLocaleString()}</span>
-                        </div>
-                    ) : null}
                 </div>
                 <div className="flex items-center gap-1">
-                    {props.thread.status === 'resolved' ? (
+                    {canCollapse ? (
                         <button
                             type="button"
                             onClick={props.onToggleResolved}
@@ -83,33 +102,17 @@ export function ReviewThreadCard(props: {
 
             {props.collapsed ? null : (
                 <>
-                    <div className="px-4 py-4">
-                        {rootComment ? (
-                            <div className="whitespace-pre-wrap text-sm leading-6 text-[var(--app-fg)]">
-                                {rootComment.body}
-                            </div>
-                        ) : null}
-
-                        {replies.length > 0 ? (
-                            <div className="mt-4 space-y-3 border-t border-[var(--code-border)] pt-4">
-                                {replies.map((comment) => (
-                                    <div key={comment.id} className="rounded-xl border border-[var(--review-thread-border)] bg-[var(--review-thread-inner-bg)] px-3 py-2.5">
-                                        <div className="flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
-                                            <span className="font-medium text-[var(--app-fg)]">{comment.author}</span>
-                                            <span>{new Date(comment.createdAt).toLocaleString()}</span>
-                                        </div>
-                                        <div className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--app-fg)]">{comment.body}</div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : null}
+                    <div className="divide-y divide-[var(--code-border)]">
+                        {props.thread.comments.map((comment) => (
+                            <ReviewCommentItem key={comment.id} comment={comment} />
+                        ))}
                     </div>
 
                     <div className="border-t border-[var(--review-thread-border)] bg-[var(--review-thread-inner-bg)] px-4 py-3">
                         <textarea
                             value={reply}
                             onChange={(event) => setReply(event.target.value)}
-                            placeholder="Reply to thread"
+                            placeholder="Add a comment"
                             className="min-h-20 w-full rounded-xl border border-[var(--code-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--review-accent)]"
                         />
                         <div className="mt-3 flex justify-end">
@@ -129,7 +132,7 @@ export function ReviewThreadCard(props: {
                                 }}
                                 className="rounded-full bg-[var(--app-button)] px-3.5 py-2 text-sm font-semibold text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                                Reply
+                                Comment
                             </button>
                         </div>
                     </div>

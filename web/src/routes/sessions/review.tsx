@@ -127,6 +127,16 @@ function buildThreadAnchor(line: ParsedDiffLine): ReviewThread['anchor'] | null 
     return null
 }
 
+function isReviewThreadCollapsed(thread: ReviewThread, collapsedThreadIds: Record<string, boolean>, isOutdated: boolean): boolean {
+    if (thread.status === 'resolved') {
+        return collapsedThreadIds[thread.id] !== false
+    }
+    if (isOutdated) {
+        return collapsedThreadIds[thread.id] === true
+    }
+    return false
+}
+
 function getLineAnchorPreviews(filePath: string, line: ParsedDiffLine): Array<{ key: string; preview: string }> {
     if (line.kind === 'add') {
         return [{ key: getAnchorKey(filePath, 'right', line.newLine), preview: line.text }]
@@ -696,33 +706,37 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                             ) : null}
                                             {lineThreads.length > 0 ? (
                                                 <div className="space-y-2 border-t border-[var(--code-border)] bg-[var(--app-secondary-bg)] px-4 py-3">
-                                                    {lineThreads.map((thread) => (
-                                                        <ReviewThreadCard
-                                                            key={thread.id}
-                                                            thread={thread}
-                                                            metaLabel={props.outdatedThreadIds.has(thread.id) ? 'Outdated' : null}
-                                                            collapsed={thread.status === 'resolved' && props.collapsedResolvedThreadIds[thread.id] !== false}
-                                                            onToggleResolved={() => {
-                                                                props.setCollapsedResolvedThreadIds((current) => ({
-                                                                    ...current,
-                                                                    [thread.id]: current[thread.id] === false ? true : false
-                                                                }))
-                                                            }}
-                                                            onResolve={() => {
-                                                                void props.onUpdateThread(thread.id, (current) => ({
-                                                                    ...current,
-                                                                    status: current.status === 'resolved' ? 'open' : 'resolved'
-                                                                }))
-                                                            }}
-                                                            onDelete={() => {
-                                                                if (!window.confirm('Delete this review thread permanently?')) {
-                                                                    return
-                                                                }
-                                                                void props.onUpdateThread(thread.id, () => null)
-                                                            }}
-                                                            onReply={(body) => props.onReplyToThread(thread.id, body)}
-                                                        />
-                                                    ))}
+                                                    {lineThreads.map((thread) => {
+                                                        const isOutdated = props.outdatedThreadIds.has(thread.id)
+                                                        return (
+                                                            <ReviewThreadCard
+                                                                key={thread.id}
+                                                                thread={thread}
+                                                                metaLabel={isOutdated ? 'Outdated' : null}
+                                                                canCollapse={thread.status === 'resolved' || isOutdated}
+                                                                collapsed={isReviewThreadCollapsed(thread, props.collapsedResolvedThreadIds, isOutdated)}
+                                                                onToggleResolved={() => {
+                                                                    props.setCollapsedResolvedThreadIds((current) => ({
+                                                                        ...current,
+                                                                        [thread.id]: !isReviewThreadCollapsed(thread, current, isOutdated)
+                                                                    }))
+                                                                }}
+                                                                onResolve={() => {
+                                                                    void props.onUpdateThread(thread.id, (current) => ({
+                                                                        ...current,
+                                                                        status: current.status === 'resolved' ? 'open' : 'resolved'
+                                                                    }))
+                                                                }}
+                                                                onDelete={() => {
+                                                                    if (!window.confirm('Delete this review thread permanently?')) {
+                                                                        return
+                                                                    }
+                                                                    void props.onUpdateThread(thread.id, () => null)
+                                                                }}
+                                                                onReply={(body) => props.onReplyToThread(thread.id, body)}
+                                                            />
+                                                        )
+                                                    })}
                                                 </div>
                                             ) : null}
                                         </div>
@@ -736,28 +750,37 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                         <div className="border-t border-[var(--code-border)] bg-[var(--app-surface-raised)] px-4 py-4">
                             <div className="mb-2 text-sm font-medium">Orphaned threads</div>
                             <div className="space-y-2">
-                                {props.orphanedThreads.map((thread) => (
-                                    <ReviewThreadCard
-                                        key={thread.id}
-                                        thread={thread}
-                                        metaLabel="Outdated"
-                                        collapsed={false}
-                                        onToggleResolved={() => {}}
-                                        onResolve={() => {
-                                            void props.onUpdateThread(thread.id, (current) => ({
-                                                ...current,
-                                                status: current.status === 'resolved' ? 'open' : 'resolved'
-                                            }))
-                                        }}
-                                        onDelete={() => {
-                                            if (!window.confirm('Delete this review thread permanently?')) {
-                                                return
-                                            }
-                                            void props.onUpdateThread(thread.id, () => null)
-                                        }}
-                                        onReply={(body) => props.onReplyToThread(thread.id, body)}
-                                    />
-                                ))}
+                                {props.orphanedThreads.map((thread) => {
+                                    const isOutdated = true
+                                    return (
+                                        <ReviewThreadCard
+                                            key={thread.id}
+                                            thread={thread}
+                                            metaLabel="Outdated"
+                                            canCollapse
+                                            collapsed={isReviewThreadCollapsed(thread, props.collapsedResolvedThreadIds, isOutdated)}
+                                            onToggleResolved={() => {
+                                                props.setCollapsedResolvedThreadIds((current) => ({
+                                                    ...current,
+                                                    [thread.id]: !isReviewThreadCollapsed(thread, current, isOutdated)
+                                                }))
+                                            }}
+                                            onResolve={() => {
+                                                void props.onUpdateThread(thread.id, (current) => ({
+                                                    ...current,
+                                                    status: current.status === 'resolved' ? 'open' : 'resolved'
+                                                }))
+                                            }}
+                                            onDelete={() => {
+                                                if (!window.confirm('Delete this review thread permanently?')) {
+                                                    return
+                                                }
+                                                void props.onUpdateThread(thread.id, () => null)
+                                            }}
+                                            onReply={(body) => props.onReplyToThread(thread.id, body)}
+                                        />
+                                    )
+                                })}
                             </div>
                         </div>
                     ) : null}

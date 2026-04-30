@@ -11,6 +11,8 @@ import { CheckIcon, CopyIcon } from '@/components/icons'
 interface MarkdownRendererProps {
     content: string
     components?: Components
+    surface?: 'panel' | 'plain'
+    className?: string
 }
 
 function extractText(children: ReactNode): string {
@@ -490,9 +492,12 @@ export function MarkdownRenderer(props: MarkdownRendererProps) {
     const mergedComponents = props.components
         ? { ...defaultComponents, ...props.components }
         : defaultComponents
+    const surfaceClass = props.surface === 'plain'
+        ? 'aui-md min-w-0 max-w-full break-words text-sm leading-6'
+        : 'aui-md mx-auto min-w-0 max-w-4xl break-words rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-6 py-6 text-base leading-7 shadow-sm'
 
     return (
-        <div className={cn('aui-md mx-auto min-w-0 max-w-4xl break-words rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-6 py-6 text-base leading-7 shadow-sm')}>
+        <div className={cn(surfaceClass, props.className)}>
             <ReactMarkdown
                 remarkPlugins={MARKDOWN_PLUGINS}
                 components={mergedComponents}
