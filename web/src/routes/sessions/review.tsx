@@ -13,7 +13,7 @@ import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { ReviewThreadCard } from '@/components/review/ReviewThreadCard'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
-import { REVIEW_FILE_PATH, countReviewCommentsByFile, createEmptyReviewFile, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
+import { REVIEW_FILE_PATH, countReviewCommentsByFile, createEmptyReviewFile, isReviewThreadOutdated, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
 import { resolveLanguageFromPath, useShikiLines } from '@/lib/shiki'
 import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
@@ -125,6 +125,22 @@ function buildThreadAnchor(line: ParsedDiffLine): ReviewThread['anchor'] | null 
         return { side: 'right', line: line.newLine, preview: line.text }
     }
     return null
+}
+
+function getLineAnchorPreviews(filePath: string, line: ParsedDiffLine): Array<{ key: string; preview: string }> {
+    if (line.kind === 'add') {
+        return [{ key: getAnchorKey(filePath, 'right', line.newLine), preview: line.text }]
+    }
+    if (line.kind === 'delete') {
+        return [{ key: getAnchorKey(filePath, 'left', line.oldLine), preview: line.text }]
+    }
+    if (line.kind === 'context') {
+        return [
+            { key: getAnchorKey(filePath, 'left', line.oldLine), preview: line.text },
+            { key: getAnchorKey(filePath, 'right', line.newLine), preview: line.text }
+        ]
+    }
+    return []
 }
 
 function generateId(): string {
@@ -382,6 +398,7 @@ type ReviewFileCardProps = {
     collapsedResolvedThreadIds: Record<string, boolean>
     lineThreadsByAnchor: Map<string, ReviewThread[]>
     orphanedThreads: ReviewThread[]
+    outdatedThreadIds: Set<string>
     setComposerAnchorKey: (value: string | null) => void
     setComposerText: (value: string) => void
     setCollapsedResolvedThreadIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
@@ -666,6 +683,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                         <ReviewThreadCard
                                                             key={thread.id}
                                                             thread={thread}
+                                                            metaLabel={props.outdatedThreadIds.has(thread.id) ? 'Outdated' : null}
                                                             collapsed={thread.status === 'resolved' && props.collapsedResolvedThreadIds[thread.id] !== false}
                                                             onToggleResolved={() => {
                                                                 props.setCollapsedResolvedThreadIds((current) => ({
@@ -718,6 +736,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                     <ReviewThreadCard
                                         key={thread.id}
                                         thread={thread}
+                                        metaLabel="Outdated"
                                         collapsed={false}
                                         onToggleResolved={() => {}}
                                         onResolve={() => {
@@ -1037,19 +1056,38 @@ export default function ReviewPage() {
         for (const file of parsedFileDiffs) {
             const keys = new Set<string>()
             for (const line of file.lines) {
-                if (line.kind === 'add') {
-                    keys.add(getAnchorKey(file.filePath, 'right', line.newLine))
-                } else if (line.kind === 'delete') {
-                    keys.add(getAnchorKey(file.filePath, 'left', line.oldLine))
-                } else if (line.kind === 'context') {
-                    keys.add(getAnchorKey(file.filePath, 'left', line.oldLine))
-                    keys.add(getAnchorKey(file.filePath, 'right', line.newLine))
+                for (const anchor of getLineAnchorPreviews(file.filePath, line)) {
+                    keys.add(anchor.key)
                 }
             }
             map.set(file.filePath, keys)
         }
         return map
     }, [parsedFileDiffs])
+
+    const currentPreviewByAnchor = useMemo(() => {
+        const map = new Map<string, string>()
+        for (const file of parsedFileDiffs) {
+            for (const line of file.lines) {
+                for (const anchor of getLineAnchorPreviews(file.filePath, line)) {
+                    map.set(anchor.key, anchor.preview)
+                }
+            }
+        }
+        return map
+    }, [parsedFileDiffs])
+
+    const outdatedThreadIds = useMemo(() => {
+        const ids = new Set<string>()
+        for (const thread of relevantThreads) {
+            const anchorKey = getAnchorKey(thread.filePath, thread.anchor.side, thread.anchor.line)
+            const currentPreview = currentPreviewByAnchor.get(anchorKey)
+            if (isReviewThreadOutdated(thread, currentPreview)) {
+                ids.add(thread.id)
+            }
+        }
+        return ids
+    }, [currentPreviewByAnchor, relevantThreads])
 
     const threadsByAnchor = useMemo(() => {
         const map = new Map<string, ReviewThread[]>()
@@ -1640,6 +1678,7 @@ export default function ReviewPage() {
                                             collapsedResolvedThreadIds={collapsedResolvedThreadIds}
                                             lineThreadsByAnchor={threadsByAnchor}
                                             orphanedThreads={orphanedThreads}
+                                            outdatedThreadIds={outdatedThreadIds}
                                             setComposerAnchorKey={setComposerAnchorKey}
                                             setComposerText={setComposerText}
                                             setCollapsedResolvedThreadIds={setCollapsedResolvedThreadIds}

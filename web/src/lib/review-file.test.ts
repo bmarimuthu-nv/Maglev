@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countReviewCommentsByFile, parseReviewFile, type ReviewThread } from './review-file'
+import { countReviewCommentsByFile, isReviewThreadOutdated, parseReviewFile, type ReviewThread } from './review-file'
 
 describe('parseReviewFile', () => {
     it('accepts review comments from any named author', () => {
@@ -87,5 +87,22 @@ describe('parseReviewFile', () => {
             'src/app.ts': 2,
             'src/other.ts': 1
         })
+    })
+
+    it('marks threads outdated when their original preview no longer matches', () => {
+        const thread: ReviewThread = {
+            id: 'thread-1',
+            diffMode: 'branch',
+            filePath: 'src/app.ts',
+            anchor: { side: 'right', line: 12, preview: 'const oldValue = true' },
+            status: 'open',
+            comments: [
+                { id: 'comment-1', author: 'Reviewer', createdAt: 1, body: 'Check this' }
+            ]
+        }
+
+        expect(isReviewThreadOutdated(thread, 'const oldValue = true')).toBe(false)
+        expect(isReviewThreadOutdated(thread, 'const newValue = true')).toBe(true)
+        expect(isReviewThreadOutdated(thread, undefined)).toBe(true)
     })
 })

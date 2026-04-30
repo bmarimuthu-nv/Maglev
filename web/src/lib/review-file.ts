@@ -98,6 +98,16 @@ export function countReviewCommentsByFile(threads: ReviewThread[]): Map<string, 
     return counts
 }
 
+export function isReviewThreadOutdated(thread: ReviewThread, currentPreview: string | undefined): boolean {
+    if (currentPreview === undefined) {
+        return true
+    }
+    if (typeof thread.anchor.preview !== 'string') {
+        return false
+    }
+    return thread.anchor.preview !== currentPreview
+}
+
 export function parseReviewFile(content: string, workspacePath: string): { ok: true; value: ReviewFile } | { ok: false; error: string } {
     if (!content.trim()) {
         return { ok: true, value: createEmptyReviewFile(workspacePath) }
