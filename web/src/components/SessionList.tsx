@@ -183,6 +183,10 @@ export function filterSessionSummaries(
     return sessions.filter((session) => matchesSessionSearch(session, filters.search))
 }
 
+export function shouldPersistSessionListOrder(filters: SessionListFilters): boolean {
+    return normalizeSearch(filters.search).length === 0
+}
+
 function getGroupDisplayName(directory: string): string {
     if (directory === 'Other') return directory
     const parts = directory.split(/[\\/]+/).filter(Boolean)
@@ -1329,6 +1333,10 @@ export function SessionList(props: {
     }, [groups, sessionOrders, collapseOverrides])
 
     useEffect(() => {
+        if (!shouldPersistSessionListOrder(appliedFilters)) {
+            return
+        }
+
         const nextOrders: SessionListOrders = {
             groups: reconcileOrder(groupRenderStates, sessionOrders.groups, (groupState) => groupState.group.directory),
             subgroups: {},
@@ -1357,7 +1365,7 @@ export function SessionList(props: {
 
         setSessionOrders(nextOrders)
         saveSessionOrders(sessionOrderStorageKey, nextOrders)
-    }, [groupRenderStates, sessionOrderStorageKey, sessionOrders])
+    }, [appliedFilters, groupRenderStates, sessionOrderStorageKey, sessionOrders])
 
     const virtualItems = useMemo<VirtualListItem[]>(() => {
         return groupRenderStates.flatMap((groupState) => {
