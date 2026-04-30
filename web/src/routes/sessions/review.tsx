@@ -13,7 +13,7 @@ import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { ReviewThreadCard } from '@/components/review/ReviewThreadCard'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
-import { REVIEW_FILE_PATH, countReviewCommentsByFile, createEmptyReviewFile, isReviewThreadOutdated, parseReviewFile, type ReviewComment, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
+import { REVIEW_FILE_PATH, countReviewCommentsByFile, countReviewCommentsByMode, createEmptyReviewFile, getReviewModeLabel, isReviewThreadOutdated, keepReviewThreadsForMode, parseReviewFile, type ReviewComment, type ReviewContext, type ReviewFile, type ReviewMode, type ReviewThread } from '@/lib/review-file'
 import { parseUnifiedDiff, type ParsedDiffLine } from '@/lib/unified-diff'
 import { resolveLanguageFromPath, useShikiLines } from '@/lib/shiki'
 import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
@@ -141,6 +141,22 @@ function getLineAnchorPreviews(filePath: string, line: ParsedDiffLine): Array<{ 
         ]
     }
     return []
+}
+
+function buildReviewContextComparison(context: {
+    mode: ReviewMode
+    baseModeLabel: string | null
+    defaultBranch: string | null
+    mergeBase: string | null
+}): string {
+    if (context.mode === 'working') {
+        return 'Uncommitted changes against HEAD'
+    }
+
+    const baseRef = context.defaultBranch ?? 'resolved base branch'
+    const baseCommit = context.mergeBase ?? 'resolved merge base'
+    const baseMode = context.baseModeLabel ? ` using ${context.baseModeLabel}` : ''
+    return `Branch diff from ${baseCommit} to HEAD against ${baseRef}${baseMode}`
 }
 
 function generateId(): string {
@@ -405,6 +421,7 @@ type ReviewFileCardProps = {
     onToggleExpanded: () => void
     onCreateThread: (filePath: string, line: ParsedDiffLine) => Promise<void>
     onUpdateThread: (threadId: string, mutator: (thread: ReviewThread) => ReviewThread | null) => Promise<void>
+    onReplyToThread: (threadId: string, body: string) => Promise<boolean>
 }
 
 function ReviewFileCard(props: ReviewFileCardProps) {
@@ -703,20 +720,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                                                 }
                                                                 void props.onUpdateThread(thread.id, () => null)
                                                             }}
-                                                            onReply={(body) => {
-                                                                void props.onUpdateThread(thread.id, (current) => ({
-                                                                    ...current,
-                                                                    comments: [
-                                                                        ...current.comments,
-                                                                        {
-                                                                            id: generateId(),
-                                                                            author: 'user',
-                                                                            createdAt: Date.now(),
-                                                                            body
-                                                                        } satisfies ReviewComment
-                                                                    ]
-                                                                }))
-                                                            }}
+                                                            onReply={(body) => props.onReplyToThread(thread.id, body)}
                                                         />
                                                     ))}
                                                 </div>
@@ -751,20 +755,7 @@ function ReviewFileCard(props: ReviewFileCardProps) {
                                             }
                                             void props.onUpdateThread(thread.id, () => null)
                                         }}
-                                        onReply={(body) => {
-                                            void props.onUpdateThread(thread.id, (current) => ({
-                                                ...current,
-                                                comments: [
-                                                    ...current.comments,
-                                                    {
-                                                        id: generateId(),
-                                                        author: 'user',
-                                                        createdAt: Date.now(),
-                                                        body
-                                                    } satisfies ReviewComment
-                                                ]
-                                            }))
-                                        }}
+                                        onReply={(body) => props.onReplyToThread(thread.id, body)}
                                     />
                                 ))}
                             </div>
@@ -869,6 +860,7 @@ export default function ReviewPage() {
     })
 
     const summary = summaryQuery.data?.success ? summaryQuery.data : null
+    const reviewBaseLabel = reviewBaseModeOptions.find((option) => option.value === reviewBaseMode)?.label ?? reviewBaseMode
     const workspacePath = session?.metadata?.path ?? null
     const respawnedSession = useMemo(
         () => findRespawnedSession(allSessions, sessionId),
@@ -1128,17 +1120,60 @@ export default function ReviewPage() {
         node.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, [selectedPath, parsedFileDiffs.length])
 
+    const buildCurrentReviewContext = useCallback((): ReviewContext => {
+        const resolvedMode = summary?.mode ?? mode
+        const currentBranch = summary?.currentBranch ?? reviewFile?.currentBranch ?? null
+        const defaultBranch = resolvedMode === 'branch'
+            ? summary?.defaultBranch ?? reviewFile?.defaultBranch ?? null
+            : null
+        const mergeBase = resolvedMode === 'branch'
+            ? summary?.mergeBase ?? reviewFile?.mergeBase ?? null
+            : null
+        const baseMode = resolvedMode === 'branch' ? summary?.baseMode ?? reviewBaseMode : null
+        const baseModeLabel = resolvedMode === 'branch' ? reviewBaseLabel : null
+
+        return {
+            mode: resolvedMode,
+            modeLabel: resolvedMode === 'branch' ? 'Branch diff' : 'Uncommitted changes',
+            baseMode,
+            baseModeLabel,
+            currentBranch,
+            defaultBranch,
+            mergeBase,
+            comparison: buildReviewContextComparison({
+                mode: resolvedMode,
+                baseModeLabel,
+                defaultBranch,
+                mergeBase
+            })
+        }
+    }, [
+        mode,
+        reviewBaseLabel,
+        reviewBaseMode,
+        reviewFile?.currentBranch,
+        reviewFile?.defaultBranch,
+        reviewFile?.mergeBase,
+        summary?.baseMode,
+        summary?.currentBranch,
+        summary?.defaultBranch,
+        summary?.mergeBase,
+        summary?.mode
+    ])
+
     const persistReviewFile = useCallback(async (next: ReviewFile) => {
         if (!api) {
             return false
         }
         setIsSaving(true)
         setSaveError(null)
+        const reviewContext = buildCurrentReviewContext()
         const payload = {
             ...next,
-            currentBranch: summary?.currentBranch ?? next.currentBranch ?? null,
-            defaultBranch: summary?.defaultBranch ?? next.defaultBranch ?? null,
-            mergeBase: summary?.mergeBase ?? next.mergeBase ?? null,
+            currentBranch: reviewContext.currentBranch,
+            defaultBranch: reviewContext.defaultBranch,
+            mergeBase: reviewContext.mergeBase,
+            reviewContext,
             updatedAt: Date.now()
         }
         const encoded = encodeBase64(`${JSON.stringify(payload, null, 2)}\n`)
@@ -1153,7 +1188,7 @@ export default function ReviewPage() {
         setReviewHash(nextHash)
         reviewHashRef.current = nextHash
         return true
-    }, [api, sessionId, summary?.currentBranch, summary?.defaultBranch, summary?.mergeBase])
+    }, [api, buildCurrentReviewContext, sessionId])
 
     const mutateReview = useCallback(async (mutator: (current: ReviewFile) => ReviewFile) => {
         if (!reviewFile) {
@@ -1166,16 +1201,41 @@ export default function ReviewPage() {
         await queued
     }, [persistReviewFile, reviewFile])
 
+    const confirmReplacingOtherModeComments = useCallback((): boolean => {
+        if (!reviewFile) {
+            return false
+        }
+        const commentsByMode = countReviewCommentsByMode(reviewFile.threads)
+        const otherModes = Array.from(commentsByMode.entries())
+            .filter(([threadMode, count]) => threadMode !== mode && count > 0)
+        if (otherModes.length === 0) {
+            return true
+        }
+
+        const total = otherModes.reduce((sum, [, count]) => sum + count, 0)
+        const otherModeLabels = otherModes
+            .map(([threadMode, count]) => `${count} ${count === 1 ? 'comment' : 'comments'} in ${getReviewModeLabel(threadMode)}`)
+            .join(', ')
+        return window.confirm(
+            `There ${total === 1 ? 'is' : 'are'} already ${otherModeLabels}. `
+            + `Adding a new comment in ${getReviewModeLabel(mode)} will delete comments added in another diff view. `
+            + 'Do you want to proceed?'
+        )
+    }, [mode, reviewFile])
+
     const handleCreateThread = useCallback(async (filePath: string, line: ParsedDiffLine) => {
         const anchor = buildThreadAnchor(line)
         const body = composerText.trim()
         if (!reviewFile || !anchor || !body || !filePath) {
             return
         }
+        if (!confirmReplacingOtherModeComments()) {
+            return
+        }
         await mutateReview((current) => ({
             ...current,
             threads: [
-                ...current.threads,
+                ...keepReviewThreadsForMode(current.threads, mode),
                 {
                     id: generateId(),
                     diffMode: mode,
@@ -1196,7 +1256,7 @@ export default function ReviewPage() {
         }))
         setComposerAnchorKey(null)
         setComposerText('')
-    }, [composerText, mode, mutateReview, reviewFile])
+    }, [composerText, confirmReplacingOtherModeComments, mode, mutateReview, reviewFile])
 
     const updateThread = useCallback(async (threadId: string, mutator: (thread: ReviewThread) => ReviewThread | null) => {
         await mutateReview((current) => ({
@@ -1211,8 +1271,38 @@ export default function ReviewPage() {
         }))
     }, [mutateReview])
 
+    const replyToThread = useCallback(async (threadId: string, body: string): Promise<boolean> => {
+        const replyBody = body.trim()
+        if (!replyBody) {
+            return false
+        }
+        if (!reviewFile || !confirmReplacingOtherModeComments()) {
+            return false
+        }
+        await mutateReview((current) => ({
+            ...current,
+            threads: keepReviewThreadsForMode(current.threads, mode).flatMap((thread) => {
+                if (thread.id !== threadId) {
+                    return [thread]
+                }
+                return [{
+                    ...thread,
+                    comments: [
+                        ...thread.comments,
+                        {
+                            id: generateId(),
+                            author: 'user',
+                            createdAt: Date.now(),
+                            body: replyBody
+                        } satisfies ReviewComment
+                    ]
+                }]
+            })
+        }))
+        return true
+    }, [confirmReplacingOtherModeComments, mode, mutateReview, reviewFile])
+
     const subtitle = session?.metadata?.path ?? sessionId
-    const reviewBaseLabel = reviewBaseModeOptions.find((option) => option.value === reviewBaseMode)?.label ?? reviewBaseMode
     const expandedCount = expandedFilePaths.size
 
     useEffect(() => {
@@ -1695,6 +1785,7 @@ export default function ReviewPage() {
                                             }}
                                             onCreateThread={handleCreateThread}
                                             onUpdateThread={updateThread}
+                                            onReplyToThread={replyToThread}
                                         />
                                     </div>
                                 )

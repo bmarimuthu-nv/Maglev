@@ -19,7 +19,7 @@ export function ReviewThreadCard(props: {
     onToggleResolved: () => void
     onResolve: () => void
     onDelete: () => void
-    onReply: (body: string) => void
+    onReply: (body: string) => boolean | void | Promise<boolean | void>
     disabled?: boolean
     metaLabel?: string | null
 }) {
@@ -121,8 +121,11 @@ export function ReviewThreadCard(props: {
                                     if (!next) {
                                         return
                                     }
-                                    props.onReply(next)
-                                    setReply('')
+                                    void Promise.resolve(props.onReply(next)).then((submitted) => {
+                                        if (submitted !== false) {
+                                            setReply('')
+                                        }
+                                    })
                                 }}
                                 className="rounded-full bg-[var(--app-button)] px-3.5 py-2 text-sm font-semibold text-[var(--app-button-text)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
