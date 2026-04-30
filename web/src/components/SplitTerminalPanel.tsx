@@ -34,10 +34,11 @@ export function SplitTerminalPanel(props: {
     onUnsplit?: (sessionId: string) => Promise<void> | void
     isClosing?: boolean
     starting?: boolean
+    showScrollControl?: boolean
     title?: string
     subtitle?: string
 }) {
-    const { sessionId, onClose, onNavigate, onUnsplit, isClosing = false, starting = false, title, subtitle } = props
+    const { sessionId, onClose, onNavigate, onUnsplit, isClosing = false, starting = false, showScrollControl = false, title, subtitle } = props
     const { api, token, baseUrl } = useAppContext()
     const {
         session,
@@ -46,6 +47,7 @@ export function SplitTerminalPanel(props: {
     } = useSession(api, sessionId)
     const isShellSession = session?.metadata?.flavor === 'shell'
     const [isTerminalFocused, setIsTerminalFocused] = useState(false)
+    const [tmuxCopyModeActive, setTmuxCopyModeActive] = useState(false)
 
     const terminalId = useMemo(() => {
         if (sessionLoading) return null
@@ -59,6 +61,7 @@ export function SplitTerminalPanel(props: {
     const connectOnceRef = useRef(false)
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const writeRef = useRef<(data: string) => void>(() => {})
+    const tmuxCopyModeActiveRef = useRef(false)
 
     const {
         state: terminalState,
@@ -84,6 +87,10 @@ export function SplitTerminalPanel(props: {
     }, [write])
 
     useEffect(() => {
+        tmuxCopyModeActiveRef.current = tmuxCopyModeActive
+    }, [tmuxCopyModeActive])
+
+    useEffect(() => {
         onOutput((data) => {
             terminalRef.current?.write(data)
         })
@@ -101,6 +108,9 @@ export function SplitTerminalPanel(props: {
             terminalRef.current = terminal
             inputDisposableRef.current?.dispose()
             inputDisposableRef.current = terminal.onData((data) => {
+                if (data === 'q' && tmuxCopyModeActiveRef.current) {
+                    setTmuxCopyModeActive(false)
+                }
                 writeRef.current(data)
             })
             replay()
@@ -247,6 +257,22 @@ export function SplitTerminalPanel(props: {
     const startupLabel = panelTitle === 'Review terminal' ? 'Starting review shell…' : 'Starting split terminal…'
 
     const startupPending = starting || sessionLoading || !session || (isShellSession && (!session.metadata?.shellTerminalId || session.metadata?.shellTerminalState !== 'ready'))
+    const scrollControlDisabled = startupPending || !session?.active || terminalState.status !== 'connected'
+
+    const handleScrollToggle = useCallback(() => {
+        if (scrollControlDisabled) {
+            return
+        }
+        if (tmuxCopyModeActive) {
+            write('q')
+            setTmuxCopyModeActive(false)
+        } else {
+            write('\u0002')
+            write('[')
+            setTmuxCopyModeActive(true)
+        }
+        terminalRef.current?.focus()
+    }, [scrollControlDisabled, tmuxCopyModeActive, write])
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden p-3">
@@ -267,6 +293,21 @@ export function SplitTerminalPanel(props: {
                             <div className="truncate text-[10px] text-[var(--app-hint)]">{subtitle}</div>
                         ) : null}
                     </div>
+                    {showScrollControl ? (
+                        <button
+                            type="button"
+                            onClick={handleScrollToggle}
+                            disabled={scrollControlDisabled}
+                            className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                tmuxCopyModeActive
+                                    ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
+                                    : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                            }`}
+                            title={tmuxCopyModeActive ? 'Exit tmux scroll mode' : 'Enter tmux scroll mode'}
+                        >
+                            {tmuxCopyModeActive ? 'Exit scroll' : 'Scroll'}
+                        </button>
+                    ) : null}
                     {isSplitTerminalChild && onUnsplit ? (
                         <button
                             type="button"

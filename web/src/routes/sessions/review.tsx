@@ -1722,6 +1722,7 @@ export default function ReviewPage() {
                         onClose={handleCloseSplit}
                         isClosing={closingSplitSessionId === splitSessionId}
                         starting={splitSessionStarting}
+                        showScrollControl
                         title="Review terminal"
                         subtitle={session.metadata?.path ?? undefined}
                         onNavigate={(id) => {

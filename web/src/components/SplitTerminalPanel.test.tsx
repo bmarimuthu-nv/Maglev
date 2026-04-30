@@ -1,4 +1,4 @@
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect } from 'react'
 import { SplitTerminalPanel } from './SplitTerminalPanel'
@@ -121,5 +121,41 @@ describe('SplitTerminalPanel child shell startup', () => {
 
         expect(newWriteMock).toHaveBeenCalledWith('pwd\n')
         expect(oldWriteMock).not.toHaveBeenCalled()
+    })
+
+    it('only shows the tmux scroll control when enabled', () => {
+        mockSession = {
+            id: 'review-child',
+            active: true,
+            metadata: {
+                flavor: 'shell',
+                childRole: 'review-terminal',
+                shellTerminalId: 'term-review',
+                shellTerminalState: 'ready'
+            }
+        }
+
+        const { rerender } = render(
+            <SplitTerminalPanel
+                sessionId="review-child"
+                onClose={() => {}}
+            />
+        )
+
+        expect(screen.queryByRole('button', { name: 'Scroll' })).not.toBeInTheDocument()
+
+        rerender(
+            <SplitTerminalPanel
+                sessionId="review-child"
+                onClose={() => {}}
+                showScrollControl
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Scroll' }))
+
+        expect(newWriteMock).toHaveBeenCalledWith('\u0002')
+        expect(newWriteMock).toHaveBeenCalledWith('[')
+        expect(screen.getByRole('button', { name: 'Exit scroll' })).toBeInTheDocument()
     })
 })
