@@ -145,6 +145,13 @@ describe('terminal socket handlers', () => {
             cols: 120,
             rows: 40
         })
+        expect(lastEmit(terminalSocket, 'terminal:status')?.data).toEqual({
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            owner: 'self',
+            attachedAt: expect.any(Number),
+            canTakeOver: false
+        })
         expect(terminalRegistry.get('terminal-1')).not.toBeNull()
 
         terminalSocket.trigger('terminal:write', {
@@ -265,6 +272,13 @@ describe('terminal socket handlers', () => {
             rows: 24
         })
 
+        expect(lastEmit(replacementSocket, 'terminal:status')?.data).toEqual({
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            owner: 'self',
+            attachedAt: expect.any(Number),
+            canTakeOver: false
+        })
         const readyEvent = lastEmit(replacementSocket, 'terminal:ready')
         expect(readyEvent).toBeUndefined()
         expect(terminalRegistry.get('terminal-1')?.socketId).toBe('terminal-socket-2')
@@ -306,6 +320,13 @@ describe('terminal socket handlers', () => {
             rows: 24
         })
 
+        expect(lastEmit(replacementSocket, 'terminal:status')?.data).toEqual({
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            owner: 'other',
+            attachedAt: expect.any(Number),
+            canTakeOver: true
+        })
         expect(lastEmit(replacementSocket, 'terminal:error')?.data).toEqual({
             terminalId: 'terminal-1',
             message: 'Terminal is attached in another browser. Reconnect here to take over.'
@@ -321,6 +342,20 @@ describe('terminal socket handlers', () => {
         })
 
         expect(terminalRegistry.get('terminal-1')?.socketId).toBe('terminal-socket-2')
+        expect(lastEmit(replacementSocket, 'terminal:status')?.data).toEqual({
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            owner: 'self',
+            attachedAt: expect.any(Number),
+            canTakeOver: false
+        })
+        expect(lastEmit(terminalSocket, 'terminal:status')?.data).toEqual({
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            owner: 'other',
+            attachedAt: expect.any(Number),
+            canTakeOver: true
+        })
         expect(lastEmit(terminalSocket, 'terminal:error')?.data).toEqual({
             terminalId: 'terminal-1',
             message: 'Terminal moved to another browser.'

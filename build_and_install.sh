@@ -151,7 +151,6 @@ main() {
     fi
 
     log "Building standalone binary"
-    TMPDIR="$tmp_dir" bun run download:tunwg
     TMPDIR="$tmp_dir" bun run build:web
     (cd "$script_dir/hub" && TMPDIR="$tmp_dir" bun run generate:embedded-web-assets)
     (cd "$script_dir/cli" && TMPDIR="$tmp_dir" bun run scripts/build-executable.ts --with-web-assets --target "$build_target_name")

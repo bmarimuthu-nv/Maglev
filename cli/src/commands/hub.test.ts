@@ -1,7 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { __test__ } from './hub'
 
 describe('hub command arg filtering', () => {
+    const originalFetch = globalThis.fetch
+
+    afterEach(() => {
+        Object.defineProperty(globalThis, 'fetch', {
+            value: originalFetch,
+            configurable: true,
+            writable: true
+        })
+    })
+
     it('preserves spaced option values for daemon startup', () => {
         const args = __test__.filterDaemonStartArgs([
             '--name', 'cw-devbox-1',
@@ -103,5 +113,69 @@ describe('hub command arg filtering', () => {
             '--config', '/tmp/override.yaml',
             '--port', '18181'
         ])
+    })
+
+    it('probes /health successfully when the hub is ready', async () => {
+        Object.defineProperty(globalThis, 'fetch', {
+            value: async () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 }),
+            configurable: true,
+            writable: true
+        })
+
+        const result = await __test__.probeHubHealth('http://127.0.0.1:3006')
+
+        expect(result).toEqual({
+            ok: true,
+            baseUrl: 'http://127.0.0.1:3006',
+            healthUrl: 'http://127.0.0.1:3006/health',
+            snapshot: {
+                status: 'ok'
+            }
+        })
+    })
+
+    it('formats timeout readiness failures with the health URL', () => {
+        const message = __test__.describeHubReadinessFailure({
+            ok: false,
+            baseUrl: 'http://127.0.0.1:3006',
+            healthUrl: 'http://127.0.0.1:3006/health',
+            reason: 'timeout',
+            detail: 'TimeoutError: timed out'
+        })
+
+        expect(message).toContain('timed out waiting for http://127.0.0.1:3006/health')
+    })
+
+    it('formats live hub status lines from health stats', () => {
+        const lines = __test__.formatHubStatusLines({
+            status: 'ok',
+            protocolVersion: '1',
+            serverTime: '2026-04-28T00:00:00.000Z',
+            uptimeMs: 1200,
+            remoteMode: true,
+            sync: {
+                connected: true,
+                sessions: {
+                    total: 5,
+                    active: 2
+                },
+                machines: {
+                    total: 3,
+                    online: 1
+                }
+            },
+            sse: {
+                connections: {
+                    total: 4,
+                    visible: 2
+                }
+            }
+        })
+
+        expect(lines).toContain('  uptimeMs: 1200')
+        expect(lines).toContain('  remoteMode: true')
+        expect(lines).toContain('  sessions: 2 active / 5 total')
+        expect(lines).toContain('  machines: 1 online / 3 total')
+        expect(lines).toContain('  sse: 2 visible / 4 total')
     })
 })

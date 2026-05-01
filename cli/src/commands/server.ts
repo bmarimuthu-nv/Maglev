@@ -368,6 +368,7 @@ async function listBrokerHubs(): Promise<void> {
 
 export const serverCommand: CommandDefinition = {
     name: 'server',
+    description: 'Manage the broker server (start, stop, status)',
     requiresRuntimeAssets: false,
     run: async (context: CommandContext) => {
         try {

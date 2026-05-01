@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { isObject, toSessionSummary } from '@maglev/protocol'
-import type { ApiClient } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import type {
     Session,
     SessionResponse,
@@ -13,7 +13,7 @@ import { queryKeys } from '@/lib/query-keys'
 
 type SSESubscription = {
     all?: boolean
-    sessionId?: string
+    sessionIds?: string[]
     machineId?: string
 }
 
@@ -110,8 +110,8 @@ function buildEventsUrl(
     if (subscription.all) {
         params.set('all', 'true')
     }
-    if (subscription.sessionId) {
-        params.set('sessionId', subscription.sessionId)
+    for (const sessionId of subscription.sessionIds ?? []) {
+        params.append('sessionId', sessionId)
     }
     if (subscription.machineId) {
         params.set('machineId', subscription.machineId)
@@ -122,7 +122,7 @@ function buildEventsUrl(
         const base = new URL(baseUrl)
         const prefix = base.pathname.replace(/\/+$/, '')
         const joinedPath = prefix ? `${prefix}${path}` : path
-        return new URL(`${joinedPath}${base.search}`, base.origin).toString()
+        return new URL(joinedPath, base.origin).toString()
     } catch {
         return path
     }
@@ -157,6 +157,7 @@ export function useSSE(options: {
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const reconnectAttemptRef = useRef(0)
     const lastActivityAtRef = useRef(0)
+    const needsReconnectSyncRef = useRef(false)
     const [reconnectNonce, setReconnectNonce] = useState(0)
     const [subscriptionId, setSubscriptionId] = useState<string | null>(null)
 
@@ -187,8 +188,9 @@ export function useSSE(options: {
     const subscription = options.subscription ?? {}
 
     const subscriptionKey = useMemo(() => {
-        return `${subscription.all ? '1' : '0'}|${subscription.sessionId ?? ''}|${subscription.machineId ?? ''}`
-    }, [subscription.all, subscription.sessionId, subscription.machineId])
+        const sessionIdsKey = (subscription.sessionIds ?? []).join(',')
+        return `${subscription.all ? '1' : '0'}|${sessionIdsKey}|${subscription.machineId ?? ''}`
+    }, [subscription.all, subscription.machineId, subscription.sessionIds])
 
     useEffect(() => {
         if (!options.enabled) {
@@ -205,6 +207,7 @@ export function useSSE(options: {
                 reconnectTimerRef.current = null
             }
             reconnectAttemptRef.current = 0
+            needsReconnectSyncRef.current = false
             setSubscriptionId(null)
             return
         }
@@ -214,33 +217,9 @@ export function useSSE(options: {
         let activeEventSource: EventSource | null = null
         let activeWatchdog: ReturnType<typeof setInterval> | null = null
 
-        const connectWithAuth = (auth: { ticket: string } | { token: string }) => {
-            if (cancelled) return
-            const url = buildEventsUrl(options.baseUrl, auth, {
-                ...subscription,
-                sessionId: subscription.sessionId ?? undefined
-            }, getVisibilityState())
-            const eventSource = new EventSource(url)
-            activeEventSource = eventSource
-            eventSourceRef.current = eventSource
-            lastActivityAtRef.current = Date.now()
-            setupEventSource(eventSource)
+        const isCurrentEventSource = (eventSource: EventSource): boolean => {
+            return !cancelled && eventSourceRef.current === eventSource
         }
-
-        // Fetch a short-lived ticket, falling back to raw token
-        const api = apiRef.current
-        if (api) {
-            api.createEventsTicket()
-                .then((res) => connectWithAuth({ ticket: res.ticket }))
-                .catch(() => connectWithAuth({ token: options.token }))
-        } else {
-            connectWithAuth({ token: options.token })
-        }
-
-        const setupEventSource = (eventSource: EventSource) => {
-
-        let disconnectNotified = false
-        let reconnectRequested = false
 
         const scheduleReconnect = () => {
             const attempt = reconnectAttemptRef.current
@@ -256,125 +235,161 @@ export function useSSE(options: {
             }, exponentialDelay + jitter)
         }
 
-        const notifyDisconnect = (reason: string) => {
-            if (disconnectNotified) {
-                return
+        const invalidateSubscribedQueriesOnReconnect = () => {
+            const tasks: Array<Promise<unknown>> = []
+            const hasSessionSubscription = subscription.all || (subscription.sessionIds?.length ?? 0) > 0
+            if (hasSessionSubscription) {
+                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) }))
             }
-            disconnectNotified = true
-            onDisconnectRef.current?.(reason)
+            for (const sessionId of subscription.sessionIds ?? []) {
+                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.session(scopeKey, sessionId) }))
+            }
+            if (subscription.machineId) {
+                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.hubConfig(scopeKey) }))
+            }
+            if (tasks.length > 0) {
+                void Promise.all(tasks).catch(() => {})
+            }
         }
 
-        const requestReconnect = (reason: string) => {
-            if (reconnectRequested) {
+        const scheduleTicketRetry = () => {
+            if (cancelled) {
                 return
             }
-            reconnectRequested = true
-            notifyDisconnect(reason)
-            eventSource.close()
-            if (eventSourceRef.current === eventSource) {
-                eventSourceRef.current = null
-            }
-            setSubscriptionId(null)
+            needsReconnectSyncRef.current = true
             scheduleReconnect()
         }
 
-        const flushInvalidations = () => {
-            const pending = pendingInvalidationsRef.current
-            if (!pending.sessions && pending.sessionIds.size === 0) {
-                return
+        const setupEventSource = (eventSource: EventSource) => {
+            let disconnectNotified = false
+            let reconnectRequested = false
+
+            const notifyDisconnect = (reason: string) => {
+                if (!isCurrentEventSource(eventSource)) {
+                    return
+                }
+                if (disconnectNotified) {
+                    return
+                }
+                disconnectNotified = true
+                onDisconnectRef.current?.(reason)
             }
 
-            const shouldInvalidateSessions = pending.sessions
-            const sessionIds = Array.from(pending.sessionIds)
-
-            pending.sessions = false
-            pending.sessionIds.clear()
-
-            const tasks: Array<Promise<unknown>> = []
-            if (shouldInvalidateSessions) {
-                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) }))
+            const requestReconnect = (reason: string) => {
+                if (!isCurrentEventSource(eventSource)) {
+                    return
+                }
+                if (reconnectRequested) {
+                    return
+                }
+                reconnectRequested = true
+                needsReconnectSyncRef.current = true
+                notifyDisconnect(reason)
+                eventSource.close()
+                if (eventSourceRef.current === eventSource) {
+                    eventSourceRef.current = null
+                }
+                setSubscriptionId(null)
+                scheduleReconnect()
             }
-            for (const sessionId of sessionIds) {
-                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.session(scopeKey, sessionId) }))
+
+            const flushInvalidations = () => {
+                const pending = pendingInvalidationsRef.current
+                if (!pending.sessions && pending.sessionIds.size === 0) {
+                    return
+                }
+
+                const shouldInvalidateSessions = pending.sessions
+                const sessionIds = Array.from(pending.sessionIds)
+
+                pending.sessions = false
+                pending.sessionIds.clear()
+
+                const tasks: Array<Promise<unknown>> = []
+                if (shouldInvalidateSessions) {
+                    tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) }))
+                }
+                for (const sessionId of sessionIds) {
+                    tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.session(scopeKey, sessionId) }))
+                }
+                if (tasks.length === 0) {
+                    return
+                }
+                void Promise.all(tasks).catch(() => {})
             }
-            if (tasks.length === 0) {
-                return
+
+            const scheduleInvalidationFlush = () => {
+                if (invalidationTimerRef.current) {
+                    return
+                }
+                invalidationTimerRef.current = setTimeout(() => {
+                    invalidationTimerRef.current = null
+                    flushInvalidations()
+                }, INVALIDATION_BATCH_MS)
             }
-            void Promise.all(tasks).catch(() => {})
-        }
 
-        const scheduleInvalidationFlush = () => {
-            if (invalidationTimerRef.current) {
-                return
+            const queueSessionListInvalidation = () => {
+                pendingInvalidationsRef.current.sessions = true
+                scheduleInvalidationFlush()
             }
-            invalidationTimerRef.current = setTimeout(() => {
-                invalidationTimerRef.current = null
-                flushInvalidations()
-            }, INVALIDATION_BATCH_MS)
-        }
 
-        const queueSessionListInvalidation = () => {
-            pendingInvalidationsRef.current.sessions = true
-            scheduleInvalidationFlush()
-        }
+            const queueSessionDetailInvalidation = (sessionId: string) => {
+                pendingInvalidationsRef.current.sessionIds.add(sessionId)
+                scheduleInvalidationFlush()
+            }
 
-        const queueSessionDetailInvalidation = (sessionId: string) => {
-            pendingInvalidationsRef.current.sessionIds.add(sessionId)
-            scheduleInvalidationFlush()
-        }
+            const upsertSessionSummary = (session: Session) => {
+                queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions(scopeKey), (previous) => {
+                    if (!previous) {
+                        return previous
+                    }
 
-        const upsertSessionSummary = (session: Session) => {
-            queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions(scopeKey), (previous) => {
-                if (!previous) {
-                    return previous
-                }
+                    const summary = toSessionSummary(session)
+                    const nextSessions = previous.sessions.slice()
+                    const existingIndex = nextSessions.findIndex((item) => item.id === session.id)
+                    if (existingIndex >= 0) {
+                        nextSessions[existingIndex] = summary
+                    } else {
+                        nextSessions.push(summary)
+                    }
+                    nextSessions.sort(sortSessionSummaries)
+                    return { ...previous, sessions: nextSessions }
+                })
+            }
 
-                const summary = toSessionSummary(session)
-                const nextSessions = previous.sessions.slice()
-                const existingIndex = nextSessions.findIndex((item) => item.id === session.id)
-                if (existingIndex >= 0) {
-                    nextSessions[existingIndex] = summary
-                } else {
-                    nextSessions.push(summary)
-                }
-                nextSessions.sort(sortSessionSummaries)
-                return { ...previous, sessions: nextSessions }
-            })
-        }
+            const patchSessionSummary = (sessionId: string, patch: SessionPatch): boolean => {
+                let patched = false
+                queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions(scopeKey), (previous) => {
+                    if (!previous) {
+                        return previous
+                    }
 
-        const patchSessionSummary = (sessionId: string, patch: SessionPatch): boolean => {
-            let patched = false
-            queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions(scopeKey), (previous) => {
-                if (!previous) {
-                    return previous
-                }
+                    const nextSessions = previous.sessions.slice()
+                    const index = nextSessions.findIndex((item) => item.id === sessionId)
+                    if (index < 0) {
+                        return previous
+                    }
 
-                const nextSessions = previous.sessions.slice()
-                const index = nextSessions.findIndex((item) => item.id === sessionId)
-                if (index < 0) {
-                    return previous
-                }
+                    const current = nextSessions[index]
+                    if (!current) {
+                        return previous
+                    }
 
-                const current = nextSessions[index]
-                if (!current) {
-                    return previous
-                }
+                    const nextSummary: SessionSummary = {
+                        ...current,
+                        active: patch.active ?? current.active,
+                        thinking: patch.thinking ?? current.thinking,
+                        activeAt: patch.activeAt ?? current.activeAt,
+                        updatedAt: patch.updatedAt ?? current.updatedAt
+                    }
 
-                const nextSummary: SessionSummary = {
-                    ...current,
-                    active: patch.active ?? current.active,
-                    thinking: patch.thinking ?? current.thinking,
-                    activeAt: patch.activeAt ?? current.activeAt,
-                    updatedAt: patch.updatedAt ?? current.updatedAt
-                }
-
-                patched = true
-                nextSessions[index] = nextSummary
-                nextSessions.sort(sortSessionSummaries)
-                return { ...previous, sessions: nextSessions }
-            })
-            return patched
-        }
+                    patched = true
+                    nextSessions[index] = nextSummary
+                    nextSessions.sort(sortSessionSummaries)
+                    return { ...previous, sessions: nextSessions }
+                })
+                return patched
+            }
 
         const patchSessionDetail = (sessionId: string, patch: SessionPatch): boolean => {
             let patched = false
@@ -408,6 +423,9 @@ export function useSSE(options: {
         }
 
         const handleSyncEvent = (event: SyncEvent) => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             lastActivityAtRef.current = Date.now()
 
             if (event.type === 'heartbeat') {
@@ -426,6 +444,11 @@ export function useSSE(options: {
 
             if (event.type === 'toast') {
                 onToastRef.current?.(event)
+                return
+            }
+
+            if (event.type === 'machine-updated') {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.hubConfig(scopeKey) })
                 return
             }
 
@@ -463,6 +486,9 @@ export function useSSE(options: {
         }
 
         const handleMessage = (message: MessageEvent<string>) => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             if (typeof message.data !== 'string') {
                 return
             }
@@ -486,16 +512,27 @@ export function useSSE(options: {
 
         eventSource.onmessage = handleMessage
         eventSource.onopen = () => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current)
                 reconnectTimerRef.current = null
             }
+            const shouldResync = needsReconnectSyncRef.current || disconnectNotified
             reconnectAttemptRef.current = 0
             disconnectNotified = false
             lastActivityAtRef.current = Date.now()
+            if (shouldResync) {
+                needsReconnectSyncRef.current = false
+                invalidateSubscribedQueriesOnReconnect()
+            }
             onConnectRef.current?.()
         }
         eventSource.onerror = (error) => {
+            if (!isCurrentEventSource(eventSource)) {
+                return
+            }
             onErrorRef.current?.(error)
             if (eventSource.readyState === EventSource.CLOSED) {
                 requestReconnect('closed')
@@ -520,6 +557,36 @@ export function useSSE(options: {
 
         } // end setupEventSource
 
+        const connectWithAuth = (auth: { ticket: string } | { token: string }) => {
+            if (cancelled) return
+            const url = buildEventsUrl(options.baseUrl, auth, {
+                ...subscription,
+                sessionIds: subscription.sessionIds ?? []
+            }, getVisibilityState())
+            const eventSource = new EventSource(url)
+            activeEventSource = eventSource
+            eventSourceRef.current = eventSource
+            lastActivityAtRef.current = Date.now()
+            setupEventSource(eventSource)
+        }
+
+        // Fetch a short-lived ticket when possible; retain raw-token fallback for non-rate-limit failures.
+        const api = apiRef.current
+        if (api) {
+            api.createEventsTicket()
+                .then((res) => connectWithAuth({ ticket: res.ticket }))
+                .catch((error: unknown) => {
+                    onErrorRef.current?.(error)
+                    if (error instanceof ApiError && error.status === 429) {
+                        scheduleTicketRetry()
+                        return
+                    }
+                    connectWithAuth({ token: options.token })
+                })
+        } else {
+            connectWithAuth({ token: options.token })
+        }
+
         return () => {
             cancelled = true
             if (activeWatchdog) {
@@ -535,7 +602,11 @@ export function useSSE(options: {
                 clearTimeout(reconnectTimerRef.current)
                 reconnectTimerRef.current = null
             }
+            needsReconnectSyncRef.current = false
             if (activeEventSource) {
+                activeEventSource.onopen = null
+                activeEventSource.onmessage = null
+                activeEventSource.onerror = null
                 activeEventSource.close()
             }
             if (eventSourceRef.current === activeEventSource) {

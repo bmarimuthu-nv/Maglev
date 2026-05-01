@@ -14,7 +14,17 @@ export type ToastContextValue = {
     removeToast: (id: string) => void
 }
 
-const ToastContext = createContext<ToastContextValue | null>(null)
+export type ToastStateValue = {
+    toasts: Toast[]
+}
+
+export type ToastActionsValue = {
+    addToast: (toast: Omit<Toast, 'id'>) => void
+    removeToast: (id: string) => void
+}
+
+const ToastStateContext = createContext<ToastStateValue | null>(null)
+const ToastActionsContext = createContext<ToastActionsValue | null>(null)
 const TOAST_DURATION_MS = 6000
 
 function createToastId(): string {
@@ -55,23 +65,43 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         timersRef.current.set(id, timer)
     }, [removeToast])
 
-    const value = useMemo<ToastContextValue>(() => ({
-        toasts,
+    const state = useMemo<ToastStateValue>(() => ({
+        toasts
+    }), [toasts])
+
+    const actions = useMemo<ToastActionsValue>(() => ({
         addToast,
         removeToast
-    }), [toasts, addToast, removeToast])
+    }), [addToast, removeToast])
 
     return (
-        <ToastContext.Provider value={value}>
-            {children}
-        </ToastContext.Provider>
+        <ToastActionsContext.Provider value={actions}>
+            <ToastStateContext.Provider value={state}>
+                {children}
+            </ToastStateContext.Provider>
+        </ToastActionsContext.Provider>
     )
 }
 
 export function useToast(): ToastContextValue {
-    const ctx = useContext(ToastContext)
+    return {
+        ...useToastState(),
+        ...useToastActions()
+    }
+}
+
+export function useToastState(): ToastStateValue {
+    const ctx = useContext(ToastStateContext)
     if (!ctx) {
-        throw new Error('useToast must be used within ToastProvider')
+        throw new Error('useToastState must be used within ToastProvider')
+    }
+    return ctx
+}
+
+export function useToastActions(): ToastActionsValue {
+    const ctx = useContext(ToastActionsContext)
+    if (!ctx) {
+        throw new Error('useToastActions must be used within ToastProvider')
     }
     return ctx
 }

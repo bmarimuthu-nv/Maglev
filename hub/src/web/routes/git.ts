@@ -2,12 +2,21 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
+import {
+    createFileReviewThread,
+    deleteFileReviewThread,
+    listFileReviewThreads,
+    replyToFileReviewThread,
+    setFileReviewThreadStatus
+} from '../../fileReview/store'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const reviewModeSchema = z.enum(['branch', 'working'])
+const reviewBaseModeSchema = z.enum(['origin', 'upstream', 'fork-point'])
 
 const fileSearchSchema = z.object({
     query: z.string().optional(),
+    mode: z.enum(['fuzzy', 'glob']).optional(),
     limit: z.coerce.number().int().min(1).max(5000).optional()
 })
 
@@ -26,12 +35,34 @@ const writeFileBodySchema = z.object({
 })
 
 const reviewSummarySchema = z.object({
-    mode: reviewModeSchema.default('branch')
+    mode: reviewModeSchema.default('branch'),
+    baseMode: reviewBaseModeSchema.optional()
 })
 
 const reviewFileSchema = z.object({
     mode: reviewModeSchema.default('branch'),
+    baseMode: reviewBaseModeSchema.optional(),
     path: z.string().min(1)
+})
+
+const fileReviewThreadsSchema = z.object({
+    path: z.string().min(1)
+})
+
+const createFileReviewThreadBodySchema = z.object({
+    path: z.string().min(1),
+    line: z.number().int().min(1),
+    body: z.string().trim().min(1).max(20000),
+    author: z.enum(['user', 'agent']).default('user')
+})
+
+const replyToFileReviewThreadBodySchema = z.object({
+    body: z.string().trim().min(1).max(20000),
+    author: z.enum(['user', 'agent']).default('user')
+})
+
+const setFileReviewThreadStatusBodySchema = z.object({
+    status: z.enum(['open', 'resolved'])
 })
 
 function parseBooleanParam(value: string | undefined): boolean | undefined {
@@ -145,7 +176,8 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
 
         const result = await runRpc(() => engine.getReviewSummary(sessionResult.sessionId, {
             cwd: sessionPath,
-            mode: parsed.data.mode
+            mode: parsed.data.mode,
+            baseMode: parsed.data.baseMode
         }))
         return c.json(result)
     })
@@ -174,7 +206,8 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         const result = await runRpc(() => engine.getReviewFile(sessionResult.sessionId, {
             cwd: sessionPath,
             filePath: parsed.data.path,
-            mode: parsed.data.mode
+            mode: parsed.data.mode,
+            baseMode: parsed.data.baseMode
         }))
         return c.json(result)
     })
@@ -202,6 +235,35 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
 
         const result = await runRpc(() => engine.readSessionFile(sessionResult.sessionId, parsed.data.path))
         return c.json(result)
+    })
+
+    app.get('/sessions/:id/file-review-threads', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const workspacePath = sessionResult.session.metadata?.path
+        if (!workspacePath) {
+            return c.json({ success: false, error: 'Session path not available' })
+        }
+
+        const parsed = fileReviewThreadsSchema.safeParse(c.req.query())
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid query' }, 400)
+        }
+
+        try {
+            const result = await listFileReviewThreads(workspacePath, parsed.data.path)
+            return c.json({ success: true, ...result })
+        } catch (error) {
+            return c.json({ success: false, error: error instanceof Error ? error.message : String(error) })
+        }
     })
 
     app.post('/sessions/:id/file', async (c) => {
@@ -232,7 +294,131 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             parsed.data.content,
             parsed.data.expectedHash
         ))
+        if ('success' in result && result.success === false && 'conflict' in result && result.conflict) {
+            return c.json(result, 409)
+        }
         return c.json(result)
+    })
+
+    app.post('/sessions/:id/file-review-threads', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const workspacePath = sessionResult.session.metadata?.path
+        if (!workspacePath) {
+            return c.json({ success: false, error: 'Session path not available' })
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = createFileReviewThreadBodySchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            await createFileReviewThread(workspacePath, parsed.data.path, {
+                line: parsed.data.line,
+                body: parsed.data.body,
+                author: parsed.data.author
+            })
+            return c.json({ success: true })
+        } catch (error) {
+            return c.json({ success: false, error: error instanceof Error ? error.message : String(error) })
+        }
+    })
+
+    app.post('/sessions/:id/file-review-threads/:threadId/replies', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const workspacePath = sessionResult.session.metadata?.path
+        if (!workspacePath) {
+            return c.json({ success: false, error: 'Session path not available' })
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = replyToFileReviewThreadBodySchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            await replyToFileReviewThread(workspacePath, c.req.param('threadId'), {
+                body: parsed.data.body,
+                author: parsed.data.author
+            })
+            return c.json({ success: true })
+        } catch (error) {
+            return c.json({ success: false, error: error instanceof Error ? error.message : String(error) })
+        }
+    })
+
+    app.patch('/sessions/:id/file-review-threads/:threadId/status', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const workspacePath = sessionResult.session.metadata?.path
+        if (!workspacePath) {
+            return c.json({ success: false, error: 'Session path not available' })
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = setFileReviewThreadStatusBodySchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            await setFileReviewThreadStatus(workspacePath, c.req.param('threadId'), parsed.data.status)
+            return c.json({ success: true })
+        } catch (error) {
+            return c.json({ success: false, error: error instanceof Error ? error.message : String(error) })
+        }
+    })
+
+    app.delete('/sessions/:id/file-review-threads/:threadId', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const workspacePath = sessionResult.session.metadata?.path
+        if (!workspacePath) {
+            return c.json({ success: false, error: 'Session path not available' })
+        }
+
+        try {
+            await deleteFileReviewThread(workspacePath, c.req.param('threadId'))
+            return c.json({ success: true })
+        } catch (error) {
+            return c.json({ success: false, error: error instanceof Error ? error.message : String(error) })
+        }
     })
 
     app.get('/sessions/:id/files', async (c) => {
@@ -257,10 +443,11 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         }
 
         const query = parsed.data.query?.trim() ?? ''
+        const mode = parsed.data.mode ?? 'fuzzy'
         const limit = parsed.data.limit ?? 200
         const args = ['--files']
         if (query) {
-            args.push('--iglob', `*${query}*`)
+            args.push('--iglob', mode === 'glob' ? query : `*${query}*`)
         }
 
         const result = await runRpc(() => engine.runRipgrep(sessionResult.sessionId, args, sessionPath, limit))

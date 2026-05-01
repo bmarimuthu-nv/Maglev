@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import type { Session, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createSessionsRoutes } from './sessions'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 function createSession(overrides?: Partial<Session>): Session {
     const baseMetadata = {
@@ -62,6 +65,67 @@ function createApp(session: Session) {
 }
 
 describe('sessions routes', () => {
+    const cleanupPaths: string[] = []
+
+    afterEach(async () => {
+        await Promise.all(cleanupPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })))
+    })
+
+    it('forwards session detail updates to the sync engine', async () => {
+        const session = createSession()
+        const updateCalls: Array<[string, { name?: string; directory?: string }]> = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+            updateSessionDetails: async (sessionId: string, updates: { name?: string; directory?: string }) => {
+                updateCalls.push([sessionId, updates])
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/session-1', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: 'Renamed', directory: '/tmp/next-project' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(updateCalls).toEqual([[
+            'session-1',
+            { name: 'Renamed', directory: '/tmp/next-project' }
+        ]])
+    })
+
+    it('forwards close requests to the sync engine', async () => {
+        const session = createSession()
+        const closeCalls: string[] = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+            closeSession: async (sessionId: string) => {
+                closeCalls.push(sessionId)
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/session-1/close', {
+            method: 'POST'
+        })
+
+        expect(response.status).toBe(200)
+        expect(closeCalls).toEqual(['session-1'])
+    })
+
     it('forwards terminal pair rebind requests to the sync engine', async () => {
         const session = createSession({
             metadata: {
@@ -200,5 +264,47 @@ describe('sessions routes', () => {
                 supervisorSessionId: 'session-supervisor'
             }
         })
+    })
+
+    it('reads and writes notes using the session metadata notesPath', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'maglev-notes-route-'))
+        cleanupPaths.push(root)
+        const notesFile = join(root, 'workspace-notes.txt')
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'shell',
+                notesPath: notesFile
+            }
+        })
+        const setNotesPathCalls: Array<[string, string]> = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+            setSessionNotesPath: async (sessionId: string, notesPath: string) => {
+                setNotesPathCalls.push([sessionId, notesPath])
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const writeResponse = await app.request('/api/sessions/session-1/notes', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ content: 'hello notes' })
+        })
+
+        expect(writeResponse.status).toBe(200)
+        expect(await readFile(notesFile, 'utf8')).toBe('hello notes')
+        expect(setNotesPathCalls).toEqual([])
+
+        const readResponse = await app.request('/api/sessions/session-1/notes')
+        expect(readResponse.status).toBe(200)
+        await expect(readResponse.json()).resolves.toEqual({ success: true, content: 'hello notes' })
     })
 })

@@ -27,10 +27,11 @@ export type TerminalHandlersDeps = {
     terminalNamespace: SocketNamespace
     resolveSessionAccess: ResolveSessionAccess
     emitAccessError: EmitAccessError
+    onTerminalSnapshotUpdated?: (payload: { sessionId: string; terminalId: string }) => void
 }
 
 export function registerTerminalHandlers(socket: CliSocketWithData, deps: TerminalHandlersDeps): void {
-    const { terminalRegistry, terminalStateCache, terminalNamespace, resolveSessionAccess, emitAccessError } = deps
+    const { terminalRegistry, terminalStateCache, terminalNamespace, resolveSessionAccess, emitAccessError, onTerminalSnapshotUpdated } = deps
 
     const forwardTerminalEvent = (event: string, payload: { sessionId: string; terminalId: string } & Record<string, unknown>) => {
         const entry = terminalRegistry.get(payload.terminalId)
@@ -64,6 +65,7 @@ export function registerTerminalHandlers(socket: CliSocketWithData, deps: Termin
             return
         }
         terminalStateCache.noteReady(parsed.data.sessionId, parsed.data.terminalId)
+        onTerminalSnapshotUpdated?.({ sessionId: parsed.data.sessionId, terminalId: parsed.data.terminalId })
         terminalRegistry.markActivity(parsed.data.terminalId)
         forwardTerminalEvent('terminal:ready', parsed.data)
     })
@@ -74,6 +76,7 @@ export function registerTerminalHandlers(socket: CliSocketWithData, deps: Termin
             return
         }
         terminalStateCache.noteOutput(parsed.data.sessionId, parsed.data.terminalId, parsed.data.data)
+        onTerminalSnapshotUpdated?.({ sessionId: parsed.data.sessionId, terminalId: parsed.data.terminalId })
         terminalRegistry.markActivity(parsed.data.terminalId)
         forwardTerminalEvent('terminal:output', parsed.data)
     })
@@ -84,6 +87,7 @@ export function registerTerminalHandlers(socket: CliSocketWithData, deps: Termin
             return
         }
         terminalStateCache.noteExit(parsed.data.sessionId, parsed.data.terminalId, parsed.data.code, parsed.data.signal)
+        onTerminalSnapshotUpdated?.({ sessionId: parsed.data.sessionId, terminalId: parsed.data.terminalId })
         const entry = terminalRegistry.get(parsed.data.terminalId)
         if (!entry || entry.sessionId !== parsed.data.sessionId || entry.cliSocketId !== socket.id) {
             return

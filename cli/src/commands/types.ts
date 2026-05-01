@@ -6,6 +6,7 @@ export type CommandContext = {
 
 export type CommandDefinition = {
     name: string
+    description?: string
     requiresRuntimeAssets: boolean
     run: (context: CommandContext) => Promise<void>
 }

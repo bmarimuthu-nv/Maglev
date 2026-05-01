@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite'
+import { durableWrite } from './durableWrite'
 import type { StoredTerminalPair } from './types'
 import {
     createTerminalPair,
@@ -28,10 +29,10 @@ export class TerminalPairStore {
     }
 
     create(pair: StoredTerminalPair): StoredTerminalPair {
-        return createTerminalPair(this.db, pair)
+        return durableWrite(this.db, () => createTerminalPair(this.db, pair))
     }
 
     update(pair: StoredTerminalPair): StoredTerminalPair | null {
-        return updateTerminalPair(this.db, pair)
+        return durableWrite(this.db, () => updateTerminalPair(this.db, pair))
     }
 }

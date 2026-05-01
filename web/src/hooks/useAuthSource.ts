@@ -108,16 +108,16 @@ export function useAuthSource(baseUrl: string): {
             return
         }
 
+        const storedJwtToken = getStoredAccessToken(jwtTokenKey)
+
         if (isBrokerHostedPath()) {
             clearStoredAccessToken(accessTokenKey)
-            clearStoredAccessToken(jwtTokenKey)
-            setAuthSource({ type: 'broker' })
+            setAuthSource({ type: 'broker', bootstrapToken: storedJwtToken ?? undefined })
             setIsLoading(false)
             return
         }
 
         // Check for stored access token as fallback
-        const storedJwtToken = getStoredAccessToken(jwtTokenKey)
         if (storedJwtToken) {
             setAuthSource({ type: 'jwt', token: storedJwtToken })
             setIsLoading(false)

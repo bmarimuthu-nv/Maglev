@@ -17,6 +17,12 @@ export type {
 export type SessionMetadataSummary = {
     path: string
     host: string
+    branch?: string
+    childRole?: 'review-terminal' | 'split-terminal'
+    lifecycleState?: string
+    lifecycleStateSince?: number
+    archivedBy?: string
+    archiveReason?: string
     version?: string
     name?: string
     os?: string
@@ -26,9 +32,12 @@ export type SessionMetadataSummary = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     notesPath?: string
+    parentSessionId?: string
     pinned?: boolean
     autoRespawn?: boolean
     startupCommand?: string
+    respawnedFromSessionId?: string
+    respawnedFromSessionIds?: string[]
 }
 
 export type AgentType = 'shell'
@@ -38,6 +47,10 @@ export type RunnerState = {
     pid?: number
     httpPort?: number
     startedAt?: number
+    acceptingNewSessions?: boolean
+    activeSpawnCount?: number
+    restartRequestedAt?: number
+    restartReason?: string
     shutdownRequestedAt?: number
     shutdownSource?: string
     lastSpawnError?: {
@@ -92,7 +105,16 @@ export type SessionsResponse = { sessions: SessionSummary[] }
 export type SessionResponse = { session: Session }
 export type TerminalSupervisionTargetResponse = {
     worker: SessionSummary
-    orchestrator: SessionSummary
+    supervisor: SessionSummary
+    bridge?: {
+        workspaceRoot: string
+        bridgeDir: string
+        transcriptFilePath: string
+        helperScriptPath: string
+        stateFilePath: string
+        readmePath: string
+        storageScope: 'git-excluded' | 'workspace'
+    } | null
     snapshot: {
         outputBuffer: string
         status: 'ready' | 'exited'
@@ -103,7 +125,7 @@ export type TerminalSupervisionTargetResponse = {
         id: string
         createdAt: number
         type: 'attached' | 'detached' | 'paused' | 'resumed' | 'write_accepted' | 'write_blocked'
-        actor: 'human' | 'orchestrator' | 'system'
+        actor: 'human' | 'supervisor' | 'system'
         message: string
     }>
 }
@@ -118,11 +140,21 @@ export type SpawnTerminalPairResponse =
         message: string
     }
 export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
+export type DetectedWorktree = {
+    repoRoot: string
+    path: string
+    branch?: string
+    isCurrent: boolean
+}
 export type HubLaunchFolder = {
     label: string
     path: string
     branch?: string
     source: 'path' | 'wt'
+}
+export type HubWorktreesResponse = {
+    worktrees: DetectedWorktree[]
+    error?: string
 }
 export type HubConfigResponse = {
     name: string | null
@@ -145,6 +177,7 @@ export type GitCommandResponse = {
 }
 
 export type ReviewMode = 'branch' | 'working'
+export type ReviewBaseMode = 'origin' | 'upstream' | 'fork-point'
 
 export type ReviewSummaryFile = {
     filePath: string
@@ -157,6 +190,7 @@ export type ReviewSummaryFile = {
 export type ReviewSummaryResponse = {
     success: boolean
     mode?: ReviewMode
+    baseMode?: ReviewBaseMode
     currentBranch?: string | null
     defaultBranch?: string | null
     mergeBase?: string | null
@@ -197,10 +231,51 @@ export type FileReadResponse = {
     error?: string
 }
 
+export type FileReviewComment = {
+    id: string
+    author: 'user' | 'agent'
+    createdAt: number
+    body: string
+}
+
+export type FileReviewThread = {
+    id: string
+    filePath: string
+    absolutePath: string
+    createdAt: number
+    updatedAt: number
+    status: 'open' | 'resolved'
+    anchor: {
+        line: number
+        preview: string
+        contextBefore: string[]
+        contextAfter: string[]
+    }
+    comments: FileReviewComment[]
+    resolvedLine: number | null
+    orphaned: boolean
+}
+
+export type FileReviewThreadsResponse = {
+    success: boolean
+    storePath?: string
+    storageScope?: 'git' | 'workspace'
+    threads?: FileReviewThread[]
+    error?: string
+}
+
+export type WriteFileConflict = {
+    type: 'hash_mismatch' | 'missing_file' | 'already_exists'
+    expectedHash: string | null
+    currentHash: string | null
+    currentContent: string | null
+}
+
 export type WriteFileResponse = {
     success: boolean
     hash?: string
     error?: string
+    conflict?: WriteFileConflict
 }
 
 export type UploadFileResponse = {

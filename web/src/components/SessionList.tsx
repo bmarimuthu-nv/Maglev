@@ -1,15 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
+import { planSessionCleanup, useCloseSessionsBatch, type SessionCleanupMode, type SessionCleanupPlan } from '@/hooks/mutations/useCloseSessionsBatch'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
-import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { SessionEditDialog } from '@/components/SessionEditDialog'
+import { SessionListFilter } from '@/components/SessionListFilter'
 import { StartupCommandDialog } from '@/components/StartupCommandDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
+import { queryKeys } from '@/lib/query-keys'
+import { readLocalStorageJson, writeLocalStorageJson } from '@/lib/storage-local'
+import {
+    cleanupSessionScopedStorage,
+    getSessionListOrderStorageKey,
+} from '@/lib/storage-session'
 import { openSessionExplorerWindow } from '@/utils/sessionExplorer'
 import { openSessionReviewWindow } from '@/utils/sessionReview'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -26,6 +35,152 @@ type SessionRow = {
     key: string
     sessions: SessionSummary[]
     paired: boolean
+    isChild?: boolean
+}
+
+type GroupRenderState = {
+    group: SessionGroup
+    isCollapsed: boolean
+    orderedRows: SessionRow[]
+    subgroups: SessionSubgroup[]
+    shouldShowSubgroups: boolean
+}
+
+type VirtualHeaderItem = {
+    key: string
+    kind: 'header'
+    groupState: GroupRenderState
+}
+
+type VirtualSubgroupItem = {
+    key: string
+    kind: 'subgroup'
+    groupState: GroupRenderState
+    subgroup: SessionSubgroup
+}
+
+type VirtualRowItem = {
+    key: string
+    kind: 'row'
+    groupState: GroupRenderState
+    subgroup: SessionSubgroup
+    row: SessionRow
+    rowIndex: number
+}
+
+type VirtualListItem = VirtualHeaderItem | VirtualSubgroupItem | VirtualRowItem
+
+type VirtualItemLayout = {
+    item: VirtualListItem
+    start: number
+    size: number
+    end: number
+}
+
+type ViewportMetrics = {
+    start: number
+    height: number
+}
+
+const HEADER_HEIGHT_ESTIMATE = 64
+const SUBGROUP_HEIGHT_ESTIMATE = 22
+const ROW_HEIGHT_ESTIMATE = 66
+const PAIRED_ROW_HEIGHT_ESTIMATE = 104
+const VIRTUAL_OVERSCAN_PX = 500
+
+type SessionSubgroup = {
+    key: string
+    label: string
+    rows: SessionRow[]
+    kind: 'branch'
+}
+
+type SessionListOrders = {
+    groups: string[]
+    subgroups: Record<string, string[]>
+    rows: Record<string, string[]>
+}
+
+type SessionListFilters = {
+    search: string
+}
+
+type SessionLifecycleStatus = 'active' | 'stopped' | 'archived'
+
+type CleanupSessionsTarget = {
+    mode: SessionCleanupMode
+    name: string
+    plan: SessionCleanupPlan
+}
+
+const DEFAULT_SESSION_FILTERS: SessionListFilters = {
+    search: ''
+}
+
+export function isVisibleInSessionList(session: SessionSummary): boolean {
+    return session.metadata?.childRole !== 'split-terminal'
+}
+
+function getSessionListFilterStorageKey(scopeKey: string): string {
+    return `maglev:session-list-filter:${encodeURIComponent(scopeKey)}`
+}
+
+function loadSessionListFilters(scopeKey: string): SessionListFilters {
+    const parsed = readLocalStorageJson<unknown>(getSessionListFilterStorageKey(scopeKey))
+    if (!parsed || typeof parsed !== 'object') {
+        return DEFAULT_SESSION_FILTERS
+    }
+
+    const candidate = parsed as Partial<SessionListFilters>
+    return {
+        search: typeof candidate.search === 'string' ? candidate.search : DEFAULT_SESSION_FILTERS.search
+    }
+}
+
+function saveSessionListFilters(scopeKey: string, filters: SessionListFilters): void {
+    writeLocalStorageJson(getSessionListFilterStorageKey(scopeKey), filters)
+}
+
+export function getSessionLifecycleStatus(session: SessionSummary): SessionLifecycleStatus {
+    if (session.active) {
+        return 'active'
+    }
+    if (session.metadata?.lifecycleState === 'archived') {
+        return 'archived'
+    }
+    return 'stopped'
+}
+
+function normalizeSearch(value: string): string {
+    return value.trim().toLowerCase()
+}
+
+export function matchesSessionSearch(session: SessionSummary, search: string): boolean {
+    const normalizedSearch = normalizeSearch(search)
+    if (!normalizedSearch) {
+        return true
+    }
+
+    const haystack = [
+        session.metadata?.name,
+        session.metadata?.summary?.text,
+        session.metadata?.branch,
+        session.metadata?.worktree?.branch,
+        session.metadata?.path,
+        session.metadata?.startupCommand,
+    ]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .join('\n')
+        .toLowerCase()
+
+    return haystack.includes(normalizedSearch)
+}
+
+export function filterSessionSummaries(
+    sessions: SessionSummary[],
+    filters: SessionListFilters
+): SessionSummary[] {
+    return sessions.filter((session) => matchesSessionSearch(session, filters.search))
 }
 
 function getGroupDisplayName(directory: string): string {
@@ -131,7 +286,55 @@ function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
     )
 }
 
+function GripVerticalIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="9" cy="5" r="1" />
+            <circle cx="9" cy="12" r="1" />
+            <circle cx="9" cy="19" r="1" />
+            <circle cx="15" cy="5" r="1" />
+            <circle cx="15" cy="12" r="1" />
+            <circle cx="15" cy="19" r="1" />
+        </svg>
+    )
+}
+
+function MoreIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="12" cy="12" r="1" />
+            <circle cx="19" cy="12" r="1" />
+            <circle cx="5" cy="12" r="1" />
+        </svg>
+    )
+}
+
 function getSessionTitle(session: SessionSummary): string {
+    if (session.metadata?.childRole === 'review-terminal') {
+        return 'review-terminal'
+    }
     if (session.metadata?.name) {
         return session.metadata.name
     }
@@ -145,36 +348,23 @@ function getSessionTitle(session: SessionSummary): string {
     return session.id.slice(0, 8)
 }
 
-function getAgentLabel(session: SessionSummary): string {
-    const flavor = session.metadata?.flavor?.trim()
-    if (flavor) return flavor
-    return 'unknown'
-}
-
 function getTerminalSupervisionTone(session: SessionSummary): string {
-    const role = session.metadata?.terminalPair?.role ?? session.metadata?.terminalSupervision?.role
-    if (role === 'worker') {
-        return 'bg-amber-500/8'
-    }
-    if (role === 'supervisor' || role === 'orchestrator') {
-        return 'bg-sky-500/8'
-    }
     return ''
 }
 
-function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
+export function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
     const byId = new Map(groupSessions.map((session) => [session.id, session]))
     const visited = new Set<string>()
-    const rows: SessionRow[] = []
 
+    // Pass 1: match terminal pairs/supervision across ALL sessions first
+    // This ensures pair grouping takes priority over parent-child indentation
+    const pairRows = new Map<string, SessionRow>()
     for (const session of groupSessions) {
-        if (visited.has(session.id)) {
-            continue
-        }
+        if (visited.has(session.id)) continue
         const pairId = session.metadata?.terminalPair?.pairId
         const peerId = pairId
-            ? groupSessions.find((candidate) =>
-                candidate.id !== session.id && candidate.metadata?.terminalPair?.pairId === pairId
+            ? groupSessions.find((c) =>
+                c.id !== session.id && c.metadata?.terminalPair?.pairId === pairId
             )?.id
             : session.metadata?.terminalSupervision?.peerSessionId
         const peer = peerId ? byId.get(peerId) : undefined
@@ -184,24 +374,275 @@ function getSessionRows(groupSessions: SessionSummary[]): SessionRow[] {
                 const bRank = (b.metadata?.terminalPair?.role ?? b.metadata?.terminalSupervision?.role) === 'worker' ? 0 : 1
                 return aRank - bRank
             })
-            ordered.forEach((item) => visited.add(item.id))
-            rows.push({
-                key: ordered.map((item) => item.id).join(':'),
+            ordered.forEach((s) => visited.add(s.id))
+            const row: SessionRow = {
+                key: ordered.map((s) => s.id).join(':'),
                 sessions: ordered,
                 paired: true
-            })
+            }
+            for (const s of ordered) pairRows.set(s.id, row)
+        }
+    }
+
+    // Pass 2: classify unpaired sessions into parent-child hierarchy
+    const childIds = new Set<string>()
+    const childrenByParent = new Map<string, SessionSummary[]>()
+    for (const session of groupSessions) {
+        if (visited.has(session.id)) continue
+        const parentId = session.metadata?.parentSessionId
+        if (parentId && byId.has(parentId)) {
+            childIds.add(session.id)
+            const siblings = childrenByParent.get(parentId) ?? []
+            siblings.push(session)
+            childrenByParent.set(parentId, siblings)
+        }
+    }
+
+    // Pass 3: assemble rows in original order — parent + children, pairs inline
+    const rows: SessionRow[] = []
+    const emitted = new Set<string>()
+
+    for (const session of groupSessions) {
+        if (emitted.has(session.id)) continue
+
+        // Emit pair row (once, at position of first member encountered)
+        const pairRow = pairRows.get(session.id)
+        if (pairRow) {
+            pairRow.sessions.forEach((s) => emitted.add(s.id))
+            rows.push(pairRow)
             continue
         }
 
-        visited.add(session.id)
+        // Skip child sessions here — they're emitted after their parent
+        if (childIds.has(session.id)) continue
+
+        emitted.add(session.id)
         rows.push({
             key: session.id,
             sessions: [session],
             paired: false
         })
+
+        // Emit children right after parent
+        const children = childrenByParent.get(session.id)
+        if (children) {
+            for (const child of children) {
+                if (!emitted.has(child.id)) {
+                    emitted.add(child.id)
+                    rows.push({
+                        key: child.id,
+                        sessions: [child],
+                        paired: false,
+                        isChild: true
+                    })
+                }
+            }
+        }
     }
 
     return rows
+}
+
+function getSubgroupIdentity(row: SessionRow): { key: string; label: string; kind: 'branch' } {
+    const primarySession = row.sessions[0]
+    const worktree = primarySession?.metadata?.worktree
+    if (worktree) {
+        const trimmedBranch = worktree.branch.trim()
+        return {
+            key: `worktree:${worktree.worktreePath ?? primarySession.metadata?.path ?? primarySession.id}`,
+            label: trimmedBranch,
+            kind: 'branch'
+        }
+    }
+
+    const branch = primarySession?.metadata?.branch?.trim()
+    return {
+        key: `branch:${branch ?? 'default'}`,
+        label: branch || 'default',
+        kind: 'branch'
+    }
+}
+
+export function getGroupBranchHint(groupSessions: SessionSummary[]): string | undefined {
+    const branchHints = new Set<string>()
+    for (const session of groupSessions) {
+        const branch = session.metadata?.worktree?.branch?.trim() ?? session.metadata?.branch?.trim()
+        if (branch) {
+            branchHints.add(branch)
+        }
+    }
+    if (branchHints.size !== 1) {
+        return undefined
+    }
+    return Array.from(branchHints)[0]
+}
+
+export function getSessionSubgroups(_groupDirectory: string, orderedRows: SessionRow[]): SessionSubgroup[] {
+    const subgroupMap = new Map<string, SessionSubgroup>()
+
+    for (const row of orderedRows) {
+        const subgroupIdentity = getSubgroupIdentity(row)
+        const existing = subgroupMap.get(subgroupIdentity.key)
+        if (existing) {
+            existing.rows.push(row)
+            continue
+        }
+        subgroupMap.set(subgroupIdentity.key, {
+            key: subgroupIdentity.key,
+            label: subgroupIdentity.label,
+            kind: subgroupIdentity.kind,
+            rows: [row]
+        })
+    }
+
+    const subgroups = Array.from(subgroupMap.values())
+    subgroups.sort((left, right) => left.label.localeCompare(right.label))
+
+    return subgroups
+}
+
+function getRowOrderKey(groupDir: string, subgroupKey: string): string {
+    return `${groupDir}::${subgroupKey}`
+}
+
+function loadSessionOrders(storageKey: string): SessionListOrders {
+    const parsed = readLocalStorageJson<unknown>(storageKey)
+    if (!parsed || typeof parsed !== 'object') {
+        return { groups: [], subgroups: {}, rows: {} }
+    }
+
+    const candidate = parsed as {
+        groups?: unknown
+        subgroups?: unknown
+        rows?: unknown
+    }
+    return {
+        groups: Array.isArray(candidate.groups) ? candidate.groups.filter((value): value is string => typeof value === 'string') : [],
+        subgroups: candidate.subgroups && typeof candidate.subgroups === 'object' ? candidate.subgroups as Record<string, string[]> : {},
+        rows: candidate.rows && typeof candidate.rows === 'object' ? candidate.rows as Record<string, string[]> : {},
+    }
+}
+
+function saveSessionOrders(storageKey: string, orders: SessionListOrders): void {
+    writeLocalStorageJson(storageKey, orders)
+}
+
+export function reconcileOrder<T>(items: T[], savedOrder: string[] | undefined, getKey: (item: T) => string): string[] {
+    const currentKeys = items.map(getKey)
+    const currentKeySet = new Set(currentKeys)
+    const next: string[] = []
+
+    for (const key of savedOrder ?? []) {
+        if (currentKeySet.has(key) && !next.includes(key)) {
+            next.push(key)
+        }
+    }
+
+    for (const key of currentKeys) {
+        if (!next.includes(key)) {
+            next.push(key)
+        }
+    }
+
+    return next
+}
+
+function applyCustomOrder<T>(items: T[], savedOrder: string[] | undefined, getKey: (item: T) => string): T[] {
+    const orderedKeys = reconcileOrder(items, savedOrder, getKey)
+    const byKey = new Map(items.map((item) => [getKey(item), item]))
+    return orderedKeys.map((key) => byKey.get(key)).filter((item): item is T => Boolean(item))
+}
+
+function estimateVirtualItemHeight(item: VirtualListItem): number {
+    if (item.kind === 'header') {
+        return HEADER_HEIGHT_ESTIMATE
+    }
+    if (item.kind === 'subgroup') {
+        return SUBGROUP_HEIGHT_ESTIMATE
+    }
+    return item.row.paired ? PAIRED_ROW_HEIGHT_ESTIMATE : ROW_HEIGHT_ESTIMATE
+}
+
+function isWindowScrollContainer(container: HTMLElement | Window): container is Window {
+    return typeof window !== 'undefined' && container === window
+}
+
+function findScrollContainer(node: HTMLElement | null): HTMLElement | Window {
+    let current = node?.parentElement ?? null
+    while (current && typeof window !== 'undefined') {
+        const style = window.getComputedStyle(current)
+        if (/(auto|scroll)/.test(style.overflowY)) {
+            return current
+        }
+        current = current.parentElement
+    }
+    return window
+}
+
+function getViewportMetrics(root: HTMLElement, container: HTMLElement | Window): ViewportMetrics {
+    if (typeof window === 'undefined') {
+        return { start: 0, height: 0 }
+    }
+
+    if (isWindowScrollContainer(container)) {
+        const scrollTop = window.scrollY
+        const rootTop = root.getBoundingClientRect().top + scrollTop
+        return {
+            start: Math.max(0, scrollTop - rootTop),
+            height: window.innerHeight
+        }
+    }
+
+    const containerRect = container.getBoundingClientRect()
+    const rootRect = root.getBoundingClientRect()
+    const rootTop = rootRect.top - containerRect.top + container.scrollTop
+    return {
+        start: Math.max(0, container.scrollTop - rootTop),
+        height: container.clientHeight
+    }
+}
+
+function VirtualMeasuredItem(props: {
+    itemKey: string
+    top: number
+    onMeasure: (key: string, height: number) => void
+    children: React.ReactNode
+}) {
+    const ref = useRef<HTMLDivElement | null>(null)
+
+    useLayoutEffect(() => {
+        const node = ref.current
+        if (!node) {
+            return
+        }
+
+        const measure = () => {
+            const nextHeight = Math.ceil(node.getBoundingClientRect().height)
+            props.onMeasure(props.itemKey, nextHeight)
+        }
+
+        measure()
+
+        if (typeof ResizeObserver === 'undefined') {
+            return
+        }
+
+        const observer = new ResizeObserver(() => {
+            measure()
+        })
+        observer.observe(node)
+        return () => observer.disconnect()
+    }, [props.itemKey, props.onMeasure])
+
+    return (
+        <div
+            ref={ref}
+            className="absolute inset-x-0"
+            style={{ transform: `translateY(${props.top}px)` }}
+        >
+            {props.children}
+        </div>
+    )
 }
 
 function formatRelativeTime(value: number, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -218,29 +659,54 @@ function formatRelativeTime(value: number, t: (key: string, params?: Record<stri
     return new Date(ms).toLocaleDateString()
 }
 
+export function buildCloneRequest(
+    session: SessionSummary,
+    startupCommand?: string
+): {
+    directory: string
+    name: string
+    pinned: boolean | undefined
+    autoRespawn: boolean | undefined
+    startupCommand: string | undefined
+} | null {
+    const directory = session.metadata?.path?.trim()
+    if (!directory) {
+        return null
+    }
+
+    return {
+        directory,
+        name: `${getSessionTitle(session)} (clone)`,
+        pinned: session.metadata?.pinned,
+        autoRespawn: session.metadata?.autoRespawn,
+        startupCommand: startupCommand?.trim() || undefined
+    }
+}
+
 function SessionItem(props: {
     session: SessionSummary
     sessions: SessionSummary[]
     onSelect: (sessionId: string) => void
+    onClone?: (newSessionId: string) => void
     showPath?: boolean
     api: ApiClient | null
     selected?: boolean
 }) {
     const { t } = useTranslation()
-    const { baseUrl } = useAppContext()
-    const { session: s, sessions, onSelect, showPath = true, api, selected = false } = props
+    const { baseUrl, scopeKey } = useAppContext()
+    const queryClient = useQueryClient()
+    const { session: s, sessions, onSelect, onClone, api, selected = false } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-    const [renameOpen, setRenameOpen] = useState(false)
+    const [menuAnchorMode, setMenuAnchorMode] = useState<'centered' | 'context'>('centered')
+    const [editOpen, setEditOpen] = useState(false)
     const [startupCommandOpen, setStartupCommandOpen] = useState(false)
-    const [archiveOpen, setArchiveOpen] = useState(false)
-    const [deleteOpen, setDeleteOpen] = useState(false)
+    const [closeOpen, setCloseOpen] = useState(false)
 
     const {
-        archiveSession,
-        renameSession,
-        deleteSession,
+        updateSession,
+        closeSession,
         setPinned,
         setShellOptions,
         attachTerminalSupervision,
@@ -269,10 +735,36 @@ function SessionItem(props: {
         && !candidate.metadata?.terminalPair
     )
 
+    const handleClone = useCallback(async (startupCommand?: string) => {
+        if (!api) return
+        const request = buildCloneRequest(s, startupCommand)
+        if (!request) return
+        try {
+            const result = await api.spawnHubSession(
+                request.directory,
+                request.name,
+                undefined,
+                undefined,
+                request.pinned,
+                request.autoRespawn,
+                request.startupCommand,
+                undefined,
+                undefined
+            )
+            if (result.type === 'success') {
+                await queryClient.invalidateQueries({ queryKey: ['sessions', scopeKey] })
+                onClone?.(result.sessionId)
+            }
+        } catch {
+            // silently fail - session list will refresh naturally
+        }
+    }, [api, onClone, queryClient, s, scopeKey])
+
     const longPressHandlers = useLongPress({
         onLongPress: (point) => {
             haptic.impact('medium')
-            setMenuAnchorPoint(point)
+            setMenuAnchorPoint({ x: point.x, y: point.y })
+            setMenuAnchorMode(point.source === 'contextmenu' ? 'context' : 'centered')
             setMenuOpen(true)
         },
         onClick: () => {
@@ -284,72 +776,39 @@ function SessionItem(props: {
     })
 
     const sessionName = getSessionTitle(s)
-    const statusDotClass = s.active
-        ? (s.thinking ? 'bg-[#007AFF]' : 'bg-[var(--app-badge-success-text)]')
-        : 'bg-[var(--app-hint)]'
+    const relativeTime = formatRelativeTime(s.updatedAt, t)
+
     return (
         <>
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item flex w-full flex-col gap-1.5 px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                className={`flex w-full flex-col gap-0.5 rounded-[12px] px-3 py-1.5 text-left transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--app-link)] select-none ${
+                    selected
+                        ? 'bg-[color-mix(in_srgb,var(--app-surface-raised)_94%,white_6%)] text-[var(--app-fg)] shadow-[inset_0_0_0_1px_var(--mg-border-strong)]'
+                        : 'bg-transparent text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]/55'
+                }`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
             >
-                <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                        <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
-                            <span
-                                className={`h-2 w-2 rounded-full ${statusDotClass}`}
-                            />
-                        </span>
-                        <div className="truncate text-base font-medium">
-                            {sessionName}
+                <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                            <div className="truncate text-[16px] font-medium leading-5 text-[var(--app-fg)]">
+                                {sessionName}
+                            </div>
+                            {s.metadata?.pinned ? (
+                                <span className="shrink-0 text-[var(--app-fg)]" title="Pinned shell">
+                                    <PinIcon className="h-2.5 w-2.5" />
+                                </span>
+                            ) : null}
                         </div>
-                        {s.metadata?.pinned ? (
-                            <span className="text-[var(--app-link)]" title="Pinned shell">
-                                <PinIcon />
-                            </span>
-                        ) : null}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0 text-xs">
-                        {s.thinking ? (
-                            <span className="text-[#007AFF] animate-pulse">
-                                {t('session.item.thinking')}
-                            </span>
-                        ) : null}
-                        <span className="text-[var(--app-hint)]">
-                            {formatRelativeTime(s.updatedAt, t)}
-                        </span>
+                    <div className="flex shrink-0 items-start gap-2">
+                        <div className="text-[9px] font-medium text-[var(--app-fg)]/72">
+                            {relativeTime}
+                        </div>
                     </div>
-                </div>
-                {showPath ? (
-                    <div className="truncate text-xs text-[var(--app-hint)]">
-                        {s.metadata?.path ?? s.id}
-                    </div>
-                ) : null}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--app-hint)]">
-                    <span className="inline-flex items-center gap-2">
-                        <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
-                            ❖
-                        </span>
-                        {getAgentLabel(s)}
-                    </span>
-                    {pairLink ? (
-                        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] uppercase tracking-wide">
-                            {pairLink.role}
-                            {pairLink.state !== 'active' ? ` ${pairLink.state}` : ''}
-                        </span>
-                    ) : null}
-                    {supervision ? (
-                        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] uppercase tracking-wide">
-                            {supervision.role}
-                            {supervision.state === 'paused' ? ' paused' : ''}
-                        </span>
-                    ) : null}
-                    {s.metadata?.worktree?.branch ? (
-                        <span>{t('session.item.worktree')}: {s.metadata.worktree.branch}</span>
-                    ) : null}
                 </div>
             </button>
 
@@ -376,13 +835,13 @@ function SessionItem(props: {
                 }}
                 canAttachTerminalSupervision={s.metadata?.flavor === 'shell' && !supervision && !pairLink}
                 onAttachTerminalSupervision={() => setAttachOpen(true)}
-                canPauseTerminalSupervision={Boolean(supervision)}
+                canPauseTerminalSupervision={Boolean(supervision && !pairLink)}
                 terminalSupervisionPaused={supervision?.state === 'paused'}
                 onToggleTerminalSupervisionPaused={() => {
                     if (!supervision) return
                     void setTerminalSupervisionPaused(supervision.state !== 'paused')
                 }}
-                canDetachTerminalSupervision={Boolean(supervision)}
+                canDetachTerminalSupervision={Boolean(supervision && !pairLink)}
                 onDetachTerminalSupervision={() => {
                     void detachTerminalSupervision()
                 }}
@@ -403,10 +862,14 @@ function SessionItem(props: {
                     if (!pairLink) return
                     void setTerminalPairPaused(pairLink.state !== 'paused')
                 }}
-                onRename={() => setRenameOpen(true)}
-                onArchive={() => setArchiveOpen(true)}
-                onDelete={() => setDeleteOpen(true)}
+                canClone={Boolean(s.metadata?.path)}
+                onClone={() => void handleClone()}
+                onCloneWithClaude={() => void handleClone('claude')}
+                onCloneWithCodex={() => void handleClone('codex')}
+                onEdit={() => setEditOpen(true)}
+                onCloseSession={() => setCloseOpen(true)}
                 anchorPoint={menuAnchorPoint}
+                anchorMode={menuAnchorMode}
             />
 
             <Dialog open={attachOpen} onOpenChange={setAttachOpen}>
@@ -485,11 +948,12 @@ function SessionItem(props: {
                 </DialogContent>
             </Dialog>
 
-            <RenameSessionDialog
-                isOpen={renameOpen}
-                onClose={() => setRenameOpen(false)}
+            <SessionEditDialog
+                isOpen={editOpen}
+                onClose={() => setEditOpen(false)}
                 currentName={sessionName}
-                onRename={renameSession}
+                currentDirectory={s.metadata?.worktree?.basePath ?? s.metadata?.path ?? ''}
+                onSave={updateSession}
                 isPending={isPending}
             />
 
@@ -504,25 +968,13 @@ function SessionItem(props: {
             />
 
             <ConfirmDialog
-                isOpen={archiveOpen}
-                onClose={() => setArchiveOpen(false)}
-                title={t('dialog.archive.title')}
-                description={t('dialog.archive.description', { name: sessionName })}
-                confirmLabel={t('dialog.archive.confirm')}
-                confirmingLabel={t('dialog.archive.confirming')}
-                onConfirm={archiveSession}
-                isPending={isPending}
-                destructive
-            />
-
-            <ConfirmDialog
-                isOpen={deleteOpen}
-                onClose={() => setDeleteOpen(false)}
-                title={t('dialog.delete.title')}
-                description={t('dialog.delete.description', { name: sessionName })}
-                confirmLabel={t('dialog.delete.confirm')}
-                confirmingLabel={t('dialog.delete.confirming')}
-                onConfirm={deleteSession}
+                isOpen={closeOpen}
+                onClose={() => setCloseOpen(false)}
+                title={t('dialog.close.title')}
+                description={t('dialog.close.description', { name: sessionName })}
+                confirmLabel={t('dialog.close.confirm')}
+                confirmingLabel={t('dialog.close.confirming')}
+                onConfirm={closeSession}
                 isPending={isPending}
                 destructive
             />
@@ -533,19 +985,39 @@ function SessionItem(props: {
 export function SessionList(props: {
     sessions: SessionSummary[]
     onSelect: (sessionId: string) => void
+    onClone?: (newSessionId: string) => void
     onNewSession: () => void
     onRefresh: () => void
     isLoading: boolean
     renderHeader?: boolean
+    searchVisible?: boolean
     api: ApiClient | null
     selectedSessionId?: string | null
 }) {
     const { t } = useTranslation()
-    const { renderHeader = true, api, selectedSessionId } = props
-    const groups = useMemo(
-        () => groupSessionsByDirectory(props.sessions),
+    const { renderHeader = true, searchVisible = false, api, selectedSessionId } = props
+    const { baseUrl, scopeKey } = useAppContext()
+    const queryClient = useQueryClient()
+    const sessionOrderStorageKey = useMemo(() => getSessionListOrderStorageKey(scopeKey), [scopeKey])
+    const { runBatchCleanup, isPending: isBatchCleanupPending } = useCloseSessionsBatch(api)
+    const visibleSessions = useMemo(
+        () => props.sessions.filter(isVisibleInSessionList),
         [props.sessions]
     )
+    const [filters, setFilters] = useState<SessionListFilters>(() => searchVisible ? loadSessionListFilters(scopeKey) : DEFAULT_SESSION_FILTERS)
+    const appliedFilters = searchVisible ? filters : DEFAULT_SESSION_FILTERS
+    const filteredSessions = useMemo(
+        () => filterSessionSummaries(visibleSessions, appliedFilters),
+        [visibleSessions, appliedFilters]
+    )
+    const groups = useMemo(
+        () => groupSessionsByDirectory(filteredSessions),
+        [filteredSessions]
+    )
+    const [cleanupSessionsTarget, setCleanupSessionsTarget] = useState<CleanupSessionsTarget | null>(null)
+    const [manageMenuOpen, setManageMenuOpen] = useState(false)
+    const [groupMenuDirectory, setGroupMenuDirectory] = useState<string | null>(null)
+    const [subgroupMenuTarget, setSubgroupMenuTarget] = useState<{ groupDir: string; subgroupKey: string } | null>(null)
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
@@ -579,78 +1051,828 @@ export function SessionList(props: {
         })
     }, [groups])
 
+    useEffect(() => {
+        setFilters(searchVisible ? loadSessionListFilters(scopeKey) : DEFAULT_SESSION_FILTERS)
+    }, [scopeKey, searchVisible])
+
+    useEffect(() => {
+        if (searchVisible || !filters.search) {
+            return
+        }
+        setFilters(DEFAULT_SESSION_FILTERS)
+    }, [filters.search, searchVisible])
+
+    useEffect(() => {
+        saveSessionListFilters(scopeKey, filters)
+    }, [filters, scopeKey])
+
+    useEffect(() => {
+        if (!groupMenuDirectory && !subgroupMenuTarget && !manageMenuOpen) {
+            return
+        }
+
+        const handlePointerDown = () => {
+            setGroupMenuDirectory(null)
+            setSubgroupMenuTarget(null)
+            setManageMenuOpen(false)
+        }
+
+        window.addEventListener('pointerdown', handlePointerDown)
+        return () => {
+            window.removeEventListener('pointerdown', handlePointerDown)
+        }
+    }, [groupMenuDirectory, subgroupMenuTarget, manageMenuOpen])
+
+    const [sessionOrders, setSessionOrders] = useState<SessionListOrders>(() => loadSessionOrders(sessionOrderStorageKey))
+    const gripActiveRef = useRef(false)
+    const draggedRef = useRef<
+        | { kind: 'group'; groupDir: string }
+        | { kind: 'subgroup'; groupDir: string; subgroupKey: string }
+        | { kind: 'row'; groupDir: string; subgroupKey: string; rowKey: string }
+        | null
+    >(null)
+    const [dropIndicator, setDropIndicator] = useState<
+        | { kind: 'group'; insertIndex: number }
+        | { kind: 'subgroup'; groupDir: string; insertIndex: number }
+        | { kind: 'row'; groupDir: string; subgroupKey: string; insertIndex: number }
+        | null
+    >(null)
+    useEffect(() => {
+        setSessionOrders(loadSessionOrders(sessionOrderStorageKey))
+    }, [sessionOrderStorageKey])
+
+    const stoppedCleanupPlan = useMemo(
+        () => planSessionCleanup(visibleSessions, 'stopped'),
+        [visibleSessions]
+    )
+
+    const updateFilters = useCallback((next: SessionListFilters) => {
+        setFilters(next)
+    }, [])
+
+    const setSearch = useCallback((search: string) => {
+        updateFilters({
+            ...filters,
+            search
+        })
+    }, [filters, updateFilters])
+
+    const handleGroupDragStart = useCallback((groupDir: string, e: React.DragEvent) => {
+        if (!gripActiveRef.current) {
+            e.preventDefault()
+            return
+        }
+        draggedRef.current = { kind: 'group', groupDir }
+        e.dataTransfer.effectAllowed = 'move'
+        const el = e.currentTarget as HTMLElement
+        requestAnimationFrame(() => {
+            el.style.opacity = '0.4'
+        })
+    }, [])
+
+    const handleSubgroupDragStart = useCallback((groupDir: string, subgroupKey: string, e: React.DragEvent) => {
+        if (!gripActiveRef.current) {
+            e.preventDefault()
+            return
+        }
+        draggedRef.current = { kind: 'subgroup', groupDir, subgroupKey }
+        e.dataTransfer.effectAllowed = 'move'
+        const el = e.currentTarget as HTMLElement
+        requestAnimationFrame(() => {
+            el.style.opacity = '0.4'
+        })
+    }, [])
+
+    const handleRowDragStart = useCallback((groupDir: string, subgroupKey: string, rowKey: string, e: React.DragEvent) => {
+        if (!gripActiveRef.current) {
+            e.preventDefault()
+            return
+        }
+        draggedRef.current = { kind: 'row', groupDir, subgroupKey, rowKey }
+        e.dataTransfer.effectAllowed = 'move'
+        const el = e.currentTarget as HTMLElement
+        requestAnimationFrame(() => {
+            el.style.opacity = '0.4'
+        })
+    }, [])
+
+    const handleDragEnd = useCallback((e: React.DragEvent) => {
+        (e.currentTarget as HTMLElement).style.opacity = ''
+        gripActiveRef.current = false
+        draggedRef.current = null
+        setDropIndicator(null)
+    }, [])
+
+    const handleGroupDragOver = useCallback((groupIndex: number, e: React.DragEvent) => {
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'group') return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const midY = rect.top + rect.height / 2
+        const insertIndex = e.clientY < midY ? groupIndex : groupIndex + 1
+
+        setDropIndicator(prev => {
+            if (prev?.kind === 'group' && prev.insertIndex === insertIndex) return prev
+            return { kind: 'group', insertIndex }
+        })
+    }, [])
+
+    const handleSubgroupDragOver = useCallback((groupDir: string, subgroupIndex: number, e: React.DragEvent) => {
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'subgroup' || dragged.groupDir !== groupDir) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const midY = rect.top + rect.height / 2
+        const insertIndex = e.clientY < midY ? subgroupIndex : subgroupIndex + 1
+
+        setDropIndicator(prev => {
+            if (prev?.kind === 'subgroup' && prev.groupDir === groupDir && prev.insertIndex === insertIndex) return prev
+            return { kind: 'subgroup', groupDir, insertIndex }
+        })
+    }, [])
+
+    const handleRowDragOver = useCallback((groupDir: string, subgroupKey: string, rowIndex: number, e: React.DragEvent) => {
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'row' || dragged.groupDir !== groupDir || dragged.subgroupKey !== subgroupKey) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const midY = rect.top + rect.height / 2
+        const insertIndex = e.clientY < midY ? rowIndex : rowIndex + 1
+
+        setDropIndicator(prev => {
+            if (prev?.kind === 'row' && prev.groupDir === groupDir && prev.subgroupKey === subgroupKey && prev.insertIndex === insertIndex) return prev
+            return { kind: 'row', groupDir, subgroupKey, insertIndex }
+        })
+    }, [])
+
+    const handleGroupDrop = (orderedGroups: SessionGroup[], e: React.DragEvent) => {
+        e.preventDefault()
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'group' || !dropIndicator || dropIndicator.kind !== 'group') return
+
+        const currentKeys = orderedGroups.map((group) => group.directory)
+        const draggedIdx = currentKeys.indexOf(dragged.groupDir)
+        if (draggedIdx === -1) return
+
+        const newKeys = [...currentKeys]
+        newKeys.splice(draggedIdx, 1)
+
+        let insertIdx = dropIndicator.insertIndex
+        if (draggedIdx < insertIdx) insertIdx--
+
+        newKeys.splice(insertIdx, 0, dragged.groupDir)
+
+        const updated = { ...sessionOrders, groups: newKeys }
+        setSessionOrders(updated)
+        saveSessionOrders(sessionOrderStorageKey, updated)
+
+        draggedRef.current = null
+        setDropIndicator(null)
+    }
+
+    const handleSubgroupDrop = (groupDir: string, subgroups: SessionSubgroup[], e: React.DragEvent) => {
+        e.preventDefault()
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'subgroup' || dragged.groupDir !== groupDir || !dropIndicator || dropIndicator.kind !== 'subgroup' || dropIndicator.groupDir !== groupDir) return
+
+        const currentKeys = subgroups.map((subgroup) => subgroup.key)
+        const draggedIdx = currentKeys.indexOf(dragged.subgroupKey)
+        if (draggedIdx === -1) return
+
+        const newKeys = [...currentKeys]
+        newKeys.splice(draggedIdx, 1)
+
+        let insertIdx = dropIndicator.insertIndex
+        if (draggedIdx < insertIdx) insertIdx--
+
+        newKeys.splice(insertIdx, 0, dragged.subgroupKey)
+
+        const updated = {
+            ...sessionOrders,
+            subgroups: {
+                ...sessionOrders.subgroups,
+                [groupDir]: newKeys
+            }
+        }
+        setSessionOrders(updated)
+        saveSessionOrders(sessionOrderStorageKey, updated)
+
+        draggedRef.current = null
+        setDropIndicator(null)
+    }
+
+    const handleRowDrop = (groupDir: string, subgroupKey: string, rows: SessionRow[], e: React.DragEvent) => {
+        e.preventDefault()
+        const dragged = draggedRef.current
+        if (!dragged || dragged.kind !== 'row' || dragged.groupDir !== groupDir || dragged.subgroupKey !== subgroupKey || !dropIndicator || dropIndicator.kind !== 'row' || dropIndicator.groupDir !== groupDir || dropIndicator.subgroupKey !== subgroupKey) return
+
+        const currentKeys = rows.map((row) => row.key)
+        const draggedIdx = currentKeys.indexOf(dragged.rowKey)
+        if (draggedIdx === -1) return
+
+        const newKeys = [...currentKeys]
+        newKeys.splice(draggedIdx, 1)
+
+        let insertIdx = dropIndicator.insertIndex
+        if (draggedIdx < insertIdx) insertIdx--
+
+        newKeys.splice(insertIdx, 0, dragged.rowKey)
+
+        const rowOrderKey = getRowOrderKey(groupDir, subgroupKey)
+        const updated = {
+            ...sessionOrders,
+            rows: {
+                ...sessionOrders.rows,
+                [rowOrderKey]: newKeys
+            }
+        }
+        setSessionOrders(updated)
+        saveSessionOrders(sessionOrderStorageKey, updated)
+
+        draggedRef.current = null
+        setDropIndicator(null)
+    }
+
+    const groupRenderStates = useMemo<GroupRenderState[]>(() => {
+        const unorderedStates = groups.map((group) => {
+            const isCollapsed = isGroupCollapsed(group)
+            const rows = getSessionRows(group.sessions)
+            const subgroups = applyCustomOrder(
+                getSessionSubgroups(group.directory, rows),
+                sessionOrders.subgroups[group.directory],
+                (subgroup) => subgroup.key
+            ).map((subgroup) => ({
+                ...subgroup,
+                rows: applyCustomOrder(
+                    subgroup.rows,
+                    sessionOrders.rows[getRowOrderKey(group.directory, subgroup.key)],
+                    (row) => row.key
+                )
+            }))
+            const orderedRows = subgroups.flatMap((subgroup) => subgroup.rows)
+            const shouldShowSubgroups = subgroups.length > 0
+            return {
+                group,
+                isCollapsed,
+                orderedRows,
+                subgroups,
+                shouldShowSubgroups
+            }
+        })
+        return applyCustomOrder(unorderedStates, sessionOrders.groups, (groupState) => groupState.group.directory)
+    }, [groups, sessionOrders, collapseOverrides])
+
+    useEffect(() => {
+        const nextOrders: SessionListOrders = {
+            groups: reconcileOrder(groupRenderStates, sessionOrders.groups, (groupState) => groupState.group.directory),
+            subgroups: {},
+            rows: {}
+        }
+
+        for (const groupState of groupRenderStates) {
+            nextOrders.subgroups[groupState.group.directory] = reconcileOrder(
+                groupState.subgroups,
+                sessionOrders.subgroups[groupState.group.directory],
+                (subgroup) => subgroup.key
+            )
+
+            for (const subgroup of groupState.subgroups) {
+                nextOrders.rows[getRowOrderKey(groupState.group.directory, subgroup.key)] = reconcileOrder(
+                    subgroup.rows,
+                    sessionOrders.rows[getRowOrderKey(groupState.group.directory, subgroup.key)],
+                    (row) => row.key
+                )
+            }
+        }
+
+        if (JSON.stringify(nextOrders) === JSON.stringify(sessionOrders)) {
+            return
+        }
+
+        setSessionOrders(nextOrders)
+        saveSessionOrders(sessionOrderStorageKey, nextOrders)
+    }, [groupRenderStates, sessionOrderStorageKey, sessionOrders])
+
+    const virtualItems = useMemo<VirtualListItem[]>(() => {
+        return groupRenderStates.flatMap((groupState) => {
+            const items: VirtualListItem[] = [{
+                key: `header:${groupState.group.directory}`,
+                kind: 'header',
+                groupState
+            }]
+            if (!groupState.isCollapsed) {
+                let rowIndex = 0
+                for (const subgroup of groupState.subgroups) {
+                    if (groupState.shouldShowSubgroups) {
+                        items.push({
+                            key: `subgroup:${groupState.group.directory}:${subgroup.key}`,
+                            kind: 'subgroup',
+                            groupState,
+                            subgroup
+                        })
+                    }
+                    items.push(...subgroup.rows.map((row) => {
+                        const item: VirtualRowItem = {
+                            key: `row:${groupState.group.directory}:${row.key}`,
+                            kind: 'row',
+                            groupState,
+                            subgroup,
+                            row,
+                            rowIndex
+                        }
+                        rowIndex += 1
+                        return item
+                    }))
+                }
+            }
+            return items
+        })
+    }, [groupRenderStates])
+
+    const [measuredHeights, setMeasuredHeights] = useState<Record<string, number>>({})
+    const virtualRootRef = useRef<HTMLDivElement | null>(null)
+    const scrollContainerRef = useRef<HTMLElement | Window | null>(null)
+    const [viewport, setViewport] = useState<ViewportMetrics>({ start: 0, height: 0 })
+
+    useEffect(() => {
+        const knownKeys = new Set(virtualItems.map((item) => item.key))
+        setMeasuredHeights((prev) => {
+            let changed = false
+            const next: Record<string, number> = {}
+            for (const [key, value] of Object.entries(prev)) {
+                if (!knownKeys.has(key)) {
+                    changed = true
+                    continue
+                }
+                next[key] = value
+            }
+            return changed ? next : prev
+        })
+    }, [virtualItems])
+
+    const handleMeasureItem = useCallback((key: string, height: number) => {
+        setMeasuredHeights((prev) => {
+            if (prev[key] === height) {
+                return prev
+            }
+            return {
+                ...prev,
+                [key]: height
+            }
+        })
+    }, [])
+
+    useLayoutEffect(() => {
+        const root = virtualRootRef.current
+        if (!root || typeof window === 'undefined') {
+            return
+        }
+
+        const container = findScrollContainer(root)
+        scrollContainerRef.current = container
+        let frame = 0
+
+        const update = () => {
+            frame = 0
+            const node = virtualRootRef.current
+            const target = scrollContainerRef.current
+            if (!node || !target) {
+                return
+            }
+            const next = getViewportMetrics(node, target)
+            setViewport((prev) => (
+                prev.start === next.start && prev.height === next.height
+                    ? prev
+                    : next
+            ))
+        }
+
+        const scheduleUpdate = () => {
+            if (frame !== 0) {
+                return
+            }
+            frame = window.requestAnimationFrame(update)
+        }
+
+        const resizeObserver = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(() => scheduleUpdate())
+            : null
+
+        resizeObserver?.observe(root)
+        if (!isWindowScrollContainer(container)) {
+            resizeObserver?.observe(container)
+            container.addEventListener('scroll', scheduleUpdate, { passive: true })
+        } else {
+            window.addEventListener('scroll', scheduleUpdate, { passive: true })
+        }
+        window.addEventListener('resize', scheduleUpdate)
+
+        update()
+
+        return () => {
+            if (frame !== 0) {
+                window.cancelAnimationFrame(frame)
+            }
+            resizeObserver?.disconnect()
+            if (!isWindowScrollContainer(container)) {
+                container.removeEventListener('scroll', scheduleUpdate)
+            } else {
+                window.removeEventListener('scroll', scheduleUpdate)
+            }
+            window.removeEventListener('resize', scheduleUpdate)
+        }
+    }, [virtualItems.length])
+
+    const itemLayouts = useMemo<VirtualItemLayout[]>(() => {
+        let start = 0
+        return virtualItems.map((item) => {
+            const size = measuredHeights[item.key] ?? estimateVirtualItemHeight(item)
+            const layout = {
+                item,
+                start,
+                size,
+                end: start + size
+            }
+            start += size
+            return layout
+        })
+    }, [measuredHeights, virtualItems])
+
+    const totalVirtualHeight = itemLayouts[itemLayouts.length - 1]?.end ?? 0
+    const visibleItemLayouts = useMemo(() => {
+        if (itemLayouts.length === 0) {
+            return []
+        }
+        if (viewport.height <= 0) {
+            return itemLayouts.slice(0, 40)
+        }
+
+        const visibleStart = Math.max(0, viewport.start - VIRTUAL_OVERSCAN_PX)
+        const visibleEnd = viewport.start + viewport.height + VIRTUAL_OVERSCAN_PX
+        return itemLayouts.filter((layout) => layout.end >= visibleStart && layout.start <= visibleEnd)
+    }, [itemLayouts, viewport])
+
+    const renderDragHandle = (variant: 'header' | 'row' = 'row') => (
+        <div
+            className={
+                variant === 'header'
+                    ? 'flex w-1.5 items-center justify-center cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity'
+                    : 'flex w-2 items-center justify-center cursor-grab shrink-0 opacity-0 group-hover/drag:opacity-70 transition-opacity'
+            }
+            onMouseDown={() => { gripActiveRef.current = true }}
+            onMouseUp={() => { gripActiveRef.current = false }}
+        >
+            <GripVerticalIcon className={variant === 'header' ? 'h-2.5 w-2.5 text-[var(--app-hint)]' : 'h-3 w-3 text-[var(--app-hint)]'} />
+        </div>
+    )
+
+    const renderVirtualItem = (layout: VirtualItemLayout) => {
+        const item = layout.item
+        if (item.kind === 'header') {
+            const { group, isCollapsed } = item.groupState
+            const groupIndex = groupRenderStates.findIndex((groupState) => groupState.group.directory === group.directory)
+            const isDropBefore = dropIndicator?.kind === 'group' && dropIndicator.insertIndex === groupIndex
+            const isDropAfter = dropIndicator?.kind === 'group'
+                && dropIndicator.insertIndex === groupRenderStates.length
+                && groupIndex === groupRenderStates.length - 1
+            const dropClass = isDropBefore
+                ? 'shadow-[inset_0_2px_0_0_var(--app-link)]'
+                : isDropAfter
+                    ? 'shadow-[inset_0_-2px_0_0_var(--app-link)]'
+                    : ''
+            return (
+                <div
+                    draggable
+                    onDragStart={(e) => handleGroupDragStart(group.directory, e)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => handleGroupDragOver(groupIndex, e)}
+                    onDrop={(e) => handleGroupDrop(groupRenderStates.map((groupState) => groupState.group), e)}
+                    className={`group/drag px-2.5 pt-1.5 ${dropClass}`}
+                >
+                    <div
+                        className="relative flex items-start gap-2 rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_96%,white_4%)] px-2 py-1"
+                        onContextMenu={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            setSubgroupMenuTarget(null)
+                            setGroupMenuDirectory((current) => current === group.directory ? null : group.directory)
+                        }}
+                    >
+                        {renderDragHandle('header')}
+                        <button
+                            type="button"
+                            onClick={() => toggleGroup(group.directory, isCollapsed)}
+                            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                            aria-label={isCollapsed ? 'Expand group' : 'Collapse group'}
+                            title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                        >
+                            <ChevronIcon
+                                className="h-3.5 w-3.5 shrink-0 text-current"
+                                collapsed={isCollapsed}
+                            />
+                        </button>
+                        <div className="min-w-0 flex-1 px-0.5 py-0.5">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate text-[13px] font-medium text-[var(--app-fg)]" title={group.directory}>
+                                    {group.displayName}
+                                </span>
+                                <span className="shrink-0 text-[10px] text-[var(--app-hint)]/80">
+                                    {group.sessions.length} sessions
+                                </span>
+                            </div>
+                        </div>
+                        {groupMenuDirectory === group.directory ? (
+                            <div
+                                className="absolute right-3 top-[calc(100%+6px)] z-20 min-w-[160px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]"
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => event.stopPropagation()}
+                            >
+                                <button
+                                    type="button"
+                                    onPointerDown={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                    }}
+                                    onClick={() => {
+                                        setGroupMenuDirectory(null)
+                                        setCleanupSessionsTarget({
+                                            mode: 'group',
+                                            name: group.displayName,
+                                            plan: planSessionCleanup(group.sessions, 'group')
+                                        })
+                                    }}
+                                    disabled={!api || isBatchCleanupPending}
+                                    className="flex w-full rounded-xl px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {isBatchCleanupPending && cleanupSessionsTarget?.name === group.displayName
+                                        ? t('dialog.cleanupGroup.confirming')
+                                        : t('session.group.cleanup')}
+                                </button>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            )
+        }
+
+        if (item.kind === 'subgroup') {
+            const subgroupIndex = item.groupState.subgroups.findIndex((subgroup) => subgroup.key === item.subgroup.key)
+            const isDropBefore = dropIndicator?.kind === 'subgroup'
+                && dropIndicator.groupDir === item.groupState.group.directory
+                && dropIndicator.insertIndex === subgroupIndex
+            const isDropAfter = dropIndicator?.kind === 'subgroup'
+                && dropIndicator.groupDir === item.groupState.group.directory
+                && dropIndicator.insertIndex === item.groupState.subgroups.length
+                && subgroupIndex === item.groupState.subgroups.length - 1
+            const dropClass = isDropBefore
+                ? 'shadow-[inset_0_2px_0_0_var(--app-link)]'
+                : isDropAfter
+                    ? 'shadow-[inset_0_-2px_0_0_var(--app-link)]'
+                    : ''
+            return (
+                <div
+                    draggable
+                    onDragStart={(e) => handleSubgroupDragStart(item.groupState.group.directory, item.subgroup.key, e)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => handleSubgroupDragOver(item.groupState.group.directory, subgroupIndex, e)}
+                    onDrop={(e) => handleSubgroupDrop(item.groupState.group.directory, item.groupState.subgroups, e)}
+                    className={`group/drag px-5 pt-0.5 ${dropClass}`}
+                >
+                    <div
+                        className="relative flex items-center gap-1 text-[12px] text-[var(--app-hint)]/74"
+                        onContextMenu={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            setGroupMenuDirectory(null)
+                            setSubgroupMenuTarget((current) => (
+                                current?.groupDir === item.groupState.group.directory && current.subgroupKey === item.subgroup.key
+                                    ? null
+                                    : { groupDir: item.groupState.group.directory, subgroupKey: item.subgroup.key }
+                            ))
+                        }}
+                    >
+                        {renderDragHandle('header')}
+                        <span className="truncate font-medium">{item.subgroup.label}</span>
+                        {subgroupMenuTarget?.groupDir === item.groupState.group.directory && subgroupMenuTarget.subgroupKey === item.subgroup.key ? (
+                            <div
+                                className="absolute left-0 top-[calc(100%+4px)] z-20 min-w-[160px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-raised)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]"
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => event.stopPropagation()}
+                            >
+                                <button
+                                    type="button"
+                                    onPointerDown={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                    }}
+                                    onClick={() => {
+                                        setSubgroupMenuTarget(null)
+                                        setCleanupSessionsTarget({
+                                            mode: 'group',
+                                            name: item.subgroup.label,
+                                            plan: planSessionCleanup(item.subgroup.rows.flatMap((row) => row.sessions), 'group')
+                                        })
+                                    }}
+                                    disabled={!api || isBatchCleanupPending}
+                                    className="flex w-full rounded-xl px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {isBatchCleanupPending
+                                        && cleanupSessionsTarget?.name === item.subgroup.label
+                                        ? t('dialog.cleanupGroup.confirming')
+                                        : t('session.group.cleanup')}
+                                </button>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            )
+        }
+
+        const { row, groupState } = item
+        const subgroupRowIndex = item.subgroup.rows.findIndex((subgroupRow) => subgroupRow.key === row.key)
+        const isDropBefore = dropIndicator?.kind === 'row'
+            && dropIndicator.groupDir === groupState.group.directory
+            && dropIndicator.subgroupKey === item.subgroup.key
+            && dropIndicator.insertIndex === subgroupRowIndex
+        const isDropAfter = dropIndicator?.kind === 'row'
+            && dropIndicator.groupDir === groupState.group.directory
+            && dropIndicator.subgroupKey === item.subgroup.key
+            && dropIndicator.insertIndex === item.subgroup.rows.length
+            && subgroupRowIndex === item.subgroup.rows.length - 1
+        const dropClass = isDropBefore
+            ? 'shadow-[inset_0_2px_0_0_var(--app-link)]'
+            : isDropAfter
+                ? 'shadow-[inset_0_-2px_0_0_var(--app-link)]'
+                : ''
+
+        return (
+            <div
+                draggable
+                onDragStart={(e) => handleRowDragStart(groupState.group.directory, item.subgroup.key, row.key, e)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => handleRowDragOver(groupState.group.directory, item.subgroup.key, subgroupRowIndex, e)}
+                onDrop={(e) => handleRowDrop(groupState.group.directory, item.subgroup.key, item.subgroup.rows, e)}
+                className={`group/drag flex items-stretch px-3 pb-0.5 ${dropClass}`}
+            >
+                {renderDragHandle('row')}
+                <div className={`flex-1 min-w-0 pl-2 ${row.paired ? 'overflow-hidden rounded-[12px] bg-[color-mix(in_srgb,var(--app-secondary-bg)_90%,white_10%)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_55%,transparent)]' : ''} ${row.isChild ? 'pl-4' : ''}`}>
+                    {row.sessions.map((session, index) => (
+                        <div
+                            key={session.id}
+                            className={`${getTerminalSupervisionTone(session)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''} relative ${row.isChild ? 'before:absolute before:bottom-3 before:left-[-12px] before:top-3 before:w-[1px] before:rounded-full before:bg-[var(--app-border)]' : ''}`}
+                        >
+                            <SessionItem
+                                session={session}
+                                sessions={props.sessions}
+                                onSelect={props.onSelect}
+                                onClone={props.onClone}
+                                showPath={false}
+                                api={api}
+                                selected={session.id === selectedSessionId}
+                            />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )
+    }
+
     return (
         <div className="mx-auto w-full max-w-content flex flex-col">
             {renderHeader ? (
-                <div className="flex items-center justify-between px-3 py-1">
-                    <div className="text-xs text-[var(--app-hint)]">
-                        {t('sessions.count', { n: props.sessions.length, m: groups.length })}
+                <div className="px-2.5 py-1">
+                    <div className="relative flex items-center justify-between rounded-[14px] bg-[var(--app-secondary-bg)] px-2.5 py-1.5 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-border)_65%,transparent)]">
+                        <div>
+                            <div className="text-[12px] text-[var(--app-fg)]">
+                                {filteredSessions.length === visibleSessions.length
+                                    ? t('sessions.count', { n: visibleSessions.length, m: groups.length })
+                                    : t('sessions.filteredCount', { n: filteredSessions.length, m: visibleSessions.length, g: groups.length })}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setManageMenuOpen((open) => !open)}
+                                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-subtle-bg)]/55 px-3 py-1.5 text-[12px] font-medium text-[var(--app-fg)] transition-[background-color] duration-150 hover:bg-[var(--app-subtle-bg)]"
+                            >
+                                <span>{t('sessions.manage')}</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={props.onNewSession}
+                                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-subtle-bg)]/55 px-3 py-1.5 text-[12px] font-medium text-[var(--app-fg)] transition-[background-color] duration-150 hover:bg-[var(--app-subtle-bg)]"
+                                title={t('sessions.new')}
+                            >
+                                <PlusIcon className="h-3.5 w-3.5" />
+                                <span>New</span>
+                            </button>
+                        </div>
+                        {manageMenuOpen ? (
+                            <div className="absolute right-2 top-[calc(100%+6px)] z-20 min-w-[180px] rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_22px_52px_-36px_rgba(0,0,0,0.5)]">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setManageMenuOpen(false)
+                                        setCleanupSessionsTarget({
+                                            mode: 'stopped',
+                                            name: 'Stopped sessions',
+                                            plan: stoppedCleanupPlan
+                                        })
+                                    }}
+                                    disabled={!api || isBatchCleanupPending || stoppedCleanupPlan.delete.length === 0}
+                                    className="flex w-full rounded-xl px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {isBatchCleanupPending
+                                        ? t('sessions.manage.cleaningStopped')
+                                        : `${t('sessions.manage.cleanStopped')} (${stoppedCleanupPlan.delete.length})`}
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
-                    <button
-                        type="button"
-                        onClick={props.onNewSession}
-                        className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
-                        title={t('sessions.new')}
-                    >
-                        <PlusIcon className="h-5 w-5" />
-                    </button>
                 </div>
             ) : null}
 
-            <div className="flex flex-col">
-                {groups.map((group) => {
-                    const isCollapsed = isGroupCollapsed(group)
-                    const rows = getSessionRows(group.sessions)
-                    return (
-                        <div key={group.directory}>
-                            <button
-                                type="button"
-                                onClick={() => toggleGroup(group.directory, isCollapsed)}
-                                className="sticky top-0 z-10 flex w-full items-center gap-2 px-3 py-2 text-left bg-[var(--app-bg)] border-b border-[var(--app-divider)] transition-colors hover:bg-[var(--app-secondary-bg)]"
-                            >
-                                <ChevronIcon
-                                    className="h-4 w-4 text-[var(--app-hint)]"
-                                    collapsed={isCollapsed}
-                                />
-                                <div className="flex items-center gap-2 min-w-0 flex-1">
-                                    <span className="font-medium text-base break-words" title={group.directory}>
-                                        {group.displayName}
-                                    </span>
-                                    <span className="shrink-0 text-xs text-[var(--app-hint)]">
-                                        ({group.sessions.length})
-                                    </span>
-                                </div>
-                            </button>
-                            {!isCollapsed ? (
-                                <div className="flex flex-col divide-y divide-[var(--app-divider)] border-b border-[var(--app-divider)]">
-                                    {rows.map((row) => (
-                                        <div
-                                            key={row.key}
-                                            className={row.paired ? 'rounded-xl border border-[var(--app-divider)]/70 bg-[var(--app-secondary-bg)]/40 mx-2 my-2 overflow-hidden' : ''}
-                                        >
-                                            {row.sessions.map((s, index) => (
-                                                <div
-                                                    key={s.id}
-                                                    className={`${getTerminalSupervisionTone(s)} ${row.paired && index > 0 ? 'border-t border-[var(--app-divider)]/60' : ''}`}
-                                                >
-                                                    <SessionItem
-                                                        session={s}
-                                                        sessions={props.sessions}
-                                                        onSelect={props.onSelect}
-                                                        showPath={false}
-                                                        api={api}
-                                                        selected={s.id === selectedSessionId}
-                                                    />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : null}
-                        </div>
-                    )
-                })}
-            </div>
+            <SessionListFilter
+                filters={filters}
+                onSearchChange={setSearch}
+                labels={{
+                    searchPlaceholder: t('session.filter.searchPlaceholder')
+                }}
+                visible={searchVisible}
+            />
+
+            {filteredSessions.length > 0 ? (
+                <div
+                    ref={virtualRootRef}
+                    className="relative"
+                    style={{ height: totalVirtualHeight > 0 ? `${totalVirtualHeight}px` : undefined }}
+                    onDragLeave={(e) => {
+                        const related = e.relatedTarget as Node | null
+                        if (!related || !e.currentTarget.contains(related)) {
+                            setDropIndicator(null)
+                        }
+                    }}
+                >
+                    {visibleItemLayouts.map((layout) => (
+                        <VirtualMeasuredItem
+                            key={layout.item.key}
+                            itemKey={layout.item.key}
+                            top={layout.start}
+                            onMeasure={handleMeasureItem}
+                        >
+                            {renderVirtualItem(layout)}
+                        </VirtualMeasuredItem>
+                    ))}
+                </div>
+            ) : (
+                <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
+                    {t('session.filter.empty')}
+                </div>
+            )}
+
+            <ConfirmDialog
+                isOpen={cleanupSessionsTarget !== null}
+                onClose={() => {
+                    if (!isBatchCleanupPending) {
+                        setCleanupSessionsTarget(null)
+                    }
+                }}
+                title={cleanupSessionsTarget?.mode === 'stopped'
+                    ? t('dialog.cleanupStopped.title')
+                    : t('dialog.cleanupGroup.title')}
+                description={cleanupSessionsTarget?.mode === 'stopped'
+                    ? t('dialog.cleanupStopped.description', {
+                        deleteCount: cleanupSessionsTarget?.plan.delete.length ?? 0,
+                        skipCount: cleanupSessionsTarget?.plan.skipped.length ?? 0
+                    })
+                    : t('dialog.cleanupGroup.description', {
+                        archiveCount: cleanupSessionsTarget?.plan.archive.length ?? 0,
+                        deleteCount: cleanupSessionsTarget?.plan.delete.length ?? 0,
+                        name: cleanupSessionsTarget?.name ?? '',
+                        skipCount: cleanupSessionsTarget?.plan.skipped.length ?? 0
+                    })}
+                confirmLabel={cleanupSessionsTarget?.mode === 'stopped'
+                    ? t('dialog.cleanupStopped.confirm')
+                    : t('dialog.cleanupGroup.confirm')}
+                confirmingLabel={cleanupSessionsTarget?.mode === 'stopped'
+                    ? t('dialog.cleanupStopped.confirming')
+                    : t('dialog.cleanupGroup.confirming')}
+                onConfirm={async () => {
+                    if (!cleanupSessionsTarget) {
+                        return
+                    }
+                    await runBatchCleanup(cleanupSessionsTarget)
+                    setCleanupSessionsTarget(null)
+                }}
+                isPending={isBatchCleanupPending}
+                destructive
+            />
         </div>
     )
 }

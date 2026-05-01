@@ -20,6 +20,12 @@ export type RpcWriteFileResponse = {
     success: boolean
     hash?: string
     error?: string
+    conflict?: {
+        type: 'hash_mismatch' | 'missing_file' | 'already_exists'
+        expectedHash: string | null
+        currentHash: string | null
+        currentContent: string | null
+    }
 }
 
 export type RpcUploadFileResponse = {
@@ -50,7 +56,19 @@ export type RpcPathExistsResponse = {
     exists: Record<string, boolean>
 }
 
+export type RpcDetectedWorktree = {
+    repoRoot: string
+    path: string
+    branch?: string
+    isCurrent: boolean
+}
+
+export type RpcListWorktreesResponse = {
+    worktrees: RpcDetectedWorktree[]
+}
+
 export type RpcReviewMode = 'branch' | 'working'
+export type RpcReviewBaseMode = 'origin' | 'upstream' | 'fork-point'
 
 export type RpcReviewSummaryFile = {
     filePath: string
@@ -63,6 +81,7 @@ export type RpcReviewSummaryFile = {
 export type RpcReviewSummaryResponse = {
     success: boolean
     mode?: RpcReviewMode
+    baseMode?: RpcReviewBaseMode
     currentBranch?: string | null
     defaultBranch?: string | null
     mergeBase?: string | null
@@ -191,6 +210,27 @@ export class RpcGateway {
         return exists
     }
 
+    async listWorktrees(machineId: string, paths: string[]): Promise<RpcDetectedWorktree[]> {
+        const result = await this.machineRpc(machineId, 'list-worktrees', { paths }) as RpcListWorktreesResponse | unknown
+        if (!result || typeof result !== 'object') {
+            throw new Error('Unexpected list-worktrees result')
+        }
+
+        const worktreesValue = (result as RpcListWorktreesResponse).worktrees
+        if (!Array.isArray(worktreesValue)) {
+            throw new Error('Unexpected list-worktrees result')
+        }
+
+        return worktreesValue.filter((item): item is RpcDetectedWorktree => Boolean(
+            item
+            && typeof item === 'object'
+            && typeof item.repoRoot === 'string'
+            && typeof item.path === 'string'
+            && typeof item.isCurrent === 'boolean'
+            && (item.branch === undefined || typeof item.branch === 'string')
+        ))
+    }
+
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
         return await this.sessionRpc(sessionId, 'git-status', { cwd }) as RpcCommandResponse
     }
@@ -203,11 +243,11 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, 'git-diff-file', options) as RpcCommandResponse
     }
 
-    async getReviewSummary(sessionId: string, options: { cwd?: string; mode: RpcReviewMode }): Promise<RpcReviewSummaryResponse> {
+    async getReviewSummary(sessionId: string, options: { cwd?: string; mode: RpcReviewMode; baseMode?: RpcReviewBaseMode }): Promise<RpcReviewSummaryResponse> {
         return await this.sessionRpc(sessionId, 'git-review-summary', options) as RpcReviewSummaryResponse
     }
 
-    async getReviewFile(sessionId: string, options: { cwd?: string; filePath: string; mode: RpcReviewMode }): Promise<RpcCommandResponse> {
+    async getReviewFile(sessionId: string, options: { cwd?: string; filePath: string; mode: RpcReviewMode; baseMode?: RpcReviewBaseMode }): Promise<RpcCommandResponse> {
         return await this.sessionRpc(sessionId, 'git-review-file', options) as RpcCommandResponse
     }
 

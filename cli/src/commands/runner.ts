@@ -14,6 +14,7 @@ import type { CommandDefinition } from './types'
 
 export const runnerCommand: CommandDefinition = {
     name: 'runner',
+    description: 'Manage the background session runner',
     requiresRuntimeAssets: true,
     run: async ({ commandArgs }) => {
         const runnerSubcommand = commandArgs[0]

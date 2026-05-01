@@ -4,7 +4,7 @@ import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
-import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { SessionEditDialog } from '@/components/SessionEditDialog'
 import { StartupCommandDialog } from '@/components/StartupCommandDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/lib/use-translation'
@@ -80,19 +80,18 @@ export function SessionHeader(props: {
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const menuId = useId()
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
-    const [renameOpen, setRenameOpen] = useState(false)
+    const [editOpen, setEditOpen] = useState(false)
     const [startupCommandOpen, setStartupCommandOpen] = useState(false)
-    const [archiveOpen, setArchiveOpen] = useState(false)
-    const [deleteOpen, setDeleteOpen] = useState(false)
+    const [closeOpen, setCloseOpen] = useState(false)
 
-    const { archiveSession, renameSession, deleteSession, setPinned, setShellOptions, isPending } = useSessionActions(
+    const { updateSession, closeSession, setPinned, setShellOptions, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
     )
 
-    const handleDelete = async () => {
-        await deleteSession()
+    const handleCloseSession = async () => {
+        await closeSession()
         onSessionDeleted?.()
     }
 
@@ -198,18 +197,18 @@ export function SessionHeader(props: {
                     if (!session.metadata?.path || !session.active) return
                     openSessionReviewWindow(baseUrl, session.id, { mode: 'branch' })
                 }}
-                onRename={() => setRenameOpen(true)}
-                onArchive={() => setArchiveOpen(true)}
-                onDelete={() => setDeleteOpen(true)}
+                onEdit={() => setEditOpen(true)}
+                onCloseSession={() => setCloseOpen(true)}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
             />
 
-            <RenameSessionDialog
-                isOpen={renameOpen}
-                onClose={() => setRenameOpen(false)}
+            <SessionEditDialog
+                isOpen={editOpen}
+                onClose={() => setEditOpen(false)}
                 currentName={title}
-                onRename={renameSession}
+                currentDirectory={session.metadata?.worktree?.basePath ?? session.metadata?.path ?? ''}
+                onSave={updateSession}
                 isPending={isPending}
             />
 
@@ -224,25 +223,13 @@ export function SessionHeader(props: {
             />
 
             <ConfirmDialog
-                isOpen={archiveOpen}
-                onClose={() => setArchiveOpen(false)}
-                title={t('dialog.archive.title')}
-                description={t('dialog.archive.description', { name: title })}
-                confirmLabel={t('dialog.archive.confirm')}
-                confirmingLabel={t('dialog.archive.confirming')}
-                onConfirm={archiveSession}
-                isPending={isPending}
-                destructive
-            />
-
-            <ConfirmDialog
-                isOpen={deleteOpen}
-                onClose={() => setDeleteOpen(false)}
-                title={t('dialog.delete.title')}
-                description={t('dialog.delete.description', { name: title })}
-                confirmLabel={t('dialog.delete.confirm')}
-                confirmingLabel={t('dialog.delete.confirming')}
-                onConfirm={handleDelete}
+                isOpen={closeOpen}
+                onClose={() => setCloseOpen(false)}
+                title={t('dialog.close.title')}
+                description={t('dialog.close.description', { name: title })}
+                confirmLabel={t('dialog.close.confirm')}
+                confirmingLabel={t('dialog.close.confirming')}
+                onConfirm={handleCloseSession}
                 isPending={isPending}
                 destructive
             />

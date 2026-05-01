@@ -111,6 +111,22 @@ function resolveLanguage(lang: string | undefined): string {
 }
 
 /**
+ * Resolve a Shiki language identifier from a file path (by extension).
+ */
+export function resolveLanguageFromPath(filePath: string): string {
+    const basename = filePath.split('/').pop() ?? ''
+    const lower = basename.toLowerCase()
+    // Special filenames
+    if (lower === 'makefile') return 'make'
+    if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return 'dockerfile'
+    // Extension-based
+    const dotIndex = basename.lastIndexOf('.')
+    if (dotIndex < 0) return 'text'
+    const ext = basename.slice(dotIndex + 1).toLowerCase()
+    return langAlias[ext] ?? ext
+}
+
+/**
  * Custom hook for syntax highlighting with our minimal Shiki bundle
  */
 export function useShikiHighlighter(
@@ -161,4 +177,67 @@ export function useShikiHighlighter(
     }, [code, lang])
 
     return highlighted
+}
+
+/**
+ * Hook that returns per-line highlighted ReactNodes for a multi-line code string.
+ * Returns null while loading or for unsupported languages.
+ */
+export function useShikiLines(
+    code: string,
+    language: string | undefined
+): ReactNode[] | null {
+    const [lines, setLines] = useState<ReactNode[] | null>(null)
+    const lang = useMemo(() => resolveLanguage(language), [language])
+
+    useEffect(() => {
+        let cancelled = false
+
+        async function highlight() {
+            const highlighter = await getHighlighter()
+            if (cancelled) return
+
+            const loadedLangs = highlighter.getLoadedLanguages()
+            if (lang === 'text' || !loadedLangs.includes(lang)) {
+                setLines(null)
+                return
+            }
+
+            const hast = highlighter.codeToHast(code, {
+                lang,
+                themes: SHIKI_THEMES,
+                defaultColor: false,
+                structure: 'classic',
+            })
+
+            if (cancelled) return
+
+            // Tree: root > pre > code > span.line[]
+            const preEl = hast.children?.[0] as { children?: unknown[] } | undefined
+            const codeEl = preEl?.children?.find(
+                (c: unknown) => (c as { type?: string; tagName?: string }).type === 'element' && (c as { tagName?: string }).tagName === 'code'
+            ) as { children?: unknown[] } | undefined
+            const lineEls = (codeEl?.children ?? []).filter(
+                (c: unknown) => (c as { type?: string; tagName?: string }).type === 'element'
+            )
+
+            const rendered = lineEls.map((lineEl) =>
+                toJsxRuntime(lineEl as Parameters<typeof toJsxRuntime>[0], {
+                    jsx,
+                    jsxs,
+                    Fragment,
+                }) as ReactNode
+            )
+
+            setLines(rendered)
+        }
+
+        const timer = setTimeout(highlight, 50)
+        return () => {
+            cancelled = true
+            clearTimeout(timer)
+        }
+    }, [code, lang])
+
+    return lines
 }

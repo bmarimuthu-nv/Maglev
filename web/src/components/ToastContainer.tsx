@@ -1,10 +1,11 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Toast } from '@/components/ui/Toast'
-import { useToast } from '@/lib/toast-context'
+import { useToastActions, useToastState } from '@/lib/toast-context'
 
 export function ToastContainer() {
     const navigate = useNavigate()
-    const { toasts, removeToast } = useToast()
+    const { toasts } = useToastState()
+    const { removeToast } = useToastActions()
 
     if (toasts.length === 0) {
         return null

@@ -4,14 +4,102 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
+import { useTheme } from '@/hooks/useTheme'
+import { useTerminalCopyOnSelect } from '@/hooks/useTerminalCopyOnSelect'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 
-function resolveThemeColors(): { background: string; foreground: string; selectionBackground: string } {
+function fallbackCopyText(text: string): boolean {
+    if (typeof document === 'undefined') {
+        return false
+    }
+
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.top = '-9999px'
+    textarea.style.left = '-9999px'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+
+    try {
+        return document.execCommand('copy')
+    } catch {
+        return false
+    } finally {
+        document.body.removeChild(textarea)
+    }
+}
+
+async function writeClipboardText(text: string): Promise<boolean> {
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text)
+            return true
+        }
+    } catch {
+        // fall through to legacy copy path
+    }
+
+    return fallbackCopyText(text)
+}
+
+function resolveThemeColors(isDark: boolean) {
     const styles = getComputedStyle(document.documentElement)
     const background = styles.getPropertyValue('--app-bg').trim() || '#000000'
     const foreground = styles.getPropertyValue('--app-fg').trim() || '#ffffff'
     const selectionBackground = styles.getPropertyValue('--app-subtle-bg').trim() || 'rgba(255, 255, 255, 0.2)'
-    return { background, foreground, selectionBackground }
+    const cursor = foreground
+
+    if (isDark) {
+        return {
+            background,
+            foreground: foreground || '#d0d7de',
+            cursor,
+            selectionBackground,
+            black: '#1f2428',
+            red: '#b34a5f',
+            green: '#417e52',
+            yellow: '#b98412',
+            blue: '#4f8cc9',
+            magenta: '#9b72cf',
+            cyan: '#2f8f9d',
+            white: '#d0d7de',
+            brightBlack: '#6e7681',
+            brightRed: '#cf5f74',
+            brightGreen: '#559766',
+            brightYellow: '#c69026',
+            brightBlue: '#6cb6ff',
+            brightMagenta: '#b083f0',
+            brightCyan: '#56d4dd',
+            brightWhite: '#f0f6fc'
+        }
+    }
+
+    return {
+        background,
+        foreground: foreground || '#24292f',
+        cursor,
+        selectionBackground,
+        black: '#24292f',
+        red: '#c0564f',
+        green: '#4d7c57',
+        yellow: '#9a6700',
+        blue: '#0969da',
+        magenta: '#8250df',
+        cyan: '#1b7c83',
+        white: '#f6f8fa',
+        brightBlack: '#57606a',
+        brightRed: '#d96a60',
+        brightGreen: '#5c8f67',
+        brightYellow: '#b97a00',
+        brightBlue: '#218bff',
+        brightMagenta: '#a475f9',
+        brightCyan: '#3192aa',
+        brightWhite: '#ffffff'
+    }
 }
 
 function configureTerminalTextarea(terminal: Terminal): void {
@@ -31,16 +119,48 @@ function configureTerminalTextarea(terminal: Terminal): void {
     textarea.setAttribute('data-enable-grammarly', 'false')
 }
 
+const TERMINAL_FIT_SETTLE_PASSES = 4
+
+function getNativeScrollElements(container: HTMLDivElement, terminal: Terminal): HTMLElement[] {
+    const elements: HTMLElement[] = [container]
+    if (terminal.element instanceof HTMLElement) {
+        elements.push(terminal.element)
+    }
+    return elements
+}
+
+function resetNativeScrollOffsets(container: HTMLDivElement, terminal: Terminal): void {
+    for (const element of getNativeScrollElements(container, terminal)) {
+        element.scrollTop = 0
+        element.scrollLeft = 0
+    }
+}
+
+function hasNativeTerminalOverflow(container: HTMLDivElement, terminal: Terminal): boolean {
+    for (const element of getNativeScrollElements(container, terminal)) {
+        if (element.scrollHeight - element.clientHeight > 1) return true
+        if (element.scrollWidth - element.clientWidth > 1) return true
+        if (element.scrollTop !== 0 || element.scrollLeft !== 0) return true
+    }
+    return false
+}
+
 export function TerminalView(props: {
     onMount?: (terminal: Terminal) => void
     onResize?: (cols: number, rows: number) => void
     className?: string
     suppressFocus?: boolean
+    onFocusChange?: (focused: boolean) => void
 }) {
+    const { isDark } = useTheme()
+    const { copyOnSelect } = useTerminalCopyOnSelect()
     const containerRef = useRef<HTMLDivElement | null>(null)
+    const terminalRef = useRef<Terminal | null>(null)
     const onMountRef = useRef(props.onMount)
     const onResizeRef = useRef(props.onResize)
     const suppressFocusRef = useRef(Boolean(props.suppressFocus))
+    const onFocusChangeRef = useRef(props.onFocusChange)
+    const copyOnSelectRef = useRef(copyOnSelect)
 
     useEffect(() => {
         onMountRef.current = props.onMount
@@ -49,6 +169,14 @@ export function TerminalView(props: {
     useEffect(() => {
         onResizeRef.current = props.onResize
     }, [props.onResize])
+
+    useEffect(() => {
+        onFocusChangeRef.current = props.onFocusChange
+    }, [props.onFocusChange])
+
+    useEffect(() => {
+        copyOnSelectRef.current = copyOnSelect
+    }, [copyOnSelect])
 
     useEffect(() => {
         suppressFocusRef.current = Boolean(props.suppressFocus)
@@ -68,23 +196,24 @@ export function TerminalView(props: {
         const abortController = new AbortController()
 
         const fontProvider = getFontProvider()
-        const { background, foreground, selectionBackground } = resolveThemeColors()
+        const theme = resolveThemeColors(isDark)
         const terminal = new Terminal({
             cursorBlink: true,
             fontFamily: fontProvider.getFontFamily(),
             fontSize: 13,
             scrollback: 0,
-            theme: {
-                background,
-                foreground,
-                cursor: foreground,
-                selectionBackground
-            },
+            theme,
+            minimumContrastRatio: isDark ? 5.5 : 5,
+            rightClickSelectsWord: true,
+            macOptionClickForcesSelection: true,
             // This is a real tmux/PTTY byte stream, not a plain log viewer.
             // Converting bare LF to CRLF breaks cursor-driven TUIs and causes stacked redraws.
             convertEol: false,
             customGlyphs: true
         })
+        terminalRef.current = terminal
+        let selectionCopyTimer: ReturnType<typeof setTimeout> | null = null
+        let lastCopiedSelection = ''
 
         const fitAddon = new FitAddon()
         const webLinksAddon = new WebLinksAddon()
@@ -95,21 +224,101 @@ export function TerminalView(props: {
         terminal.open(container)
         ;(container as HTMLDivElement & { __xterm?: Terminal | null }).__xterm = terminal
         configureTerminalTextarea(terminal)
+
+        let scheduledFitFrame: number | null = null
+        let pendingFitPasses = 0
+        const fitTerminal = (remainingPasses = 0) => {
+            if (abortController.signal.aborted) return
+            resetNativeScrollOffsets(container, terminal)
+            fitAddon.fit()
+            resetNativeScrollOffsets(container, terminal)
+            onResizeRef.current?.(terminal.cols, terminal.rows)
+            if (remainingPasses > 0 && hasNativeTerminalOverflow(container, terminal)) {
+                scheduleFitTerminal(remainingPasses - 1)
+            }
+        }
+        const scheduleFitTerminal = (settlePasses = TERMINAL_FIT_SETTLE_PASSES) => {
+            pendingFitPasses = Math.max(pendingFitPasses, settlePasses)
+            if (scheduledFitFrame !== null || abortController.signal.aborted) {
+                return
+            }
+            scheduledFitFrame = requestAnimationFrame(() => {
+                scheduledFitFrame = null
+                const passes = pendingFitPasses
+                pendingFitPasses = 0
+                fitTerminal(passes)
+            })
+        }
+        const handleNativeScroll = () => {
+            resetNativeScrollOffsets(container, terminal)
+            scheduleFitTerminal()
+        }
+        for (const element of getNativeScrollElements(container, terminal)) {
+            element.addEventListener('scroll', handleNativeScroll, { signal: abortController.signal })
+        }
+
         const handlePointerDown = () => {
             if (suppressFocusRef.current) {
                 return
             }
             terminal.focus()
         }
+        const tryCopyCurrentSelection = () => {
+            if (!copyOnSelectRef.current || !terminal.hasSelection()) {
+                return
+            }
+            const selection = terminal.getSelection()
+            if (!selection || selection === lastCopiedSelection) {
+                return
+            }
+            void writeClipboardText(selection).then((copied) => {
+                if (copied) {
+                    lastCopiedSelection = selection
+                }
+            })
+        }
+        const handleFocusIn = () => {
+            onFocusChangeRef.current?.(true)
+        }
+        const handleFocusOut = (event: FocusEvent) => {
+            if (event.relatedTarget instanceof Node && container.contains(event.relatedTarget)) {
+                return
+            }
+            onFocusChangeRef.current?.(false)
+        }
         container.addEventListener('pointerdown', handlePointerDown, { signal: abortController.signal })
+        container.addEventListener('pointerup', tryCopyCurrentSelection, { signal: abortController.signal })
+        container.addEventListener('focusin', handleFocusIn, { signal: abortController.signal })
+        container.addEventListener('focusout', handleFocusOut, { signal: abortController.signal })
 
         const observer = new ResizeObserver(() => {
-            requestAnimationFrame(() => {
-                fitAddon.fit()
-                onResizeRef.current?.(terminal.cols, terminal.rows)
-            })
+            scheduleFitTerminal()
         })
         observer.observe(container)
+        if (terminal.element instanceof HTMLElement) {
+            observer.observe(terminal.element)
+        }
+
+        window.addEventListener('resize', () => scheduleFitTerminal(), { signal: abortController.signal })
+        window.visualViewport?.addEventListener('resize', () => scheduleFitTerminal(), { signal: abortController.signal })
+
+        const selectionDisposable = terminal.onSelectionChange(() => {
+            if (!copyOnSelectRef.current) {
+                return
+            }
+
+            if (selectionCopyTimer) {
+                clearTimeout(selectionCopyTimer)
+            }
+
+            selectionCopyTimer = setTimeout(() => {
+                if (!copyOnSelectRef.current || !terminal.hasSelection()) {
+                    lastCopiedSelection = ''
+                    return
+                }
+                tryCopyCurrentSelection()
+            }, 40)
+        })
 
         const refreshFont = (forceRemeasure = false) => {
             if (abortController.signal.aborted) return
@@ -123,8 +332,7 @@ export function TerminalView(props: {
                     if (terminal.rows > 0) {
                         terminal.refresh(0, terminal.rows - 1)
                     }
-                    fitAddon.fit()
-                    onResizeRef.current?.(terminal.cols, terminal.rows)
+                    fitTerminal()
                 })
                 return
             }
@@ -133,8 +341,7 @@ export function TerminalView(props: {
             if (terminal.rows > 0) {
                 terminal.refresh(0, terminal.rows - 1)
             }
-            fitAddon.fit()
-            onResizeRef.current?.(terminal.cols, terminal.rows)
+            fitTerminal()
         }
 
         void ensureBuiltinFontLoaded().then(loaded => {
@@ -145,15 +352,23 @@ export function TerminalView(props: {
         // Cleanup on abort
         abortController.signal.addEventListener('abort', () => {
             observer.disconnect()
+            if (scheduledFitFrame !== null) {
+                cancelAnimationFrame(scheduledFitFrame)
+                scheduledFitFrame = null
+            }
+            if (selectionCopyTimer) {
+                clearTimeout(selectionCopyTimer)
+            }
+            selectionDisposable.dispose()
             fitAddon.dispose()
             webLinksAddon.dispose()
             canvasAddon.dispose()
+            terminalRef.current = null
             terminal.dispose()
         })
 
         requestAnimationFrame(() => {
-            fitAddon.fit()
-            onResizeRef.current?.(terminal.cols, terminal.rows)
+            fitTerminal()
             if (!suppressFocusRef.current) {
                 terminal.focus()
             }
@@ -162,9 +377,22 @@ export function TerminalView(props: {
 
         return () => {
             ;(container as HTMLDivElement & { __xterm?: Terminal | null }).__xterm = null
+            onFocusChangeRef.current?.(false)
             abortController.abort()
         }
     }, [])
+
+    useEffect(() => {
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return
+        }
+        terminal.options.theme = resolveThemeColors(isDark)
+        terminal.options.minimumContrastRatio = isDark ? 5.5 : 5
+        if (terminal.rows > 0) {
+            terminal.refresh(0, terminal.rows - 1)
+        }
+    }, [isDark])
 
     return (
         <div

@@ -35,6 +35,7 @@ export class ApiSessionClient extends EventEmitter {
     private readonly socket: Socket<ServerToClientEvents, ClientToServerEvents>
     readonly rpcHandlerManager: RpcHandlerManager
     private readonly terminalManager: TerminalManager
+    private commonHandlersRegistered = false
     private agentStateLock = new AsyncLock()
     private metadataLock = new AsyncLock()
 
@@ -52,13 +53,11 @@ export class ApiSessionClient extends EventEmitter {
             logger: (msg, data) => logger.debug(msg, data)
         })
 
-        if (this.metadata?.path) {
-            registerCommonHandlers(this.rpcHandlerManager, this.metadata.path)
-        }
+        this.ensureCommonHandlersRegistered(this.metadata)
 
         this.socket = io(`${configuration.apiUrl}/cli`, {
             auth: (cb) => cb({
-                token: configuration.cliApiToken ?? this.token,
+                token: this.token,
                 clientType: 'session-scoped' as const,
                 sessionId: this.sessionId
             }),
@@ -151,6 +150,7 @@ export class ApiSessionClient extends EventEmitter {
                         const parsed = MetadataSchema.safeParse(data.body.metadata.value)
                         if (parsed.success) {
                             this.metadata = parsed.data
+                            this.ensureCommonHandlersRegistered(this.metadata)
                         } else {
                             logger.debug('[API] Ignoring invalid metadata update', { version: data.body.metadata.version })
                         }
@@ -235,6 +235,7 @@ export class ApiSessionClient extends EventEmitter {
                     },
                     applyValue: (value) => {
                         this.metadata = value
+                        this.ensureCommonHandlersRegistered(this.metadata)
                     },
                     applyVersion: (version) => {
                         this.metadataVersion = version
@@ -379,5 +380,14 @@ export class ApiSessionClient extends EventEmitter {
         this.rpcHandlerManager.onSocketDisconnect()
         this.terminalManager.closeAll()
         this.socket.disconnect()
+    }
+
+    private ensureCommonHandlersRegistered(metadata: Metadata | null): void {
+        if (this.commonHandlersRegistered || !metadata?.path) {
+            return
+        }
+
+        registerCommonHandlers(this.rpcHandlerManager, metadata.path)
+        this.commonHandlersRegistered = true
     }
 }

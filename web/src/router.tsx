@@ -16,6 +16,7 @@ import { App } from '@/App'
 import { SessionList } from '@/components/SessionList'
 import { NewSession } from '@/components/NewSession'
 import { LoadingState } from '@/components/LoadingState'
+import { MaglevMark } from '@/components/MaglevBrand'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -23,6 +24,17 @@ import { useHubConfig } from '@/hooks/queries/useHubConfig'
 import { useSession } from '@/hooks/queries/useSession'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { queryKeys } from '@/lib/query-keys'
+import { markPendingTerminalFocus } from '@/lib/pending-terminal-focus'
+import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
+import {
+    migrateStorageFoundation,
+    sweepOrphanedSessionStorage,
+} from '@/lib/storage-session'
+import {
+    readLocalStorageItem,
+    readLocalStorageNumber,
+    writeLocalStorageItem,
+} from '@/lib/storage-local'
 import { useTranslation } from '@/lib/use-translation'
 import { getCurrentHubLabel } from '@/utils/url'
 import type { AgentType } from '@/components/NewSession/types'
@@ -37,7 +49,6 @@ const SESSIONS_SIDEBAR_WIDTH_KEY = 'maglev:sessionsSidebarWidth'
 const SESSIONS_SIDEBAR_DEFAULT_WIDTH = 360
 const SESSIONS_SIDEBAR_MIN_WIDTH = 280
 const SESSIONS_SIDEBAR_MAX_WIDTH = 640
-
 type HubMenuItem = {
     key: string
     label: string
@@ -143,8 +154,28 @@ function SettingsIcon(props: { className?: string }) {
     )
 }
 
+function SearchIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+        </svg>
+    )
+}
+
 function SessionsPage() {
-    const { api, baseUrl } = useAppContext()
+    const { api, baseUrl, scopeKey } = useAppContext()
     const navigate = useNavigate()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
@@ -154,34 +185,23 @@ function SessionsPage() {
     const [sidebarWidth, setSidebarWidth] = useState(SESSIONS_SIDEBAR_DEFAULT_WIDTH)
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
     const [hubMenuOpen, setHubMenuOpen] = useState(false)
+    const [sessionSearchVisible, setSessionSearchVisible] = useState(false)
     const hubLabel = getCurrentHubLabel(baseUrl)
 
     useEffect(() => {
-        try {
-            setSidebarCollapsed(localStorage.getItem(SESSIONS_SIDEBAR_COLLAPSED_KEY) === 'true')
-        } catch {
-            setSidebarCollapsed(false)
-        }
+        setSidebarCollapsed(readLocalStorageItem(SESSIONS_SIDEBAR_COLLAPSED_KEY) === 'true')
     }, [])
 
     useEffect(() => {
-        try {
-            const raw = localStorage.getItem(SESSIONS_SIDEBAR_WIDTH_KEY)
-            if (!raw) {
-                setSidebarWidth(SESSIONS_SIDEBAR_DEFAULT_WIDTH)
-                return
-            }
-            const nextWidth = Number.parseInt(raw, 10)
-            if (!Number.isFinite(nextWidth)) {
-                setSidebarWidth(SESSIONS_SIDEBAR_DEFAULT_WIDTH)
-                return
-            }
-            setSidebarWidth(
-                Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, nextWidth))
-            )
-        } catch {
+        const nextWidth = readLocalStorageNumber(SESSIONS_SIDEBAR_WIDTH_KEY)
+        if (nextWidth === null) {
             setSidebarWidth(SESSIONS_SIDEBAR_DEFAULT_WIDTH)
+            return
         }
+
+        setSidebarWidth(
+            Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, nextWidth))
+        )
     }, [])
 
     useEffect(() => {
@@ -189,12 +209,27 @@ function SessionsPage() {
         setHubMenuOpen(false)
     }, [pathname])
 
+    useEffect(() => {
+        if (isLoading) {
+            return
+        }
+
+        const sessionIds = sessions.map((session) => session.id)
+        migrateStorageFoundation({
+            scopeKey,
+            baseUrl,
+            sessionIds,
+        })
+        sweepOrphanedSessionStorage({
+            scopeKey,
+            baseUrl,
+            activeSessionIds: sessionIds,
+        })
+    }, [baseUrl, isLoading, scopeKey, sessions])
+
     const setSidebarCollapsedWithPersistence = useCallback((next: boolean) => {
         setSidebarCollapsed(next)
-        try {
-            localStorage.setItem(SESSIONS_SIDEBAR_COLLAPSED_KEY, String(next))
-        } catch {
-        }
+        writeLocalStorageItem(SESSIONS_SIDEBAR_COLLAPSED_KEY, String(next))
     }, [])
 
     const setSidebarWidthWithPersistence = useCallback((nextWidth: number) => {
@@ -203,10 +238,7 @@ function SessionsPage() {
             Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, Math.round(nextWidth))
         )
         setSidebarWidth(clamped)
-        try {
-            localStorage.setItem(SESSIONS_SIDEBAR_WIDTH_KEY, String(clamped))
-        } catch {
-        }
+        writeLocalStorageItem(SESSIONS_SIDEBAR_WIDTH_KEY, String(clamped))
     }, [])
 
     const isFileExplorerRoute = /\/sessions\/[^/]+\/files(?:\/)?(?:$|\?)/.test(pathname)
@@ -280,34 +312,31 @@ function SessionsPage() {
     const renderSidebarContent = (mode: 'desktop' | 'mobile') => (
         <>
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                <div className="flex w-full items-center justify-between gap-3 px-3 py-2">
-                    <div className="relative min-w-0">
-                        <button
-                            type="button"
-                            onClick={() => setHubMenuOpen((value) => !value)}
-                            className="flex min-w-0 items-center gap-2 rounded-full px-2 py-1 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
-                        >
-                            <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-[var(--app-fg)]">
-                                    {hubLabel}
-                                </div>
-                                <div className="text-xs text-[var(--app-hint)]">
-                                    {t('sessions.count', { n: sessions.length, m: projectCount })}
-                                </div>
+                <div className="px-2.5 py-2">
+                    <div className="flex min-w-0 items-center gap-2.5 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-2.5 py-2">
+                        <MaglevMark size="sm" className="h-8.5 w-8.5 rounded-[14px] shrink-0" />
+                        <div className="min-w-0 flex-1">
+                            <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--app-hint)]">
+                                Maglev Hub
                             </div>
-                            <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform ${hubMenuOpen ? 'rotate-180' : ''}`} />
-                        </button>
-                        {hubMenuOpen ? renderHubMenu() : null}
+                            <div className="mt-0.5 truncate text-[12px] font-semibold text-[var(--app-fg)]">
+                                {hubLabel}
+                            </div>
+                            <div className="text-[10px] text-[var(--app-hint)]">
+                                {t('sessions.count', { n: sessions.length, m: projectCount })}
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         {mode === 'desktop' ? (
                             <button
                                 type="button"
                                 onClick={() => setSidebarCollapsedWithPersistence(true)}
-                                className="hidden lg:flex p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                className="hidden lg:flex rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                 title="Hide sidebar"
                             >
-                                <PanelLeftIcon className="h-5 w-5" />
+                                <PanelLeftIcon className="h-4 w-4" />
                             </button>
                         ) : null}
                         <button
@@ -316,10 +345,24 @@ function SessionsPage() {
                                 setMobileSidebarOpen(false)
                                 navigate({ to: '/settings' })
                             }}
-                            className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                            className="rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                             title={t('settings.title')}
                         >
-                            <SettingsIcon className="h-5 w-5" />
+                            <SettingsIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setSessionSearchVisible((visible) => !visible)}
+                            className={`rounded-full p-1 transition-colors ${
+                                sessionSearchVisible
+                                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
+                                    : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                            }`}
+                            title="Search sessions"
+                            aria-label="Search sessions"
+                            aria-pressed={sessionSearchVisible}
+                        >
+                            <SearchIcon className="h-4 w-4" />
                         </button>
                         <button
                             type="button"
@@ -327,10 +370,13 @@ function SessionsPage() {
                                 setMobileSidebarOpen(false)
                                 navigate({ to: '/sessions/new' })
                             }}
-                            className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
+                            className={mode === 'desktop'
+                                ? 'hidden lg:inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)]/55 px-2.5 text-[12px] font-medium text-[var(--app-fg)] transition-colors duration-150 hover:bg-[var(--app-subtle-bg)]'
+                                : 'session-list-new-button rounded-full p-1.5 text-[var(--app-link)] transition-colors'}
                             title={t('sessions.new')}
                         >
-                            <PlusIcon className="h-5 w-5" />
+                            <PlusIcon className="h-4 w-4" />
+                            {mode === 'desktop' ? <span className="hidden xl:inline">New</span> : null}
                         </button>
                     </div>
                 </div>
@@ -346,6 +392,13 @@ function SessionsPage() {
                     sessions={sessions}
                     selectedSessionId={selectedSessionId}
                     onSelect={handleSelectSession}
+                    onClone={(newSessionId) => {
+                        setMobileSidebarOpen(false)
+                        navigate({
+                            to: '/sessions/$sessionId/terminal',
+                            params: { sessionId: newSessionId },
+                        })
+                    }}
                     onNewSession={() => {
                         setMobileSidebarOpen(false)
                         navigate({ to: '/sessions/new' })
@@ -353,6 +406,7 @@ function SessionsPage() {
                     onRefresh={handleRefresh}
                     isLoading={isLoading}
                     renderHeader={false}
+                    searchVisible={sessionSearchVisible}
                     api={api}
                 />
             </div>
@@ -404,17 +458,21 @@ function SessionsPage() {
                         >
                             <PanelLeftIcon className="h-5 w-5" />
                         </button>
-                        <div className="relative min-w-0">
-                            <button
-                                type="button"
-                                onClick={() => setHubMenuOpen((value) => !value)}
-                                className="flex min-w-0 items-center gap-2 rounded-full px-2 py-1 text-sm font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)]"
-                            >
-                                <span className="truncate">{hubLabel}</span>
-                                <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform ${hubMenuOpen ? 'rotate-180' : ''}`} />
-                            </button>
-                            {hubMenuOpen ? renderHubMenu('right') : null}
+                        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+                            <MaglevMark size="sm" className="h-8 w-8 rounded-[14px] shrink-0" />
+                            <div className="relative min-w-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setHubMenuOpen((value) => !value)}
+                                    className="flex min-w-0 items-center gap-2 rounded-full px-2 py-1 text-sm font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                >
+                                    <span className="truncate">{hubLabel}</span>
+                                    <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform ${hubMenuOpen ? 'rotate-180' : ''}`} />
+                                </button>
+                                {hubMenuOpen ? renderHubMenu('right') : null}
+                            </div>
                         </div>
+                        <div className="w-9 shrink-0" />
                     </div>
                 ) : null}
                 {effectiveSidebarCollapsed && !isFileExplorerRoute ? (
@@ -477,13 +535,28 @@ function NewSessionPage() {
     }, [navigate])
 
     const handleSuccess = useCallback((sessionId: string, _agent: AgentType) => {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
-        navigate({
-            to: '/sessions/$sessionId/terminal',
-            params: { sessionId },
-            replace: true
-        })
-    }, [navigate, queryClient, scopeKey])
+        const openSpawnedSession = async () => {
+            markPendingTerminalFocus(sessionId)
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur()
+            }
+
+            await waitForSpawnedShellSessionReady({
+                api,
+                queryClient,
+                scopeKey,
+                sessionId
+            })
+
+            navigate({
+                to: '/sessions/$sessionId/terminal',
+                params: { sessionId },
+                replace: true
+            })
+        }
+
+        void openSpawnedSession()
+    }, [api, navigate, queryClient, scopeKey])
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -507,13 +580,15 @@ function NewSessionPage() {
             ) : null}
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-                <NewSession
-                    api={api}
-                    machine={machine}
-                    isLoading={hubLoading}
-                    onCancel={handleCancel}
-                    onSuccess={handleSuccess}
-                />
+                <div className="mx-auto w-full max-w-[720px]">
+                    <NewSession
+                        api={api}
+                        machine={machine}
+                        isLoading={hubLoading}
+                        onCancel={handleCancel}
+                        onSuccess={handleSuccess}
+                    />
+                </div>
             </div>
         </div>
     )

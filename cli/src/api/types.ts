@@ -28,10 +28,14 @@ export const MachineMetadataSchema = z.object({
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>
 
 export const RunnerStateSchema = z.object({
-    status: z.union([z.enum(['running', 'shutting-down']), z.string()]),
+    status: z.union([z.enum(['running', 'restarting', 'shutting-down']), z.string()]),
     pid: z.number().optional(),
     httpPort: z.number().optional(),
     startedAt: z.number().optional(),
+    acceptingNewSessions: z.boolean().optional(),
+    activeSpawnCount: z.number().optional(),
+    restartRequestedAt: z.number().optional(),
+    restartReason: z.union([z.enum(['cli-version-drift']), z.string()]).optional(),
     shutdownRequestedAt: z.number().optional(),
     shutdownSource: z.union([z.enum(['mobile-app', 'cli', 'os-signal', 'unknown']), z.string()]).optional(),
     lastSpawnError: z.object({

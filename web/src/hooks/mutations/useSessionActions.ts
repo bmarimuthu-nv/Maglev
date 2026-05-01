@@ -11,9 +11,16 @@ export function useSessionActions(
     abortSession: () => Promise<void>
     archiveSession: () => Promise<void>
     switchSession: () => Promise<void>
+    updateSession: (updates: {
+        name?: string
+        directory?: string
+        parentSessionId?: string | null
+        childRole?: 'review-terminal' | 'split-terminal' | null
+    }) => Promise<void>
     renameSession: (name: string) => Promise<void>
     setPinned: (pinned: boolean) => Promise<void>
     setShellOptions: (options: { startupCommand?: string | null; autoRespawn?: boolean; pinned?: boolean }) => Promise<void>
+    closeSession: () => Promise<void>
     deleteSession: () => Promise<void>
     attachTerminalSupervision: (workerSessionId: string) => Promise<void>
     setTerminalSupervisionPaused: (paused: boolean) => Promise<void>
@@ -63,14 +70,25 @@ export function useSessionActions(
         onSuccess: () => void invalidateSession(),
     })
 
-    const renameMutation = useMutation({
-        mutationFn: async (name: string) => {
+    const updateMutation = useMutation({
+        mutationFn: async (updates: {
+            name?: string
+            directory?: string
+            parentSessionId?: string | null
+            childRole?: 'review-terminal' | 'split-terminal' | null
+        }) => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            await api.renameSession(sessionId, name)
+            await api.updateSession(sessionId, updates)
         },
         onSuccess: () => void invalidateSession(),
+    })
+
+    const renameMutation = useMutation({
+        mutationFn: async (name: string) => {
+            await updateMutation.mutateAsync({ name })
+        }
     })
 
     const deleteMutation = useMutation({
@@ -79,6 +97,20 @@ export function useSessionActions(
                 throw new Error('Session unavailable')
             }
             await api.deleteSession(sessionId)
+        },
+        onSuccess: async () => {
+            if (!sessionId) return
+            queryClient.removeQueries({ queryKey: queryKeys.session(scopeKey, sessionId) })
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions(scopeKey) })
+        },
+    })
+
+    const closeMutation = useMutation({
+        mutationFn: async () => {
+            if (!api || !sessionId) {
+                throw new Error('Session unavailable')
+            }
+            await api.closeSession(sessionId)
         },
         onSuccess: async () => {
             if (!sessionId) return
@@ -187,9 +219,11 @@ export function useSessionActions(
         abortSession: abortMutation.mutateAsync,
         archiveSession: archiveMutation.mutateAsync,
         switchSession: switchMutation.mutateAsync,
+        updateSession: updateMutation.mutateAsync,
         renameSession: renameMutation.mutateAsync,
         setPinned: pinMutation.mutateAsync,
         setShellOptions: shellOptionsMutation.mutateAsync,
+        closeSession: closeMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,
         attachTerminalSupervision: attachTerminalSupervisionMutation.mutateAsync,
         setTerminalSupervisionPaused: setTerminalSupervisionPausedMutation.mutateAsync,
@@ -201,9 +235,11 @@ export function useSessionActions(
         isPending: abortMutation.isPending
             || archiveMutation.isPending
             || switchMutation.isPending
+            || updateMutation.isPending
             || renameMutation.isPending
             || pinMutation.isPending
             || shellOptionsMutation.isPending
+            || closeMutation.isPending
             || deleteMutation.isPending
             || attachTerminalSupervisionMutation.isPending
             || setTerminalSupervisionPausedMutation.isPending

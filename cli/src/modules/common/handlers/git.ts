@@ -25,16 +25,19 @@ interface GitDiffFileRequest {
 }
 
 type GitReviewMode = 'branch' | 'working'
+type GitReviewBaseMode = 'origin' | 'upstream' | 'fork-point'
 
 interface GitReviewSummaryRequest {
     cwd?: string
     mode: GitReviewMode
+    baseMode?: GitReviewBaseMode
     timeout?: number
 }
 
 interface GitReviewFileRequest {
     cwd?: string
     mode: GitReviewMode
+    baseMode?: GitReviewBaseMode
     filePath: string
     timeout?: number
 }
@@ -58,6 +61,7 @@ interface GitReviewSummaryFile {
 interface GitReviewSummaryResponse {
     success: boolean
     mode?: GitReviewMode
+    baseMode?: GitReviewBaseMode
     currentBranch?: string | null
     defaultBranch?: string | null
     mergeBase?: string | null
@@ -140,13 +144,13 @@ async function tryRunGitText(args: string[], cwd: string, timeout?: number): Pro
     }
 }
 
-async function resolveDefaultRemoteBranch(cwd: string, timeout?: number): Promise<string | null> {
-    const symbolic = await tryRunGitText(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], cwd, timeout)
+async function resolveRemoteDefaultBranch(remote: string, cwd: string, timeout?: number): Promise<string | null> {
+    const symbolic = await tryRunGitText(['symbolic-ref', '--quiet', `refs/remotes/${remote}/HEAD`], cwd, timeout)
     if (symbolic) {
         return symbolic.replace(/^refs\/remotes\//, '')
     }
 
-    const fallbacks = ['origin/main', 'origin/master']
+    const fallbacks = [`${remote}/main`, `${remote}/master`]
     for (const candidate of fallbacks) {
         const exists = await tryRunGitText(['rev-parse', '--verify', '--quiet', candidate], cwd, timeout)
         if (exists) {
@@ -156,8 +160,19 @@ async function resolveDefaultRemoteBranch(cwd: string, timeout?: number): Promis
     return null
 }
 
-async function resolveReviewBase(cwd: string, mode: GitReviewMode, timeout?: number): Promise<{
+async function resolveBranchUpstream(cwd: string, timeout?: number): Promise<string | null> {
+    return await tryRunGitText(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], cwd, timeout)
+}
+
+async function resolveForkPointBaseRef(cwd: string, timeout?: number): Promise<string | null> {
+    return await resolveRemoteDefaultBranch('upstream', cwd, timeout)
+        ?? await resolveRemoteDefaultBranch('origin', cwd, timeout)
+        ?? await resolveBranchUpstream(cwd, timeout)
+}
+
+async function resolveReviewBase(cwd: string, mode: GitReviewMode, timeout: number | undefined, baseMode: GitReviewBaseMode = 'origin'): Promise<{
     mode: GitReviewMode
+    baseMode: GitReviewBaseMode
     currentBranch: string | null
     defaultBranch: string | null
     mergeBase: string | null
@@ -168,6 +183,7 @@ async function resolveReviewBase(cwd: string, mode: GitReviewMode, timeout?: num
     if (mode === 'working') {
         return {
             mode,
+            baseMode,
             currentBranch,
             defaultBranch: null,
             mergeBase: null,
@@ -175,14 +191,34 @@ async function resolveReviewBase(cwd: string, mode: GitReviewMode, timeout?: num
         }
     }
 
-    const defaultBranch = await resolveDefaultRemoteBranch(cwd, timeout)
+    if (baseMode === 'fork-point') {
+        const baseRef = await resolveForkPointBaseRef(cwd, timeout)
+        if (!baseRef) {
+            throw new Error('Could not resolve base branch for fork-point diff')
+        }
+
+        const mergeBase = await tryRunGitText(['merge-base', '--fork-point', baseRef, 'HEAD'], cwd, timeout)
+            ?? await runGitText(['merge-base', 'HEAD', baseRef], cwd, timeout)
+        return {
+            mode,
+            baseMode,
+            currentBranch,
+            defaultBranch: baseRef,
+            mergeBase,
+            rangeArgs: [`${mergeBase}..HEAD`]
+        }
+    }
+
+    const remote = baseMode === 'upstream' ? 'upstream' : 'origin'
+    const defaultBranch = await resolveRemoteDefaultBranch(remote, cwd, timeout)
     if (!defaultBranch) {
-        throw new Error('Could not resolve default remote branch')
+        throw new Error(`Could not resolve ${remote} default branch`)
     }
 
     const mergeBase = await runGitText(['merge-base', 'HEAD', defaultBranch], cwd, timeout)
     return {
         mode,
+        baseMode,
         currentBranch,
         defaultBranch,
         mergeBase,
@@ -262,11 +298,12 @@ export function registerGitHandlers(rpcHandlerManager: RpcHandlerManager, workin
         }
 
         try {
-            const base = await resolveReviewBase(resolved.cwd, data.mode, data.timeout)
+            const base = await resolveReviewBase(resolved.cwd, data.mode, data.timeout, data.baseMode)
             const stdout = await runGitText(['diff', '--numstat', ...base.rangeArgs, '--'], resolved.cwd, data.timeout)
             return {
                 success: true,
                 mode: data.mode,
+                baseMode: base.baseMode,
                 currentBranch: base.currentBranch,
                 defaultBranch: base.defaultBranch,
                 mergeBase: base.mergeBase,
@@ -288,7 +325,7 @@ export function registerGitHandlers(rpcHandlerManager: RpcHandlerManager, workin
         }
 
         try {
-            const base = await resolveReviewBase(resolved.cwd, data.mode, data.timeout)
+            const base = await resolveReviewBase(resolved.cwd, data.mode, data.timeout, data.baseMode)
             const args = ['diff', '--no-ext-diff', ...base.rangeArgs, '--', data.filePath]
             return await runGitCommand(args, resolved.cwd, data.timeout)
         } catch (error) {

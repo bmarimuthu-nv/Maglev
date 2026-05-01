@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import { toSessionSummary } from '@maglev/protocol'
 import type { SyncEvent } from '@maglev/protocol/types'
+import { mkdtemp, readFile, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import type { EventPublisher } from './eventPublisher'
@@ -83,31 +86,31 @@ describe('session model', () => {
                 null,
                 'default'
             )
-            const orchestrator = engine.getOrCreateSession(
-                'orchestrator-session',
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session',
                 {
                     path: '/tmp/project',
                     host: 'localhost',
                     flavor: 'shell',
-                    shellTerminalId: 'terminal:orchestrator',
+                    shellTerminalId: 'terminal:supervisor',
                     shellTerminalState: 'ready'
                 },
                 null,
                 'default'
             )
 
-            await engine.attachTerminalSupervision(orchestrator.id, worker.id, 'default')
+            await engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')
 
             const refreshedWorker = engine.getSession(worker.id)
-            const refreshedOrchestrator = engine.getSession(orchestrator.id)
+            const refreshedSupervisor = engine.getSession(supervisor.id)
 
             expect(refreshedWorker?.metadata?.terminalSupervision).toMatchObject({
                 role: 'worker',
-                peerSessionId: orchestrator.id,
+                peerSessionId: supervisor.id,
                 state: 'active'
             })
-            expect(toSessionSummary(refreshedOrchestrator!).metadata?.terminalSupervision).toMatchObject({
-                role: 'orchestrator',
+            expect(toSessionSummary(refreshedSupervisor!).metadata?.terminalSupervision).toMatchObject({
+                role: 'supervisor',
                 peerSessionId: worker.id,
                 state: 'active'
             })
@@ -116,7 +119,209 @@ describe('session model', () => {
         }
     })
 
-    it('blocks orchestrator writes during the human override window and delivers them after it expires', async () => {
+    it('retries transient metadata version mismatches while attaching terminal supervision', async () => {
+        const store = new Store(':memory:')
+        const io = new FakeIo()
+        const engine = new SyncEngine(
+            store,
+            io as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            { terminalSupervisionHumanOverrideMs: 5_000 }
+        )
+
+        try {
+            const worker = engine.getOrCreateSession(
+                'worker-session-retry',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:worker',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session-retry',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:supervisor',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+
+            const originalUpdate = store.sessions.updateSessionMetadata.bind(store.sessions)
+            let transientMismatchPending = true
+            store.sessions.updateSessionMetadata = ((id, metadata, expectedVersion, namespace, options) => {
+                if (transientMismatchPending && id === supervisor.id) {
+                    transientMismatchPending = false
+                    return {
+                        result: 'version-mismatch',
+                        currentValue: metadata
+                    }
+                }
+                return originalUpdate(id, metadata, expectedVersion, namespace, options)
+            }) as typeof store.sessions.updateSessionMetadata
+
+            await engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')
+
+            expect(engine.getSession(supervisor.id)?.metadata?.terminalSupervision).toMatchObject({
+                role: 'supervisor',
+                peerSessionId: worker.id,
+                state: 'active'
+            })
+            expect(engine.getSession(worker.id)?.metadata?.terminalSupervision).toMatchObject({
+                role: 'worker',
+                peerSessionId: supervisor.id,
+                state: 'active'
+            })
+            expect(transientMismatchPending).toBeFalse()
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('rolls back a partial terminal supervision attach when the peer update fails', async () => {
+        const store = new Store(':memory:')
+        const io = new FakeIo()
+        const engine = new SyncEngine(
+            store,
+            io as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            { terminalSupervisionHumanOverrideMs: 5_000 }
+        )
+
+        try {
+            const worker = engine.getOrCreateSession(
+                'worker-session-rollback-attach',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:worker',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session-rollback-attach',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:supervisor',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+
+            const sessionCache = (engine as any).sessionCache
+            const originalUpdate = sessionCache.updateSessionMetadataFields.bind(sessionCache)
+            let failedOnce = false
+            sessionCache.updateSessionMetadataFields = async (
+                sessionId: string,
+                mutate: (metadata: Record<string, unknown>) => Record<string, unknown>
+            ) => {
+                if (!failedOnce && sessionId === worker.id) {
+                    failedOnce = true
+                    throw new Error('simulated peer write failure')
+                }
+                return originalUpdate(sessionId, mutate)
+            }
+
+            await expect(engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')).rejects.toThrow(
+                'Failed to attach terminal supervision consistently. Partial update was rolled back: simulated peer write failure'
+            )
+
+            expect(engine.getSession(supervisor.id)?.metadata?.terminalSupervision).toBeUndefined()
+            expect(engine.getSession(worker.id)?.metadata?.terminalSupervision).toBeUndefined()
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('rolls back a partial terminal supervision detach when the peer update fails', async () => {
+        const store = new Store(':memory:')
+        const io = new FakeIo()
+        const engine = new SyncEngine(
+            store,
+            io as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            { terminalSupervisionHumanOverrideMs: 5_000 }
+        )
+
+        try {
+            const worker = engine.getOrCreateSession(
+                'worker-session-rollback-detach',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:worker',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session-rollback-detach',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:supervisor',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+
+            await engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')
+
+            const sessionCache = (engine as any).sessionCache
+            const originalUpdate = sessionCache.updateSessionMetadataFields.bind(sessionCache)
+            let failedOnce = false
+            sessionCache.updateSessionMetadataFields = async (
+                sessionId: string,
+                mutate: (metadata: Record<string, unknown>) => Record<string, unknown>
+            ) => {
+                if (!failedOnce && sessionId === worker.id) {
+                    failedOnce = true
+                    throw new Error('simulated peer detach failure')
+                }
+                return originalUpdate(sessionId, mutate)
+            }
+
+            await expect(engine.detachTerminalSupervision(supervisor.id, 'default')).rejects.toThrow(
+                'Failed to detach terminal supervision consistently. Partial update was rolled back: simulated peer detach failure'
+            )
+
+            expect(engine.getSession(supervisor.id)?.metadata?.terminalSupervision).toMatchObject({
+                role: 'supervisor',
+                peerSessionId: worker.id,
+                state: 'active'
+            })
+            expect(engine.getSession(worker.id)?.metadata?.terminalSupervision).toMatchObject({
+                role: 'worker',
+                peerSessionId: supervisor.id,
+                state: 'active'
+            })
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('blocks supervisor writes during the human override window and delivers them after it expires', async () => {
         const store = new Store(':memory:')
         const io = new FakeIo()
         const engine = new SyncEngine(
@@ -140,13 +345,13 @@ describe('session model', () => {
                 null,
                 'default'
             )
-            const orchestrator = engine.getOrCreateSession(
-                'orchestrator-session-write',
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session-write',
                 {
                     path: '/tmp/project',
                     host: 'localhost',
                     flavor: 'shell',
-                    shellTerminalId: 'terminal:orchestrator',
+                    shellTerminalId: 'terminal:supervisor',
                     shellTerminalState: 'ready'
                 },
                 null,
@@ -154,15 +359,15 @@ describe('session model', () => {
             )
             const workerCli = connectCliSession(io, worker.id, 'default')
 
-            await engine.attachTerminalSupervision(orchestrator.id, worker.id, 'default')
+            await engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')
             engine.noteHumanTerminalInput(worker.id)
 
-            const blocked = await engine.writeTerminalSupervisionInput(orchestrator.id, 'pwd\n', 'default')
+            const blocked = await engine.writeTerminalSupervisionInput(supervisor.id, 'pwd\n', 'default')
             expect(blocked).toEqual({ delivered: false, blockedReason: 'human_override' })
             expect(workerCli.emitted).toHaveLength(0)
 
             ;(engine as any).recentHumanTerminalActivityBySessionId.set(worker.id, Date.now() - 6_000)
-            const delivered = await engine.writeTerminalSupervisionInput(orchestrator.id, 'pwd\n', 'default')
+            const delivered = await engine.writeTerminalSupervisionInput(supervisor.id, 'pwd\n', 'default')
             expect(delivered).toEqual({ delivered: true })
             expect(workerCli.emitted.at(-1)).toEqual({
                 event: 'terminal:write',
@@ -174,6 +379,71 @@ describe('session model', () => {
             })
         } finally {
             engine.stop()
+        }
+    })
+
+    it('mirrors worker terminal state into the supervisor bridge workspace and clears it on detach', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'maglev-supervision-session-'))
+        const workerPath = join(root, 'worker')
+        const supervisorPath = join(root, 'supervisor')
+        const store = new Store(':memory:')
+        const io = new FakeIo()
+        const engine = new SyncEngine(
+            store,
+            io as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            { terminalSupervisionHumanOverrideMs: 5_000 }
+        )
+
+        try {
+            const worker = engine.getOrCreateSession(
+                'worker-session-bridge',
+                {
+                    path: workerPath,
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:worker',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+            const supervisor = engine.getOrCreateSession(
+                'supervisor-session-bridge',
+                {
+                    path: supervisorPath,
+                    host: 'localhost',
+                    flavor: 'shell',
+                    shellTerminalId: 'terminal:supervisor',
+                    shellTerminalState: 'ready'
+                },
+                null,
+                'default'
+            )
+
+            await engine.attachTerminalSupervision(supervisor.id, worker.id, 'default')
+            ;(engine as any).terminalStateCache.noteOutput(worker.id, 'terminal:worker', 'worker ready\n')
+            await engine.syncTerminalSupervisionBridge(worker.id, 'default')
+
+            const bridgeDir = join(supervisorPath, '.maglev-supervision', supervisor.id)
+            expect(await readFile(join(bridgeDir, 'worker-terminal.log'), 'utf8')).toBe('worker ready\n')
+
+            const state = JSON.parse(await readFile(join(bridgeDir, 'worker-terminal.json'), 'utf8')) as Record<string, unknown>
+            expect(state.supervisorSessionId).toBe(supervisor.id)
+            expect(state.workerSessionId).toBe(worker.id)
+            expect(state.supervisionState).toBe('active')
+            expect(await readFile(join(bridgeDir, 'send-to-worker.sh'), 'utf8')).toContain(`--session "${supervisor.id}"`)
+
+            await engine.setTerminalSupervisionPaused(supervisor.id, true, 'default')
+            const pausedState = JSON.parse(await readFile(join(bridgeDir, 'worker-terminal.json'), 'utf8')) as Record<string, unknown>
+            expect(pausedState.supervisionState).toBe('paused')
+
+            await engine.detachTerminalSupervision(supervisor.id, 'default')
+            expect(await readFile(join(bridgeDir, 'worker-terminal.log'), 'utf8').catch(() => null)).toBeNull()
+        } finally {
+            engine.stop()
+            await rm(root, { recursive: true, force: true })
         }
     })
 
@@ -609,6 +879,76 @@ describe('session model', () => {
         })
     })
 
+    it('auto-archives stale inactive sessions instead of deleting them', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events), {
+            staleSessionArchiveMs: 60_000
+        })
+
+        const session = cache.getOrCreateSession(
+            'stale-session-archive',
+            { path: '/tmp/project', host: 'localhost', flavor: 'shell' },
+            null,
+            'default'
+        )
+
+        const aliveAt = Date.now()
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: aliveAt,
+            thinking: false
+        })
+        cache.handleSessionEnd({ sid: session.id, time: aliveAt + 1_000 })
+
+        cache.expireInactive(aliveAt + 120_000)
+
+        expect(cache.getSession(session.id)).not.toBeNull()
+        expect(store.sessions.getSession(session.id)?.metadata).toMatchObject({
+            lifecycleState: 'archived',
+            archivedBy: 'hub',
+            archiveReason: 'Inactive session auto-archived'
+        })
+    })
+
+    it('does not auto-archive inactive auto-respawn shells', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events), {
+            staleSessionArchiveMs: 60_000
+        })
+
+        const session = cache.getOrCreateSession(
+            'auto-respawn-retained',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'shell',
+                pinned: true,
+                autoRespawn: true
+            },
+            null,
+            'default'
+        )
+
+        const aliveAt = Date.now()
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: aliveAt,
+            thinking: false
+        })
+        cache.handleSessionEnd({ sid: session.id, time: aliveAt + 1_000 })
+
+        cache.expireInactive(aliveAt + 120_000)
+
+        const storedMetadata = store.sessions.getSession(session.id)?.metadata as Record<string, unknown> | null | undefined
+        expect(storedMetadata).toMatchObject({
+            pinned: true,
+            autoRespawn: true
+        })
+        expect(storedMetadata?.lifecycleState).not.toBe('archived')
+    })
+
     it('preserves recent session activity across cache reload so restart does not immediately delete sessions', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
@@ -691,6 +1031,80 @@ describe('session model', () => {
             expect(result).toEqual({ type: 'success', sessionId: session.id })
             expect(capturedMachineId).toBe('current-machine')
             expect(capturedStartupCommand).toBe('echo hello')
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('marks respawned pinned shells with their replaced session lineage', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            { boundMachineId: 'current-machine' }
+        )
+
+        try {
+            const oldSession = engine.getOrCreateSession(
+                'old-shell',
+                {
+                    path: '/tmp/project',
+                    host: 'old-host',
+                    machineId: 'stale-machine',
+                    flavor: 'shell',
+                    pinned: true,
+                    respawnedFromSessionIds: ['original-shell'],
+                    shellTerminalId: 'term-1'
+                },
+                null,
+                'default'
+            )
+
+            engine.getOrCreateMachine(
+                'current-machine',
+                { host: 'new-host', platform: 'linux', maglevCliVersion: '0.1.0' },
+                null,
+                'default'
+            )
+            engine.handleMachineAlive({ machineId: 'current-machine', time: Date.now() })
+
+            ;(engine as any).rpcGateway.spawnSession = async () => {
+                const replacement = engine.getOrCreateSession(
+                    'new-shell',
+                    {
+                        path: '/tmp/project',
+                        host: 'new-host',
+                        machineId: 'current-machine',
+                        flavor: 'shell',
+                        shellTerminalId: 'term-2'
+                    },
+                    null,
+                    'default'
+                )
+                engine.handleSessionAlive({ sid: replacement.id, time: Date.now(), thinking: false })
+                return { type: 'success', sessionId: replacement.id }
+            }
+            ;(engine as any).waitForSessionActive = async () => true
+
+            const result = await engine.respawnPinnedShellSession(oldSession.id, 'default')
+
+            expect(result.type).toBe('success')
+            if (result.type !== 'success') {
+                return
+            }
+            expect(engine.getSession(oldSession.id)).toBeUndefined()
+            const replacement = engine.getSession(result.sessionId)
+            expect(replacement?.metadata).toMatchObject({
+                respawnedFromSessionId: oldSession.id,
+                respawnedFromSessionIds: ['original-shell', oldSession.id],
+                pinned: true
+            })
+            expect(toSessionSummary(replacement!).metadata).toMatchObject({
+                respawnedFromSessionId: oldSession.id,
+                respawnedFromSessionIds: ['original-shell', oldSession.id]
+            })
         } finally {
             engine.stop()
         }

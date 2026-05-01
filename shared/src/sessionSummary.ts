@@ -3,16 +3,25 @@ import type { Session, TerminalPairLink, TerminalSupervision, WorktreeMetadata }
 export type SessionSummaryMetadata = {
     name?: string
     path: string
+    branch?: string
+    childRole?: 'review-terminal' | 'split-terminal'
+    lifecycleState?: string
+    lifecycleStateSince?: number
+    archivedBy?: string
+    archiveReason?: string
     machineId?: string
     summary?: { text: string }
     flavor?: string | null
     worktree?: WorktreeMetadata
     notesPath?: string
+    parentSessionId?: string
     pinned?: boolean
     autoRespawn?: boolean
     startupCommand?: string
     shellTerminalId?: string
     shellTerminalState?: 'ready' | 'stale'
+    respawnedFromSessionId?: string
+    respawnedFromSessionIds?: string[]
     terminalSupervision?: TerminalSupervision
     terminalPair?: TerminalPairLink
 }
@@ -30,16 +39,25 @@ export function toSessionSummary(session: Session): SessionSummary {
     const metadata: SessionSummaryMetadata | null = session.metadata ? {
         name: session.metadata.name,
         path: session.metadata.path,
+        branch: session.metadata.branch,
+        childRole: session.metadata.childRole,
+        lifecycleState: session.metadata.lifecycleState,
+        lifecycleStateSince: session.metadata.lifecycleStateSince,
+        archivedBy: session.metadata.archivedBy,
+        archiveReason: session.metadata.archiveReason,
         machineId: session.metadata.machineId ?? undefined,
         summary: session.metadata.summary ? { text: session.metadata.summary.text } : undefined,
         flavor: session.metadata.flavor ?? null,
         worktree: session.metadata.worktree,
         notesPath: session.metadata.notesPath,
+        parentSessionId: session.metadata.parentSessionId,
         pinned: session.metadata.pinned,
         autoRespawn: session.metadata.autoRespawn,
         startupCommand: session.metadata.startupCommand,
         shellTerminalId: session.metadata.shellTerminalId,
         shellTerminalState: session.metadata.shellTerminalState,
+        respawnedFromSessionId: session.metadata.respawnedFromSessionId,
+        respawnedFromSessionIds: session.metadata.respawnedFromSessionIds,
         terminalSupervision: session.metadata.terminalSupervision,
         terminalPair: session.metadata.terminalPair
     } : null

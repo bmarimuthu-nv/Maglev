@@ -6,7 +6,7 @@ import { getBrokerBasepath } from '@/utils/url'
 export type AuthSource =
     | { type: 'telegram'; initData: string }
     | { type: 'accessToken'; token: string }
-    | { type: 'broker' }
+    | { type: 'broker'; bootstrapToken?: string }
     | { type: 'jwt'; token: string }
 
 function decodeJwtExpMs(token: string): number | null {
@@ -50,6 +50,32 @@ function redirectToBrokerRoot(): void {
     const brokerBasepath = getBrokerBasepath(window.location.pathname)
     const nextPath = brokerBasepath || '/'
     window.location.replace(`${window.location.origin}${nextPath}`)
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isBrokerSessionExpiredError(error: unknown): boolean {
+    return error instanceof ApiError && error.status === 401
+}
+
+async function authenticateBrokerSessionWithRetry(client: ApiClient): Promise<AuthResponse> {
+    let lastError: unknown = null
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            return await client.authenticateBrokerSession()
+        } catch (error) {
+            lastError = error
+            if (isBrokerSessionExpiredError(error) || attempt === 2) {
+                throw error
+            }
+            await sleep(300 * (attempt + 1))
+        }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('Broker auth failed')
 }
 
 export function useAuth(authSource: AuthSource | null, baseUrl: string): {
@@ -110,7 +136,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
             try {
                 const client = new ApiClient('', { baseUrl })
                 const auth = currentSource.type === 'broker'
-                    ? await client.authenticateBrokerSession()
+                    ? await authenticateBrokerSessionWithRetry(client)
                     : await client.authenticate(getAuthPayload(currentSource)!)
                 tokenRef.current = auth.token
                 setToken(auth.token)
@@ -128,6 +154,12 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                     return null
                 }
                 const isExpired = expMs ? Date.now() >= expMs : false
+                if (currentSource.type === 'broker' && !isBrokerSessionExpiredError(error)) {
+                    if (options?.hardFail || isExpired) {
+                        setError('Unable to reach the hub through the server. Retry in a moment.')
+                    }
+                    return null
+                }
                 if (options?.hardFail || isExpired) {
                     tokenRef.current = null
                     setToken(null)
@@ -135,7 +167,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 const msg = currentSource.type === 'telegram'
                     ? 'Session expired. Reopen the Mini App from Telegram.'
                     : currentSource.type === 'broker'
-                    ? 'Broker session expired. Sign in at the broker and reload.'
+                    ? 'Server session expired. Sign in at the server and reload.'
                     : 'Session expired. Please login again.'
                 setError(msg)
             }
@@ -205,13 +237,24 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 return
             }
 
-            setIsLoading(true)
+            const brokerBootstrapToken = authSource.type === 'broker'
+                ? authSource.bootstrapToken ?? null
+                : null
+            if (brokerBootstrapToken) {
+                tokenRef.current = brokerBootstrapToken
+                setToken(brokerBootstrapToken)
+                setUser(null)
+                setError(null)
+                setNeedsBinding(false)
+            }
+
+            setIsLoading(!brokerBootstrapToken)
             setError(null)
             setNeedsBinding(false)
             try {
                 const client = new ApiClient('', { baseUrl }) // temporary for auth call
                 const auth = authSource.type === 'broker'
-                    ? await client.authenticateBrokerSession()
+                    ? await authenticateBrokerSessionWithRetry(client)
                     : await client.authenticate(getAuthPayload(authSource)!)
                 if (isCancelled) return
                 setToken(auth.token)
@@ -227,11 +270,20 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                     return
                 }
                 if (authSource.type === 'broker') {
-                    setToken(null)
-                    setUser(null)
-                    setNeedsBinding(false)
-                    setError('Broker session expired. Redirecting to broker login...')
-                    redirectToBrokerRoot()
+                    if (isBrokerSessionExpiredError(e)) {
+                        setToken(null)
+                        setUser(null)
+                        setNeedsBinding(false)
+                        setError('Server session expired. Redirecting to server login...')
+                        redirectToBrokerRoot()
+                        return
+                    }
+                    if (!brokerBootstrapToken) {
+                        setToken(null)
+                        setUser(null)
+                        setNeedsBinding(false)
+                        setError(e instanceof Error ? e.message : 'Unable to reach the hub through the server.')
+                    }
                     return
                 }
                 setNeedsBinding(false)

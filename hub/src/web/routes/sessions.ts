@@ -1,12 +1,20 @@
 import { toSessionSummary } from '@maglev/protocol'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { configuration } from '../../configuration'
+import { resolveTerminalSupervisionBridgeLocation } from '../../supervision/bridge'
+import { ensureNotesParentDir, resolveSessionNotesLocation } from '../../notes/storage'
 
-const renameSessionSchema = z.object({
-    name: z.string().min(1).max(255)
+const updateSessionSchema = z.object({
+    name: z.string().trim().min(1).max(255).optional(),
+    directory: z.string().trim().min(1).max(4000).optional(),
+    parentSessionId: z.string().trim().min(1).max(255).nullable().optional(),
+    childRole: z.enum(['review-terminal', 'split-terminal']).nullable().optional()
 })
 
 const pinSessionSchema = z.object({
@@ -17,6 +25,10 @@ const shellSessionOptionsSchema = z.object({
     startupCommand: z.string().max(4000).nullable().optional(),
     autoRespawn: z.boolean().optional(),
     pinned: z.boolean().optional()
+})
+
+const notesContentSchema = z.object({
+    content: z.string()
 })
 
 const attachTerminalSupervisionSchema = z.object({
@@ -123,7 +135,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ type: 'success', sessionId: result.sessionId })
     })
 
-    app.get('/sessions/:id/terminal-supervision/target', (c) => {
+    app.get('/sessions/:id/terminal-supervision/target', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {
             return engine
@@ -136,9 +148,14 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         try {
             const target = engine.getTerminalSupervisionTarget(sessionResult.sessionId, c.get('namespace'))
+            const supervisorPath = target.supervisor.metadata?.path?.trim()
+            const bridge = supervisorPath
+                ? await resolveTerminalSupervisionBridgeLocation(supervisorPath, target.supervisor.id)
+                : null
             return c.json({
                 worker: toSessionSummary(target.worker),
-                orchestrator: toSessionSummary(target.orchestrator),
+                supervisor: toSessionSummary(target.supervisor),
+                bridge,
                 snapshot: target.snapshot,
                 events: target.events
             })
@@ -464,20 +481,58 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const body = await c.req.json().catch(() => null)
-        const parsed = renameSessionSchema.safeParse(body)
+        const parsed = updateSessionSchema.safeParse(body)
         if (!parsed.success) {
-            return c.json({ error: 'Invalid body: name is required' }, 400)
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        if (
+            parsed.data.name === undefined
+            && parsed.data.directory === undefined
+            && parsed.data.parentSessionId === undefined
+            && parsed.data.childRole === undefined
+        ) {
+            return c.json({ error: 'At least one session update is required' }, 400)
         }
 
         try {
-            await engine.renameSession(sessionResult.sessionId, parsed.data.name)
+            await engine.updateSessionDetails(sessionResult.sessionId, {
+                name: parsed.data.name,
+                directory: parsed.data.directory
+            })
+            if (parsed.data.parentSessionId !== undefined) {
+                await engine.setParentSessionId(sessionResult.sessionId, parsed.data.parentSessionId)
+            }
+            if (parsed.data.childRole !== undefined) {
+                await engine.setChildRole(sessionResult.sessionId, parsed.data.childRole)
+            }
             return c.json({ ok: true })
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to rename session'
+            const message = error instanceof Error ? error.message : 'Failed to update session'
             // Map concurrency/version errors to 409 conflict
             if (message.includes('concurrently') || message.includes('version')) {
                 return c.json({ error: message }, 409)
             }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.post('/sessions/:id/close', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        try {
+            await engine.closeSession(sessionResult.sessionId)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to close session'
             return c.json({ error: message }, 500)
         }
     })
@@ -550,6 +605,64 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ ok: true })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to update shell session options'
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.get('/sessions/:id/notes', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const { fsPath: filePath } = resolveSessionNotesLocation(sessionResult.session)
+        if (!existsSync(filePath)) {
+            return c.json({ success: true, content: null })
+        }
+
+        try {
+            const content = readFileSync(filePath, 'utf-8')
+            return c.json({ success: true, content })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to read notes'
+            return c.json({ success: false, error: message })
+        }
+    })
+
+    app.post('/sessions/:id/notes', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = notesContentSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: content is required' }, 400)
+        }
+
+        try {
+            const location = resolveSessionNotesLocation(sessionResult.session)
+            ensureNotesParentDir(location.fsPath)
+            writeFileSync(location.fsPath, parsed.data.content, 'utf-8')
+
+            if (sessionResult.session.metadata?.notesPath !== location.displayPath) {
+                await engine.setSessionNotesPath(sessionResult.sessionId, location.displayPath)
+            }
+
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to save notes'
             return c.json({ error: message }, 500)
         }
     })

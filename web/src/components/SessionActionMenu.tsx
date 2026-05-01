@@ -7,6 +7,7 @@ import {
     useState,
     type CSSProperties
 } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
@@ -38,10 +39,14 @@ type SessionActionMenuProps = {
     canPauseTerminalPair?: boolean
     terminalPairPaused?: boolean
     onToggleTerminalPairPaused?: () => void
-    onRename: () => void
-    onArchive: () => void
-    onDelete: () => void
+    canClone?: boolean
+    onClone?: () => void
+    onCloneWithClaude?: () => void
+    onCloneWithCodex?: () => void
+    onEdit: () => void
+    onCloseSession: () => void
     anchorPoint: { x: number; y: number }
+    anchorMode?: 'centered' | 'context'
     menuId?: string
 }
 
@@ -180,6 +185,26 @@ function PinIcon(props: { className?: string }) {
     )
 }
 
+function CopyIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <rect width="14" height="14" x="8" y="8" rx="2" />
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </svg>
+    )
+}
+
 function TerminalIcon(props: { className?: string }) {
     return (
         <svg
@@ -231,10 +256,14 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         canPauseTerminalPair = false,
         terminalPairPaused = false,
         onToggleTerminalPairPaused,
-        onRename,
-        onArchive,
-        onDelete,
+        canClone = false,
+        onClone,
+        onCloneWithClaude,
+        onCloneWithCodex,
+        onEdit,
+        onCloseSession,
         anchorPoint,
+        anchorMode = 'centered',
         menuId
     } = props
     const menuRef = useRef<HTMLDivElement | null>(null)
@@ -243,9 +272,9 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const resolvedMenuId = menuId ?? `session-action-menu-${internalId}`
     const headingId = `${resolvedMenuId}-heading`
 
-    const handleRename = () => {
+    const handleEdit = () => {
         onClose()
-        onRename()
+        onEdit()
     }
 
     const handleOpenFolder = () => {
@@ -258,11 +287,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onOpenReview?.()
     }
 
-    const handleArchive = () => {
-        onClose()
-        onArchive()
-    }
-
     const handleTogglePin = () => {
         onClose()
         onTogglePin?.()
@@ -273,9 +297,9 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onEditStartupCommand?.()
     }
 
-    const handleDelete = () => {
+    const handleCloseSession = () => {
         onClose()
-        onDelete()
+        onCloseSession()
     }
 
     const handleAttachTerminalSupervision = () => {
@@ -313,6 +337,21 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onAddTerminalPairSupervisor?.()
     }
 
+    const handleClone = () => {
+        onClose()
+        onClone?.()
+    }
+
+    const handleCloneWithClaude = () => {
+        onClose()
+        onCloneWithClaude?.()
+    }
+
+    const handleCloneWithCodex = () => {
+        onClose()
+        onCloneWithCodex?.()
+    }
+
     const updatePosition = useCallback(() => {
         const menuEl = menuRef.current
         if (!menuEl) return
@@ -321,21 +360,25 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         const viewportWidth = window.innerWidth
         const viewportHeight = window.innerHeight
         const padding = 8
-        const gap = 8
+        const gap = anchorMode === 'context' ? 0 : 8
 
         const spaceBelow = viewportHeight - anchorPoint.y
         const spaceAbove = anchorPoint.y
         const openAbove = spaceBelow < menuRect.height + gap && spaceAbove > spaceBelow
 
         let top = openAbove ? anchorPoint.y - menuRect.height - gap : anchorPoint.y + gap
-        let left = anchorPoint.x - menuRect.width / 2
-        const transformOrigin = openAbove ? 'bottom center' : 'top center'
+        let left = anchorMode === 'context'
+            ? anchorPoint.x
+            : anchorPoint.x - menuRect.width / 2
+        const transformOrigin = anchorMode === 'context'
+            ? (openAbove ? 'bottom left' : 'top left')
+            : (openAbove ? 'bottom center' : 'top center')
 
         top = Math.min(Math.max(top, padding), viewportHeight - menuRect.height - padding)
         left = Math.min(Math.max(left, padding), viewportWidth - menuRect.width - padding)
 
         setMenuPosition({ top, left, transformOrigin })
-    }, [anchorPoint])
+    }, [anchorMode, anchorPoint])
 
     useLayoutEffect(() => {
         if (!isOpen) return
@@ -396,15 +439,21 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
             left: menuPosition.left,
             transformOrigin: menuPosition.transformOrigin
         }
-        : undefined
+        : {
+            top: anchorPoint.y,
+            left: anchorPoint.x,
+            visibility: 'hidden'
+        }
 
     const baseItemClassName =
         'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
 
-    return (
+    const menu = (
         <div
             ref={menuRef}
-            className="fixed z-50 min-w-[200px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg animate-menu-pop"
+            className={`fixed z-50 min-w-[200px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg ${
+                anchorMode === 'context' ? '' : 'animate-menu-pop'
+            }`}
             style={menuStyle}
         >
             <div
@@ -549,38 +598,64 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     </button>
                 ) : null}
 
+                {canClone ? (
+                    <>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={handleClone}
+                        >
+                            <CopyIcon className="text-[var(--app-hint)]" />
+                            Clone
+                        </button>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={handleCloneWithClaude}
+                        >
+                            <CopyIcon className="text-[var(--app-hint)]" />
+                            Clone with Claude
+                        </button>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={handleCloneWithCodex}
+                        >
+                            <CopyIcon className="text-[var(--app-hint)]" />
+                            Clone with Codex
+                        </button>
+                    </>
+                ) : null}
+
                 <button
                     type="button"
                     role="menuitem"
                     className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
-                    onClick={handleRename}
+                    onClick={handleEdit}
                 >
                     <EditIcon className="text-[var(--app-hint)]" />
-                    {t('session.action.rename')}
+                    {t('session.action.edit')}
                 </button>
 
-                {sessionActive ? (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
-                        onClick={handleArchive}
-                    >
-                        <ArchiveIcon className="text-red-500" />
-                        {t('session.action.archive')}
-                    </button>
-                ) : (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
-                        onClick={handleDelete}
-                    >
-                        <TrashIcon className="text-red-500" />
-                        {t('session.action.delete')}
-                    </button>
-                )}
+                <button
+                    type="button"
+                    role="menuitem"
+                    className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
+                    onClick={handleCloseSession}
+                >
+                    {sessionActive ? <ArchiveIcon className="text-red-500" /> : <TrashIcon className="text-red-500" />}
+                    {t('session.action.close')}
+                </button>
             </div>
         </div>
     )
+
+    if (typeof document === 'undefined') {
+        return menu
+    }
+
+    return createPortal(menu, document.body)
 }

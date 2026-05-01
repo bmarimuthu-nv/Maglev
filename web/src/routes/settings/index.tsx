@@ -5,6 +5,10 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
 import { useAppearance, getAppearanceOptions, type AppearancePreference } from '@/hooks/useTheme'
 import { eventToShortcutLabel, getOpenFileShortcut, setOpenFileShortcut } from '@/lib/open-file-shortcut'
+import { useAutoScroll } from '@/hooks/useAutoScroll'
+import { useTerminalCopyOnSelect } from '@/hooks/useTerminalCopyOnSelect'
+import { getReviewBaseModeOptions, useReviewBaseMode } from '@/hooks/useReviewBaseMode'
+import { getReviewAppearanceOptions, useReviewAppearance, type ReviewAppearancePreference } from '@/hooks/useReviewAppearance'
 import { PROTOCOL_VERSION } from '@maglev/protocol'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
@@ -75,18 +79,28 @@ export default function SettingsPage() {
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
     const [isFontOpen, setIsFontOpen] = useState(false)
+    const [isReviewAppearanceOpen, setIsReviewAppearanceOpen] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const appearanceContainerRef = useRef<HTMLDivElement>(null)
     const fontContainerRef = useRef<HTMLDivElement>(null)
+    const reviewAppearanceContainerRef = useRef<HTMLDivElement>(null)
     const { fontScale, setFontScale } = useFontScale()
     const { appearance, setAppearance } = useAppearance()
     const [openFileShortcut, setOpenFileShortcutState] = useState(() => getOpenFileShortcut())
+    const { autoScroll, setAutoScroll } = useAutoScroll()
+    const { copyOnSelect, setCopyOnSelect } = useTerminalCopyOnSelect()
+    const { reviewBaseMode, setReviewBaseMode } = useReviewBaseMode()
+    const { reviewAppearance, setReviewAppearance } = useReviewAppearance()
 
     const fontScaleOptions = getFontScaleOptions()
     const appearanceOptions = getAppearanceOptions()
+    const reviewBaseModeOptions = getReviewBaseModeOptions()
+    const reviewAppearanceOptions = getReviewAppearanceOptions()
     const currentLocale = locales.find((loc) => loc.value === locale)
     const currentAppearanceLabel = appearanceOptions.find((opt) => opt.value === appearance)?.labelKey ?? 'settings.display.appearance.system'
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
+    const currentReviewBaseMode = reviewBaseModeOptions.find((opt) => opt.value === reviewBaseMode) ?? reviewBaseModeOptions[0]
+    const currentReviewAppearanceLabel = reviewAppearanceOptions.find((opt) => opt.value === reviewAppearance)?.label ?? 'App default'
 
     const handleLocaleChange = (newLocale: Locale) => {
         setLocale(newLocale)
@@ -103,6 +117,11 @@ export default function SettingsPage() {
         setIsFontOpen(false)
     }
 
+    const handleReviewAppearanceChange = (pref: ReviewAppearancePreference) => {
+        setReviewAppearance(pref)
+        setIsReviewAppearanceOpen(false)
+    }
+
     const handleOpenFileShortcutKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
         event.preventDefault()
         const next = eventToShortcutLabel(event.nativeEvent)
@@ -114,7 +133,7 @@ export default function SettingsPage() {
 
     // Close dropdown when clicking outside
     useEffect(() => {
-        if (!isOpen && !isAppearanceOpen && !isFontOpen) return
+        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isReviewAppearanceOpen) return
 
         const handleClickOutside = (event: MouseEvent) => {
             if (isOpen && containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -126,27 +145,35 @@ export default function SettingsPage() {
             if (isFontOpen && fontContainerRef.current && !fontContainerRef.current.contains(event.target as Node)) {
                 setIsFontOpen(false)
             }
+            if (
+                isReviewAppearanceOpen &&
+                reviewAppearanceContainerRef.current &&
+                !reviewAppearanceContainerRef.current.contains(event.target as Node)
+            ) {
+                setIsReviewAppearanceOpen(false)
+            }
         }
 
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [isOpen, isAppearanceOpen, isFontOpen])
+    }, [isOpen, isAppearanceOpen, isFontOpen, isReviewAppearanceOpen])
 
     // Close on escape key
     useEffect(() => {
-        if (!isOpen && !isAppearanceOpen && !isFontOpen) return
+        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isReviewAppearanceOpen) return
 
         const handleEscape = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 setIsOpen(false)
                 setIsAppearanceOpen(false)
                 setIsFontOpen(false)
+                setIsReviewAppearanceOpen(false)
             }
         }
 
         document.addEventListener('keydown', handleEscape)
         return () => document.removeEventListener('keydown', handleEscape)
-    }, [isOpen, isAppearanceOpen, isFontOpen])
+    }, [isOpen, isAppearanceOpen, isFontOpen, isReviewAppearanceOpen])
 
     return (
         <div className="flex h-full flex-col">
@@ -342,6 +369,143 @@ export default function SettingsPage() {
                                 aria-label="Open file shortcut"
                             />
                         </div>
+                        <div className="flex w-full items-center justify-between gap-4 px-3 py-3">
+                            <div className="min-w-0">
+                                <div className="text-[var(--app-fg)]">Auto-scroll</div>
+                                <div className="text-xs text-[var(--app-hint)]">Scroll gesture activates tmux copy-mode automatically</div>
+                            </div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={autoScroll}
+                                onClick={() => setAutoScroll(!autoScroll)}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                                    autoScroll
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)]'
+                                        : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
+                                }`}
+                            >
+                                <span
+                                    className={`pointer-events-none inline-block h-5 w-5 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] shadow-sm transition-transform ${
+                                        autoScroll ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
+                        </div>
+                        <div className="flex w-full items-center justify-between gap-4 px-3 py-3">
+                            <div className="min-w-0">
+                                <div className="text-[var(--app-fg)]">Copy on selection</div>
+                                <div className="text-xs text-[var(--app-hint)]">Copy highlighted terminal text automatically</div>
+                            </div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={copyOnSelect}
+                                onClick={() => setCopyOnSelect(!copyOnSelect)}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                                    copyOnSelect
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)]'
+                                        : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
+                                }`}
+                            >
+                                <span
+                                    className={`pointer-events-none inline-block h-5 w-5 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] shadow-sm transition-transform ${
+                                        copyOnSelect ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="border-b border-[var(--app-divider)]">
+                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
+                            Review
+                        </div>
+                        <div ref={reviewAppearanceContainerRef} className="relative border-b border-[var(--app-divider)]">
+                            <button
+                                type="button"
+                                onClick={() => setIsReviewAppearanceOpen(!isReviewAppearanceOpen)}
+                                className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                aria-expanded={isReviewAppearanceOpen}
+                                aria-haspopup="listbox"
+                            >
+                                <span className="text-[var(--app-fg)]">Review appearance</span>
+                                <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <span>{currentReviewAppearanceLabel}</span>
+                                    <ChevronDownIcon className={`transition-transform ${isReviewAppearanceOpen ? 'rotate-180' : ''}`} />
+                                </span>
+                            </button>
+
+                            {isReviewAppearanceOpen && (
+                                <div
+                                    className="absolute right-3 top-full mt-1 min-w-[160px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg overflow-hidden z-50"
+                                    role="listbox"
+                                    aria-label="Review appearance"
+                                >
+                                    {reviewAppearanceOptions.map((option) => {
+                                        const isSelected = reviewAppearance === option.value
+                                        return (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                role="option"
+                                                aria-selected={isSelected}
+                                                onClick={() => handleReviewAppearanceChange(option.value)}
+                                                className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                                    isSelected
+                                                        ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                                                }`}
+                                            >
+                                                <span>{option.label}</span>
+                                                {isSelected && (
+                                                    <span className="ml-2 text-[var(--app-link)]">
+                                                        <CheckIcon />
+                                                    </span>
+                                                )}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                        <div className="px-3 py-3">
+                            <div className="text-[var(--app-fg)]">Branch diff base</div>
+                            <div className="mt-1 text-xs text-[var(--app-hint)]">
+                                Choose what branch-review mode compares against
+                            </div>
+                            <div className="mt-3 space-y-2">
+                                {reviewBaseModeOptions.map((option) => {
+                                    const checked = reviewBaseMode === option.value
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setReviewBaseMode(option.value)}
+                                            className={`flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
+                                                checked
+                                                    ? 'border-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                    : 'border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]'
+                                            }`}
+                                            aria-pressed={checked}
+                                        >
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium text-[var(--app-fg)]">{option.label}</div>
+                                                <div className="mt-1 text-xs text-[var(--app-hint)]">{option.description}</div>
+                                            </div>
+                                            {checked ? (
+                                                <span className="shrink-0 text-[var(--app-link)]" aria-hidden="true">
+                                                    <CheckIcon />
+                                                </span>
+                                            ) : null}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                            <div className="mt-2 text-[11px] text-[var(--app-hint)]">
+                                Current: {currentReviewBaseMode.label}
+                            </div>
+                        </div>
                     </div>
 
                     {/* About section */}
@@ -352,12 +516,12 @@ export default function SettingsPage() {
                         <div className="flex w-full items-center justify-between px-3 py-3">
                             <span className="text-[var(--app-fg)]">{t('settings.about.website')}</span>
                             <a
-                                href="https://maglev.run"
+                                href="https://github.com/bmarimuthu-nv/Maglev"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-[var(--app-link)] hover:underline"
                             >
-                                maglev.run
+                                github.com/bmarimuthu-nv/Maglev
                             </a>
                         </div>
                         <div className="flex w-full items-center justify-between px-3 py-3">

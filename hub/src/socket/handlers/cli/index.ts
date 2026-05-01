@@ -39,10 +39,11 @@ export type CliHandlersDeps = {
     onSessionEnd?: (payload: SessionEndPayload) => void
     onMachineAlive?: (payload: MachineAlivePayload) => void
     onWebappEvent?: (event: SyncEvent) => void
+    onTerminalSnapshotUpdated?: (payload: { sessionId: string; terminalId: string; namespace: string }) => void
 }
 
 export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlersDeps): void {
-    const { io, store, rpcRegistry, terminalRegistry, terminalStateCache, onSessionAlive, onSessionEnd, onMachineAlive, onWebappEvent } = deps
+    const { io, store, rpcRegistry, terminalRegistry, terminalStateCache, onSessionAlive, onSessionEnd, onMachineAlive, onWebappEvent, onTerminalSnapshotUpdated } = deps
     const terminalNamespace = io.of('/terminal')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
 
@@ -118,7 +119,10 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         terminalStateCache,
         terminalNamespace,
         resolveSessionAccess,
-        emitAccessError
+        emitAccessError,
+        onTerminalSnapshotUpdated: namespace
+            ? (payload) => onTerminalSnapshotUpdated?.({ ...payload, namespace })
+            : undefined
     })
 
     socket.on('ping', (callback: () => void) => {

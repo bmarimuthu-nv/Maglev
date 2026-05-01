@@ -28,10 +28,13 @@ import { MachineCache, type Machine } from './machineCache'
 import {
     RpcGateway,
     type RpcCommandResponse,
+    type RpcDetectedWorktree,
     type RpcDeleteUploadResponse,
     type RpcListDirectoryResponse,
+    type RpcListWorktreesResponse,
     type RpcPathExistsResponse,
     type RpcReadFileResponse,
+    type RpcReviewBaseMode,
     type RpcReviewMode,
     type RpcReviewSummaryResponse,
     type RpcWriteFileResponse,
@@ -39,17 +42,25 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { TerminalStateCache } from './terminalStateCache'
+import {
+    clearTerminalSupervisionBridge,
+    resolveTerminalSupervisionBridgeLocation,
+    writeTerminalSupervisionBridge
+} from '../supervision/bridge'
 
 export type { Session, SyncEvent } from '@maglev/protocol/types'
 export type { Machine } from './machineCache'
 export type { SyncEventListener } from './eventPublisher'
 export type {
     RpcCommandResponse,
+    RpcDetectedWorktree,
     RpcDeleteUploadResponse,
     RpcListDirectoryResponse,
+    RpcListWorktreesResponse,
     RpcPathExistsResponse,
     RpcReadFileResponse,
     RpcReviewMode,
+    RpcReviewBaseMode,
     RpcReviewSummaryResponse,
     RpcWriteFileResponse,
     RpcUploadFileResponse
@@ -89,12 +100,15 @@ export class SyncEngine {
             boundMachineId?: string | null
             terminalStateCache?: TerminalStateCache
             terminalSupervisionHumanOverrideMs?: number
+            staleSessionArchiveMs?: number
         }
     ) {
         this.store = store
         this.io = io
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
-        this.sessionCache = new SessionCache(store, this.eventPublisher)
+        this.sessionCache = new SessionCache(store, this.eventPublisher, {
+            staleSessionArchiveMs: options?.staleSessionArchiveMs
+        })
         this.machineCache = new MachineCache(store, this.eventPublisher)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.terminalStateCache = options?.terminalStateCache ?? new TerminalStateCache()
@@ -135,8 +149,16 @@ export class SyncEngine {
         return this.sessionCache.getSessions()
     }
 
+    getSessionCount(): number {
+        return this.sessionCache.getSessions().length
+    }
+
     getSessionsByNamespace(namespace: string): Session[] {
         return this.sessionCache.getSessionsByNamespace(namespace)
+    }
+
+    getSessionCountByNamespace(namespace: string): number {
+        return this.sessionCache.getSessionsByNamespace(namespace).length
     }
 
     getSession(sessionId: string): Session | undefined {
@@ -163,12 +185,28 @@ export class SyncEngine {
         return this.sessionCache.getActiveSessions()
     }
 
+    getActiveSessionCount(): number {
+        return this.sessionCache.getActiveSessions().length
+    }
+
+    getActiveSessionCountByNamespace(namespace: string): number {
+        return this.sessionCache.getSessionsByNamespace(namespace).filter((session) => session.active).length
+    }
+
     getMachines(): Machine[] {
         return this.machineCache.getMachines()
     }
 
+    getMachineCount(): number {
+        return this.machineCache.getMachines().length
+    }
+
     getMachinesByNamespace(namespace: string): Machine[] {
         return this.machineCache.getMachinesByNamespace(namespace)
+    }
+
+    getMachineCountByNamespace(namespace: string): number {
+        return this.machineCache.getMachinesByNamespace(namespace).length
     }
 
     getMachine(machineId: string): Machine | undefined {
@@ -183,8 +221,16 @@ export class SyncEngine {
         return this.machineCache.getOnlineMachines()
     }
 
+    getOnlineMachineCount(): number {
+        return this.machineCache.getOnlineMachines().length
+    }
+
     getOnlineMachinesByNamespace(namespace: string): Machine[] {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
+    }
+
+    getOnlineMachineCountByNamespace(namespace: string): number {
+        return this.machineCache.getOnlineMachinesByNamespace(namespace).length
     }
 
     getBoundMachine(namespace: string): Machine | undefined {
@@ -320,7 +366,7 @@ export class SyncEngine {
 
         const current = this.getRequiredSession(sessionId, namespace)
         const replacement = this.getRequiredSession(replacementSessionId, namespace)
-        this.assertTerminalSupervisionEligible(replacement, current.metadata?.terminalPair?.role === 'worker' ? 'worker' : 'orchestrator')
+        this.assertTerminalSupervisionEligible(replacement, current.metadata?.terminalPair?.role === 'worker' ? 'worker' : 'supervisor')
 
         if (replacement.id === current.id) {
             return pair
@@ -476,13 +522,47 @@ export class SyncEngine {
     }
 
     async renameSession(sessionId: string, name: string): Promise<void> {
-        await this.sessionCache.renameSession(sessionId, name)
+        await this.updateSessionDetails(sessionId, { name })
+    }
+
+    async updateSessionDetails(sessionId: string, updates: { name?: string; directory?: string }): Promise<void> {
+        await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => {
+            const next = { ...metadata }
+            if (updates.name !== undefined) {
+                next.name = updates.name
+            }
+            if (updates.directory !== undefined) {
+                if (metadata.worktree) {
+                    next.worktree = {
+                        ...metadata.worktree,
+                        basePath: updates.directory
+                    }
+                } else {
+                    next.path = updates.directory
+                }
+            }
+            return next
+        })
     }
 
     async setSessionNotesPath(sessionId: string, notesPath: string): Promise<void> {
         await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
             ...metadata,
             notesPath
+        }))
+    }
+
+    async setParentSessionId(sessionId: string, parentSessionId: string | null): Promise<void> {
+        await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
+            ...metadata,
+            parentSessionId: parentSessionId ?? undefined
+        }))
+    }
+
+    async setChildRole(sessionId: string, childRole: 'review-terminal' | 'split-terminal' | null): Promise<void> {
+        await this.sessionCache.updateSessionMetadataFields(sessionId, (metadata) => ({
+            ...metadata,
+            childRole: childRole ?? undefined
         }))
     }
 
@@ -516,6 +596,27 @@ export class SyncEngine {
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
         this.terminalStateCache.removeSession(sessionId)
+    }
+
+    async closeSession(sessionId: string): Promise<void> {
+        const session = this.getSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        if (session.metadata?.flavor === 'shell' && (session.metadata.pinned || session.metadata.autoRespawn)) {
+            await this.setShellSessionOptions(sessionId, {
+                pinned: false,
+                autoRespawn: false
+            })
+        }
+
+        const refreshed = this.getSession(sessionId)
+        if (refreshed?.active) {
+            await this.archiveSession(sessionId)
+        }
+
+        await this.deleteSession(sessionId)
     }
 
     async applySessionConfig(
@@ -624,11 +725,65 @@ export class SyncEngine {
         }
 
         if (spawnResult.sessionId !== access.sessionId) {
+            const previousRespawnIds = metadata.respawnedFromSessionIds ?? []
+            const respawnedFromSessionIds = Array.from(new Set([
+                ...previousRespawnIds,
+                access.sessionId
+            ]))
+            await this.sessionCache.updateSessionMetadataFields(spawnResult.sessionId, (nextMetadata) => ({
+                ...nextMetadata,
+                respawnedFromSessionId: access.sessionId,
+                respawnedFromSessionIds
+            }))
+
             try {
                 await this.sessionCache.mergeSessions(access.sessionId, spawnResult.sessionId, namespace)
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Failed to merge respawned shell session'
                 return { type: 'error', message, code: 'resume_failed' }
+            }
+
+            // Re-link supervision peers to the new session ID
+            if (metadata.terminalSupervision?.peerSessionId) {
+                const peerSessionId = metadata.terminalSupervision.peerSessionId
+                try {
+                    await this.sessionCache.updateSessionMetadataFields(peerSessionId, (peerMeta) => {
+                        if (!peerMeta.terminalSupervision || peerMeta.terminalSupervision.peerSessionId !== access.sessionId) {
+                            return peerMeta
+                        }
+                        return {
+                            ...peerMeta,
+                            terminalSupervision: {
+                                ...peerMeta.terminalSupervision,
+                                peerSessionId: spawnResult.sessionId
+                            }
+                        }
+                    })
+                } catch {
+                    // Best-effort: supervision link may be stale but won't crash
+                }
+            }
+
+            // Update terminal pair references to the new session ID
+            const pairLink = metadata.terminalPair as { pairId?: string; role?: string } | undefined
+            if (pairLink?.pairId) {
+                try {
+                    const pair = this.getTerminalPair(pairLink.pairId, namespace)
+                    if (pair) {
+                        const field = pairLink.role === 'worker' ? 'workerSessionId' : 'supervisorSessionId'
+                        if ((pair as Record<string, unknown>)[field] === access.sessionId) {
+                            await this.persistTerminalPair({
+                                ...pair,
+                                [field]: spawnResult.sessionId
+                            })
+                            await this.syncTerminalPairSessionMetadata(
+                                { ...pair, [field]: spawnResult.sessionId }
+                            )
+                        }
+                    }
+                } catch {
+                    // Best-effort: pair link may be stale but won't crash
+                }
             }
         }
 
@@ -668,40 +823,61 @@ export class SyncEngine {
         }
     }
 
-    async attachTerminalSupervision(orchestratorSessionId: string, workerSessionId: string, namespace: string): Promise<void> {
-        if (orchestratorSessionId === workerSessionId) {
-            throw new Error('Worker and orchestrator must be different sessions')
+    async attachTerminalSupervision(supervisorSessionId: string, workerSessionId: string, namespace: string): Promise<void> {
+        if (supervisorSessionId === workerSessionId) {
+            throw new Error('Worker and supervisor must be different sessions')
         }
 
-        const orchestrator = this.getRequiredSession(orchestratorSessionId, namespace)
+        const supervisor = this.getRequiredSession(supervisorSessionId, namespace)
         const worker = this.getRequiredSession(workerSessionId, namespace)
 
-        this.assertTerminalSupervisionEligible(orchestrator, 'orchestrator')
+        this.assertTerminalSupervisionEligible(supervisor, 'supervisor')
         this.assertTerminalSupervisionEligible(worker, 'worker')
-        this.assertTerminalSupervisionAvailable(orchestrator)
+        this.assertTerminalSupervisionAvailable(supervisor)
         this.assertTerminalSupervisionAvailable(worker)
 
-        const event = this.createTerminalSupervisionEvent('attached', 'system', `Attached orchestrator ${orchestrator.id.slice(0, 8)} to worker ${worker.id.slice(0, 8)}`)
+        const event = this.createTerminalSupervisionEvent('attached', 'system', `Attached supervisor ${supervisor.id.slice(0, 8)} to worker ${worker.id.slice(0, 8)}`)
+        const originalSupervisorSupervision = this.cloneTerminalSupervision(supervisor.metadata?.terminalSupervision)
 
-        await this.sessionCache.updateSessionMetadataFields(orchestrator.id, (metadata) => ({
-            ...metadata,
-            terminalSupervision: {
-                role: 'orchestrator',
-                peerSessionId: worker.id,
-                state: 'active',
-                events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
-            }
-        }))
+        await this.updateTerminalSupervisionPair({
+            primarySessionId: supervisor.id,
+            secondarySessionId: worker.id,
+            primaryRole: 'supervisor',
+            secondaryRole: 'worker',
+            failureMessage: 'Failed to attach terminal supervision consistently.',
+            applyPrimary: (metadata) => {
+                this.assertTerminalSupervisionAvailableForMetadata(metadata)
+                return {
+                    ...metadata,
+                    terminalSupervision: {
+                        role: 'supervisor',
+                        peerSessionId: worker.id,
+                        state: 'active',
+                        events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
+                    }
+                }
+            },
+            applySecondary: (metadata) => {
+                this.assertTerminalSupervisionAvailableForMetadata(metadata)
+                return {
+                    ...metadata,
+                    terminalSupervision: {
+                        role: 'worker',
+                        peerSessionId: supervisor.id,
+                        state: 'active',
+                        events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
+                    }
+                }
+            },
+            rollbackPrimary: (metadata) =>
+                this.restoreTerminalSupervision(metadata, {
+                    peerSessionId: worker.id,
+                    role: 'supervisor',
+                    state: 'active'
+                }, originalSupervisorSupervision)
+        })
 
-        await this.sessionCache.updateSessionMetadataFields(worker.id, (metadata) => ({
-            ...metadata,
-            terminalSupervision: {
-                role: 'worker',
-                peerSessionId: orchestrator.id,
-                state: 'active',
-                events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
-            }
-        }))
+        await this.syncTerminalSupervisionBridge(supervisor.id, namespace)
     }
 
     async setTerminalSupervisionPaused(sessionId: string, paused: boolean, namespace: string): Promise<void> {
@@ -718,19 +894,33 @@ export class SyncEngine {
             'human',
             paused ? 'Paused terminal supervision' : 'Resumed terminal supervision'
         )
+        const originalSessionSupervision = this.cloneTerminalSupervision(session.metadata?.terminalSupervision)
 
-        await this.sessionCache.updateSessionMetadataFields(session.id, (metadata) =>
-            this.setTerminalSupervisionState(metadata, peer.id, pairing.role, nextState, event)
-        )
-        await this.sessionCache.updateSessionMetadataFields(peer.id, (metadata) =>
-            this.setTerminalSupervisionState(
-                metadata,
-                session.id,
-                metadata.terminalSupervision?.role === 'worker' ? 'worker' : 'orchestrator',
-                nextState,
-                event
-            )
-        )
+        await this.updateTerminalSupervisionPair({
+            primarySessionId: session.id,
+            secondarySessionId: peer.id,
+            primaryRole: pairing.role,
+            secondaryRole: pairing.role === 'worker' ? 'supervisor' : 'worker',
+            failureMessage: 'Failed to update terminal supervision state consistently.',
+            applyPrimary: (metadata) =>
+                this.setTerminalSupervisionState(metadata, peer.id, pairing.role, nextState, event),
+            applySecondary: (metadata) =>
+                this.setTerminalSupervisionState(
+                    metadata,
+                    session.id,
+                    pairing.role === 'worker' ? 'supervisor' : 'worker',
+                    nextState,
+                    event
+                ),
+            rollbackPrimary: (metadata) =>
+                this.restoreTerminalSupervision(metadata, {
+                    peerSessionId: peer.id,
+                    role: pairing.role,
+                    state: nextState
+                }, originalSessionSupervision)
+        })
+
+        await this.syncTerminalSupervisionBridge(session.id, namespace)
     }
 
     async detachTerminalSupervision(sessionId: string, namespace: string): Promise<void> {
@@ -740,19 +930,42 @@ export class SyncEngine {
             return
         }
 
+        const supervisor = pairing.role === 'supervisor'
+            ? session
+            : this.getSessionByNamespace(pairing.peerSessionId, namespace) ?? null
+        const supervisorWorkspacePath = supervisor?.metadata?.path?.trim() || null
+        const supervisorBridgeLocation = supervisor && supervisorWorkspacePath
+            ? await resolveTerminalSupervisionBridgeLocation(supervisorWorkspacePath, supervisor.id)
+            : null
+
         const peer = this.getSessionByNamespace(pairing.peerSessionId, namespace)
-        await this.sessionCache.updateSessionMetadataFields(session.id, (metadata) => {
-            const { terminalSupervision, ...rest } = metadata
-            return rest
-        })
         if (peer) {
-            await this.sessionCache.updateSessionMetadataFields(peer.id, (metadata) => {
-                const { terminalSupervision, ...rest } = metadata
-                return rest
+            const originalSessionSupervision = this.cloneTerminalSupervision(session.metadata?.terminalSupervision)
+            await this.updateTerminalSupervisionPair({
+                primarySessionId: session.id,
+                secondarySessionId: peer.id,
+                primaryRole: pairing.role,
+                secondaryRole: pairing.role === 'worker' ? 'supervisor' : 'worker',
+                failureMessage: 'Failed to detach terminal supervision consistently.',
+                applyPrimary: (metadata) => this.clearTerminalSupervision(metadata, peer.id, pairing.role),
+                applySecondary: (metadata) =>
+                    this.clearTerminalSupervision(
+                        metadata,
+                        session.id,
+                        pairing.role === 'worker' ? 'supervisor' : 'worker'
+                    ),
+                rollbackPrimary: (metadata) => this.restoreClearedTerminalSupervision(metadata, originalSessionSupervision)
             })
+        } else {
+            await this.sessionCache.updateSessionMetadataFields(session.id, (metadata) =>
+                this.clearTerminalSupervision(metadata, pairing.peerSessionId, pairing.role)
+            )
         }
         this.recentHumanTerminalActivityBySessionId.delete(session.id)
         this.recentHumanTerminalActivityBySessionId.delete(pairing.peerSessionId)
+        if (supervisorBridgeLocation) {
+            await clearTerminalSupervisionBridge(supervisorBridgeLocation)
+        }
     }
 
     noteHumanTerminalInput(sessionId: string): void {
@@ -767,7 +980,7 @@ export class SyncEngine {
         session: Session
         peer: Session
         worker: Session
-        orchestrator: Session
+        supervisor: Session
         snapshot: ReturnType<TerminalStateCache['getSnapshot']>
         events: TerminalSupervisionEvent[]
     } {
@@ -779,7 +992,7 @@ export class SyncEngine {
 
         const peer = this.getRequiredSession(pairing.peerSessionId, namespace)
         const worker = pairing.role === 'worker' ? session : peer
-        const orchestrator = pairing.role === 'orchestrator' ? session : peer
+        const supervisor = pairing.role === 'supervisor' ? session : peer
         const workerTerminalId = worker.metadata?.shellTerminalId
         const snapshot = workerTerminalId ? this.terminalStateCache.getSnapshot(worker.id, workerTerminalId) : null
 
@@ -787,33 +1000,33 @@ export class SyncEngine {
             session,
             peer,
             worker,
-            orchestrator,
+            supervisor,
             snapshot,
             events: worker.metadata?.terminalSupervision?.events ?? session.metadata?.terminalSupervision?.events ?? []
         }
     }
 
-    async writeTerminalSupervisionInput(orchestratorSessionId: string, data: string, namespace: string): Promise<{
+    async writeTerminalSupervisionInput(supervisorSessionId: string, data: string, namespace: string): Promise<{
         delivered: boolean
         blockedReason?: 'paused' | 'human_override'
     }> {
-        const orchestrator = this.getRequiredSession(orchestratorSessionId, namespace)
-        const pairing = orchestrator.metadata?.terminalSupervision
-        if (!pairing || pairing.role !== 'orchestrator') {
-            throw new Error('Session is not an orchestrator')
+        const supervisor = this.getRequiredSession(supervisorSessionId, namespace)
+        const pairing = supervisor.metadata?.terminalSupervision
+        if (!pairing || pairing.role !== 'supervisor') {
+            throw new Error('Session is not a supervisor')
         }
 
         const worker = this.getRequiredSession(pairing.peerSessionId, namespace)
         this.assertTerminalSupervisionEligible(worker, 'worker')
 
         if (pairing.state === 'paused' || worker.metadata?.terminalSupervision?.state === 'paused') {
-            await this.recordTerminalSupervisionEvent(orchestrator, worker, 'write_blocked', 'orchestrator', 'Blocked orchestrator input because supervision is paused')
+            await this.recordTerminalSupervisionEvent(supervisor, worker, 'write_blocked', 'supervisor', 'Blocked supervisor input because supervision is paused')
             return { delivered: false, blockedReason: 'paused' }
         }
 
         const lastHumanActivityAt = this.recentHumanTerminalActivityBySessionId.get(worker.id) ?? 0
         if (Date.now() - lastHumanActivityAt < this.terminalSupervisionHumanOverrideMs) {
-            await this.recordTerminalSupervisionEvent(orchestrator, worker, 'write_blocked', 'orchestrator', 'Blocked orchestrator input because the human is actively using the worker terminal')
+            await this.recordTerminalSupervisionEvent(supervisor, worker, 'write_blocked', 'supervisor', 'Blocked supervisor input because the human is actively using the worker terminal')
             return { delivered: false, blockedReason: 'human_override' }
         }
 
@@ -832,12 +1045,44 @@ export class SyncEngine {
             terminalId,
             data
         })
-        await this.recordTerminalSupervisionEvent(orchestrator, worker, 'write_accepted', 'orchestrator', 'Sent orchestrator input to worker terminal')
+        await this.recordTerminalSupervisionEvent(supervisor, worker, 'write_accepted', 'supervisor', 'Sent supervisor input to worker terminal')
         return { delivered: true }
     }
 
     getTerminalSnapshot(sessionId: string, terminalId: string) {
         return this.terminalStateCache.getSnapshot(sessionId, terminalId)
+    }
+
+    async syncTerminalSupervisionBridge(sessionId: string, namespace: string): Promise<void> {
+        const session = this.getSessionByNamespace(sessionId, namespace)
+        const pairing = session?.metadata?.terminalSupervision
+        if (!session || !pairing) {
+            return
+        }
+
+        const peer = this.getSessionByNamespace(pairing.peerSessionId, namespace)
+        if (!peer?.metadata?.terminalSupervision) {
+            return
+        }
+
+        const supervisor = pairing.role === 'supervisor' ? session : peer
+        const worker = pairing.role === 'worker' ? session : peer
+        const supervisorWorkspacePath = supervisor.metadata?.path?.trim()
+        if (!supervisorWorkspacePath) {
+            return
+        }
+
+        const location = await resolveTerminalSupervisionBridgeLocation(supervisorWorkspacePath, supervisor.id)
+        const workerTerminalId = worker.metadata?.shellTerminalId ?? null
+        const snapshot = workerTerminalId ? this.terminalStateCache.getSnapshot(worker.id, workerTerminalId) : null
+
+        await writeTerminalSupervisionBridge(location, {
+            supervisorSessionId: supervisor.id,
+            workerSessionId: worker.id,
+            supervisionState: supervisor.metadata?.terminalSupervision?.state ?? 'active',
+            workerTerminalId,
+            snapshot
+        })
     }
 
     private getRequiredSession(sessionId: string, namespace: string): Session {
@@ -848,9 +1093,9 @@ export class SyncEngine {
         return session
     }
 
-    private assertTerminalSupervisionEligible(session: Session, role: 'worker' | 'orchestrator'): void {
+    private assertTerminalSupervisionEligible(session: Session, role: 'worker' | 'supervisor'): void {
         if (!session.metadata?.shellTerminalId || session.metadata.shellTerminalState !== 'ready') {
-            throw new Error(`${role === 'worker' ? 'Worker' : 'Orchestrator'} terminal is not ready`)
+            throw new Error(`${role === 'worker' ? 'Worker' : 'Supervisor'} terminal is not ready`)
         }
     }
 
@@ -889,6 +1134,7 @@ export class SyncEngine {
         state: TerminalSupervision['state'],
         event: TerminalSupervisionEvent
     ): NonNullable<Metadata> {
+        this.requireTerminalSupervisionMatch(metadata, peerSessionId, role)
         return {
             ...metadata,
             terminalSupervision: {
@@ -901,27 +1147,149 @@ export class SyncEngine {
     }
 
     private async recordTerminalSupervisionEvent(
-        orchestrator: Session,
+        supervisor: Session,
         worker: Session,
         type: TerminalSupervisionEvent['type'],
         actor: TerminalSupervisionEvent['actor'],
         message: string
     ): Promise<void> {
         const event = this.createTerminalSupervisionEvent(type, actor, message)
-        await this.sessionCache.updateSessionMetadataFields(orchestrator.id, (metadata) => ({
+        const originalSupervisorSupervision = this.cloneTerminalSupervision(supervisor.metadata?.terminalSupervision)
+
+        await this.updateTerminalSupervisionPair({
+            primarySessionId: supervisor.id,
+            secondarySessionId: worker.id,
+            primaryRole: 'supervisor',
+            secondaryRole: 'worker',
+            failureMessage: 'Failed to record terminal supervision event consistently.',
+            applyPrimary: (metadata) => this.appendTerminalSupervisionEventToMetadata(metadata, worker.id, 'supervisor', event),
+            applySecondary: (metadata) => this.appendTerminalSupervisionEventToMetadata(metadata, supervisor.id, 'worker', event),
+            rollbackPrimary: (metadata) =>
+                this.restoreTerminalSupervision(metadata, {
+                    peerSessionId: worker.id,
+                    role: 'supervisor'
+                }, originalSupervisorSupervision)
+        })
+    }
+
+    private async updateTerminalSupervisionPair(options: {
+        primarySessionId: string
+        secondarySessionId: string
+        primaryRole: TerminalSupervision['role']
+        secondaryRole: TerminalSupervision['role']
+        failureMessage: string
+        applyPrimary: (metadata: NonNullable<Metadata>) => NonNullable<Metadata>
+        applySecondary: (metadata: NonNullable<Metadata>) => NonNullable<Metadata>
+        rollbackPrimary: (metadata: NonNullable<Metadata>) => NonNullable<Metadata>
+    }): Promise<void> {
+        await this.sessionCache.updateSessionMetadataFields(options.primarySessionId, options.applyPrimary)
+        try {
+            await this.sessionCache.updateSessionMetadataFields(options.secondarySessionId, options.applySecondary)
+        } catch (error) {
+            try {
+                await this.sessionCache.updateSessionMetadataFields(options.primarySessionId, options.rollbackPrimary)
+            } catch (rollbackError) {
+                throw new Error(`${options.failureMessage} Partial update could not be rolled back: ${this.toErrorMessage(rollbackError)}`)
+            }
+            throw new Error(`${options.failureMessage} Partial update was rolled back: ${this.toErrorMessage(error)}`)
+        }
+    }
+
+    private assertTerminalSupervisionAvailableForMetadata(metadata: NonNullable<Metadata>): void {
+        if (metadata.terminalSupervision) {
+            throw new Error('Session is already paired')
+        }
+    }
+
+    private requireTerminalSupervisionMatch(
+        metadata: NonNullable<Metadata>,
+        peerSessionId: string,
+        role: TerminalSupervision['role']
+    ): TerminalSupervision {
+        const supervision = metadata.terminalSupervision
+        if (!supervision || supervision.peerSessionId !== peerSessionId || supervision.role !== role) {
+            throw new Error('Terminal supervision changed during update')
+        }
+        return supervision
+    }
+
+    private clearTerminalSupervision(
+        metadata: NonNullable<Metadata>,
+        peerSessionId: string,
+        role: TerminalSupervision['role']
+    ): NonNullable<Metadata> {
+        this.requireTerminalSupervisionMatch(metadata, peerSessionId, role)
+        const { terminalSupervision, ...rest } = metadata
+        return rest
+    }
+
+    private restoreClearedTerminalSupervision(
+        metadata: NonNullable<Metadata>,
+        original: TerminalSupervision | undefined
+    ): NonNullable<Metadata> {
+        if (metadata.terminalSupervision) {
+            throw new Error('Terminal supervision changed during rollback')
+        }
+        if (!original) {
+            return metadata
+        }
+        return {
             ...metadata,
-            terminalSupervision: metadata.terminalSupervision ? {
-                ...metadata.terminalSupervision,
-                events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
-            } : metadata.terminalSupervision
-        }))
-        await this.sessionCache.updateSessionMetadataFields(worker.id, (metadata) => ({
+            terminalSupervision: this.cloneTerminalSupervision(original)
+        }
+    }
+
+    private restoreTerminalSupervision(
+        metadata: NonNullable<Metadata>,
+        expected: {
+            peerSessionId: string
+            role: TerminalSupervision['role']
+            state?: TerminalSupervision['state']
+        },
+        original: TerminalSupervision | undefined
+    ): NonNullable<Metadata> {
+        const supervision = this.requireTerminalSupervisionMatch(metadata, expected.peerSessionId, expected.role)
+        if (expected.state && supervision.state !== expected.state) {
+            throw new Error('Terminal supervision changed during rollback')
+        }
+        if (!original) {
+            const { terminalSupervision, ...rest } = metadata
+            return rest
+        }
+        return {
             ...metadata,
-            terminalSupervision: metadata.terminalSupervision ? {
-                ...metadata.terminalSupervision,
-                events: this.appendTerminalSupervisionEvent(metadata.terminalSupervision, event)
-            } : metadata.terminalSupervision
-        }))
+            terminalSupervision: this.cloneTerminalSupervision(original)
+        }
+    }
+
+    private appendTerminalSupervisionEventToMetadata(
+        metadata: NonNullable<Metadata>,
+        peerSessionId: string,
+        role: TerminalSupervision['role'],
+        event: TerminalSupervisionEvent
+    ): NonNullable<Metadata> {
+        const supervision = this.requireTerminalSupervisionMatch(metadata, peerSessionId, role)
+        return {
+            ...metadata,
+            terminalSupervision: {
+                ...supervision,
+                events: this.appendTerminalSupervisionEvent(supervision, event)
+            }
+        }
+    }
+
+    private cloneTerminalSupervision(supervision: TerminalSupervision | undefined): TerminalSupervision | undefined {
+        if (!supervision) {
+            return undefined
+        }
+        return {
+            ...supervision,
+            events: [...(supervision.events ?? [])]
+        }
+    }
+
+    private toErrorMessage(error: unknown): string {
+        return error instanceof Error ? error.message : String(error)
     }
 
     private pickCliSocketForSession(sessionId: string, namespace: string) {
@@ -1227,6 +1595,14 @@ export class SyncEngine {
         return await this.rpcGateway.checkPathsExist(machine.id, paths)
     }
 
+    async listWorktreesForBoundMachine(namespace: string, paths: string[]): Promise<RpcDetectedWorktree[]> {
+        const machine = this.getBoundMachine(namespace)
+        if (!machine?.active) {
+            throw new Error('No machine online')
+        }
+        return await this.rpcGateway.listWorktrees(machine.id, paths)
+    }
+
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
         return await this.rpcGateway.getGitStatus(sessionId, cwd)
     }
@@ -1239,11 +1615,11 @@ export class SyncEngine {
         return await this.rpcGateway.getGitDiffFile(sessionId, options)
     }
 
-    async getReviewSummary(sessionId: string, options: { cwd?: string; mode: RpcReviewMode }): Promise<RpcReviewSummaryResponse> {
+    async getReviewSummary(sessionId: string, options: { cwd?: string; mode: RpcReviewMode; baseMode?: RpcReviewBaseMode }): Promise<RpcReviewSummaryResponse> {
         return await this.rpcGateway.getReviewSummary(sessionId, options)
     }
 
-    async getReviewFile(sessionId: string, options: { cwd?: string; filePath: string; mode: RpcReviewMode }): Promise<RpcCommandResponse> {
+    async getReviewFile(sessionId: string, options: { cwd?: string; filePath: string; mode: RpcReviewMode; baseMode?: RpcReviewBaseMode }): Promise<RpcCommandResponse> {
         return await this.rpcGateway.getReviewFile(sessionId, options)
     }
 

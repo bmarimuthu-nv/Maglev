@@ -131,6 +131,7 @@ const recentRegistry = new Map<string, RegisteredHub>()
 const socketHubMap = new Map<string, string>()
 const browserWsMap = new Map<string, ServerWebSocket<HubSocketData>>()
 const pendingRequests = new Map<string, {
+    targetClientId?: string
     resolve: (response: ProxyResponseMessage | ProxyStreamStartMessage) => void
     reject: (error: Error) => void
 }>()
@@ -499,6 +500,47 @@ function renderFolderRows(folders: HubLaunchFolder[]): string {
     }).join('\n')
 }
 
+function renderMaglevLogo(): string {
+    return `<svg class="maglev-logo" viewBox="0 0 512 512" aria-hidden="true">
+  <defs>
+    <linearGradient id="logoMLeft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1B4F72"/>
+      <stop offset="100%" stop-color="#2E86C1"/>
+    </linearGradient>
+    <linearGradient id="logoMRight" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2471A3"/>
+      <stop offset="100%" stop-color="#5DADE2"/>
+    </linearGradient>
+    <linearGradient id="logoTrainBody" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#154360"/>
+      <stop offset="40%" stop-color="#1F618D"/>
+      <stop offset="100%" stop-color="#2E86C1"/>
+    </linearGradient>
+    <linearGradient id="logoSwoosh1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2471A3"/>
+      <stop offset="100%" stop-color="#85C1E9"/>
+    </linearGradient>
+    <linearGradient id="logoSwoosh2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5DADE2"/>
+      <stop offset="100%" stop-color="#AED6F1"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <path d="M 198 68 L 218 80 L 198 92" fill="none" stroke="#1B4F72" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="224" y1="92" x2="244" y2="92" stroke="#1B4F72" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <path d="M 100 108 L 100 330 L 148 330 L 148 108 Z" fill="url(#logoMLeft)"/>
+  <path d="M 100 108 L 256 280 L 256 330 L 148 208 L 148 108 Z" fill="url(#logoMLeft)"/>
+  <path d="M 412 108 L 256 280 L 256 330 L 364 208 L 364 108 Z" fill="url(#logoMRight)"/>
+  <path d="M 364 108 L 412 108 L 412 330 L 364 330 Z" fill="url(#logoMRight)"/>
+  <path d="M 95 265 Q 105 250 130 242 L 200 228 L 380 205 Q 410 200 420 215 Q 425 225 415 235 L 380 242 L 200 260 L 130 268 Q 105 272 95 265 Z" fill="url(#logoTrainBody)" opacity="0.85"/>
+  <path d="M 180 237 L 370 213 Q 390 210 395 220 L 390 228 L 180 250 Z" fill="#85C1E9" opacity="0.5"/>
+  <path d="M 70 300 Q 160 330 256 335 Q 352 330 442 300" fill="none" stroke="url(#logoSwoosh1)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M 90 322 Q 170 355 256 360 Q 342 355 422 322" fill="none" stroke="url(#logoSwoosh2)" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M 115 340 Q 185 368 256 373 Q 327 368 397 340" fill="none" stroke="url(#logoSwoosh2)" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+</svg>`
+}
+
 function renderHubCard(hub: RegisteredHub, options?: { link?: boolean }): string {
     const link = options?.link !== false
     const details = [
@@ -520,9 +562,12 @@ function renderHubCard(hub: RegisteredHub, options?: { link?: boolean }): string
 
     return `<article class="hub-card">
   <div class="hub-card-header">
-    <div>
+    <div class="hub-card-title">
+      ${renderMaglevLogo()}
+      <div>
       <div class="hub-id">${htmlEscape(hub.hubId)}</div>
       <div class="hub-details">${htmlEscape(details)}</div>
+      </div>
     </div>
     <div class="hub-last-seen">last seen ${new Date(hub.lastSeenAt).toLocaleString()}</div>
   </div>
@@ -543,7 +588,7 @@ function renderHubListItems(hubs: RegisteredHub[], emptyText: string, options?: 
         : `<div class="hub-empty">${htmlEscape(emptyText)}</div>`
 }
 
-function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], recentHubs: RegisteredHub[]): string {
+function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], recentHubs: RegisteredHub[], session: BrokerUserSession): string {
     const activeHubItems = renderHubListItems(activeHubs, 'No active hubs registered.')
     const recentHubItems = renderHubListItems(recentHubs, 'No recent hubs recorded.', { link: false })
     const brokerHost = (() => {
@@ -559,7 +604,7 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>maglev server · ${htmlEscape(brokerHost)}</title>
+  <title>Maglev Server · ${htmlEscape(brokerHost)}</title>
   <style>
     :root {
       color-scheme: dark;
@@ -616,6 +661,38 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
       border-bottom: 1px solid var(--border);
       margin-bottom: 1.5rem;
     }
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .hero-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.6rem;
+      flex-shrink: 0;
+    }
+    .hero-user {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .logout-button {
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 0.6rem 0.95rem;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .logout-button:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(140, 168, 209, 0.28);
+    }
     .hero-grid {
       display: grid;
       gap: 0.75rem;
@@ -665,6 +742,21 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
       justify-content: space-between;
       gap: 1rem;
       align-items: flex-start;
+    }
+    .hub-card-title {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      min-width: 0;
+    }
+    .maglev-logo {
+      width: 2.6rem;
+      height: 2.6rem;
+      flex-shrink: 0;
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(125, 211, 252, 0.06));
+      padding: 0.28rem;
+      box-shadow: inset 0 0 0 1px rgba(140, 168, 209, 0.15);
     }
     .hub-id {
       font-size: 1.05rem;
@@ -758,6 +850,12 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
         padding: 1.2rem;
         border-radius: 18px;
       }
+      .hero-top {
+        flex-direction: column;
+      }
+      .hero-actions {
+        align-items: stretch;
+      }
       .hub-card-header {
         flex-direction: column;
       }
@@ -767,8 +865,16 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
 <body>
   <main>
     <section class="hero">
-      <h1>maglev server · ${htmlEscape(brokerHost)}</h1>
-      <p>Self-hosted control plane for remote hubs. Active cards show the launch folders and branch layout each hub was started with.</p>
+      <div class="hero-top">
+        <div>
+          <h1>Maglev Server · ${htmlEscape(brokerHost)}</h1>
+          <p>Self-hosted control plane for remote hubs. Active cards show the launch folders and branch layout each hub was started with.</p>
+        </div>
+        <div class="hero-actions">
+          <div class="hero-user">Signed in as <code>${htmlEscape(session.login)}</code></div>
+          <button id="logout" class="logout-button" type="button">Logout</button>
+        </div>
+      </div>
       <div class="hero-grid">
         <div class="hero-stat">
           <div class="hero-stat-label">Public URL</div>
@@ -795,6 +901,17 @@ function renderBrokerIndex(config: BrokerConfig, activeHubs: RegisteredHub[], re
       </div>
     </section>
   </main>
+  <script>
+    const logoutButton = document.getElementById('logout');
+    logoutButton?.addEventListener('click', async () => {
+      logoutButton.setAttribute('disabled', 'true');
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } finally {
+        window.location.replace('/');
+      }
+    });
+  </script>
 </body>
 </html>`
 }
@@ -806,7 +923,7 @@ function renderBrokerLogin(config: BrokerConfig, errorMessage?: string): string 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>maglev server login</title>
+  <title>Maglev Server Login</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; background: #f4f7fb; color: #102038; margin: 0; }
     main { max-width: 34rem; margin: 8vh auto; background: white; border-radius: 16px; box-shadow: 0 20px 70px rgba(16,32,56,.12); padding: 2rem; }
@@ -817,8 +934,8 @@ function renderBrokerLogin(config: BrokerConfig, errorMessage?: string): string 
 </head>
 <body>
   <main>
-    <h1>Sign in to broker</h1>
-    <p>Broker URL: <code>${htmlEscape(config.publicUrl)}</code></p>
+    <h1>Sign in to server</h1>
+    <p>Server URL: <code>${htmlEscape(config.publicUrl)}</code></p>
     ${escapedError}
     <button id="login">Continue with GitHub</button>
     <p id="status"></p>
@@ -864,7 +981,16 @@ function renderBrokerLogin(config: BrokerConfig, errorMessage?: string): string 
 </html>`
 }
 
-function createTimeoutPromise(requestId: string): Promise<ProxyResponseMessage | ProxyStreamStartMessage> {
+function rejectPendingRequestsForClient(clientId: string, reason: string): void {
+    for (const [requestId, pending] of Array.from(pendingRequests.entries())) {
+        if (pending.targetClientId !== clientId) {
+            continue
+        }
+        pending.reject(new Error(`${reason} (${requestId})`))
+    }
+}
+
+function createTimeoutPromise(requestId: string, targetClientId?: string): Promise<ProxyResponseMessage | ProxyStreamStartMessage> {
     return new Promise<ProxyResponseMessage | ProxyStreamStartMessage>((resolve, reject) => {
         const timeout = setTimeout(() => {
             pendingRequests.delete(requestId)
@@ -872,6 +998,7 @@ function createTimeoutPromise(requestId: string): Promise<ProxyResponseMessage |
         }, REQUEST_TIMEOUT_MS)
 
         pendingRequests.set(requestId, {
+            targetClientId,
             resolve: (response) => {
                 clearTimeout(timeout)
                 pendingRequests.delete(requestId)
@@ -914,8 +1041,18 @@ async function proxyHttpRequest(config: BrokerConfig, hub: RegisteredHub, req: R
         bodyBase64: bodyBytes.length > 0 ? encodeBase64(bodyBytes) : undefined
     }
 
-    hub.socket.send(JSON.stringify(message))
-    const response = await createTimeoutPromise(requestId)
+    // Register the pending request before sending so a fast hub response cannot race past us.
+    const responsePromise = createTimeoutPromise(requestId, hub.socket.data.clientId)
+    try {
+        hub.socket.send(JSON.stringify(message))
+    } catch (error) {
+        const pending = pendingRequests.get(requestId)
+        if (pending) {
+            pending.reject(error instanceof Error ? error : new Error(String(error)))
+        }
+        throw error
+    }
+    const response = await responsePromise
     const responseHeaders = new Headers(response.headers)
 
     if (response.type === 'proxy-stream-start') {
@@ -967,6 +1104,7 @@ export async function startBroker(): Promise<void> {
     const server = Bun.serve<HubSocketData>({
         hostname: config.host,
         port: config.port,
+        idleTimeout: 255, // seconds; max value — keeps SSE streams alive
         async fetch(req, serverRef) {
             const url = new URL(req.url)
             const brokerSession = await getBrokerSession(req)
@@ -1165,7 +1303,7 @@ export async function startBroker(): Promise<void> {
                         }
                     })
                 }
-                return new Response(renderBrokerIndex(config, listActiveHubs(), listRecentHubs()), {
+                return new Response(renderBrokerIndex(config, listActiveHubs(), listRecentHubs(), brokerSession), {
                     headers: {
                         'content-type': 'text/html; charset=utf-8'
                     }
@@ -1238,6 +1376,12 @@ export async function startBroker(): Promise<void> {
                             socket: ws,
                             launchFolders: payload.launchFolders ?? [],
                             configError: payload.configError ?? null
+                        }
+                        if (existing?.socket && existing.socket !== ws) {
+                            rejectPendingRequestsForClient(
+                                existing.socket.data.clientId,
+                                `Hub ${payload.hubId} reconnected before completing the request`
+                            )
                         }
                         registry.set(hub.hubId, hub)
                         rememberHub(hub)
@@ -1335,6 +1479,7 @@ export async function startBroker(): Promise<void> {
                 socketHubMap.delete(ws.data.clientId)
                 const hub = registry.get(hubId)
                 if (hub && hub.socket === ws) {
+                    rejectPendingRequestsForClient(ws.data.clientId, `Hub ${hubId} disconnected while waiting for response`)
                     hub.socket = null
                     hub.lastSeenAt = Date.now()
                     rememberHub(hub)

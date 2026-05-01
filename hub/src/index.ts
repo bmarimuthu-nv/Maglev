@@ -220,13 +220,17 @@ async function main() {
         onSessionAlive: (payload) => syncEngine?.handleSessionAlive(payload),
         onSessionEnd: (payload) => syncEngine?.handleSessionEnd(payload),
         onMachineAlive: (payload) => syncEngine?.handleMachineAlive(payload),
-        onSessionTerminalInput: (payload) => syncEngine?.noteHumanTerminalInput(payload.sessionId)
+        onSessionTerminalInput: (payload) => syncEngine?.noteHumanTerminalInput(payload.sessionId),
+        onTerminalSnapshotUpdated: (payload) => {
+            void syncEngine?.syncTerminalSupervisionBridge(payload.sessionId, payload.namespace)
+        }
     })
 
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager, {
         boundMachineId: config.boundMachineId,
         terminalStateCache: socketServer.terminalStateCache,
-        terminalSupervisionHumanOverrideMs: config.terminalSupervisionHumanOverrideMs
+        terminalSupervisionHumanOverrideMs: config.terminalSupervisionHumanOverrideMs,
+        staleSessionArchiveMs: config.staleSessionArchiveMs
     })
 
     const notificationChannels: NotificationChannel[] = [
@@ -299,6 +303,7 @@ async function main() {
             brokerUrl: effectiveBrokerUrl!,
             brokerToken: configuredBrokerToken ?? brokerKey?.key ?? null,
             owner: brokerOwner,
+            localHost: config.listenHost,
             localPort: config.listenPort,
             hubName: process.env.MAGLEV_HUB_NAME?.trim() || null,
             launchFolders: hubLaunchConfig.folders,

@@ -271,22 +271,43 @@ export class ApiClient {
         return await this.request<GitCommandResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/git-diff-file?${params.toString()}`)
     }
 
-    async getReviewSummary(sessionId: string, mode: 'branch' | 'working'): Promise<import('@/types/api').ReviewSummaryResponse> {
+    async getReviewSummary(
+        sessionId: string,
+        mode: 'branch' | 'working',
+        baseMode?: import('@/types/api').ReviewBaseMode
+    ): Promise<import('@/types/api').ReviewSummaryResponse> {
         const params = new URLSearchParams()
         params.set('mode', mode)
+        if (baseMode) {
+            params.set('baseMode', baseMode)
+        }
         return await this.request<import('@/types/api').ReviewSummaryResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/review-summary?${params.toString()}`
         )
     }
 
-    async getReviewFile(sessionId: string, path: string, mode: 'branch' | 'working'): Promise<GitCommandResponse> {
+    async getReviewFile(
+        sessionId: string,
+        path: string,
+        mode: 'branch' | 'working',
+        baseMode?: import('@/types/api').ReviewBaseMode
+    ): Promise<GitCommandResponse> {
         const params = new URLSearchParams()
         params.set('path', path)
         params.set('mode', mode)
+        if (baseMode) {
+            params.set('baseMode', baseMode)
+        }
         return await this.request<GitCommandResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/review-file?${params.toString()}`)
     }
 
-    async searchSessionFiles(sessionId: string, query: string, limit?: number): Promise<FileSearchResponse> {
+    async searchSessionFiles(
+        sessionId: string,
+        query: string,
+        limit?: number,
+        mode?: 'fuzzy' | 'glob',
+        signal?: AbortSignal
+    ): Promise<FileSearchResponse> {
         const params = new URLSearchParams()
         if (query) {
             params.set('query', query)
@@ -294,8 +315,13 @@ export class ApiClient {
         if (limit !== undefined) {
             params.set('limit', `${limit}`)
         }
+        if (mode) {
+            params.set('mode', mode)
+        }
         const qs = params.toString()
-        return await this.request<FileSearchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/files${qs ? `?${qs}` : ''}`)
+        return await this.request<FileSearchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/files${qs ? `?${qs}` : ''}`, {
+            signal
+        })
     }
 
     async readSessionFile(sessionId: string, path: string): Promise<FileReadResponse> {
@@ -304,16 +330,85 @@ export class ApiClient {
         return await this.request<FileReadResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/file?${params.toString()}`)
     }
 
+    async getSessionFileReviewThreads(sessionId: string, path: string): Promise<import('@/types/api').FileReviewThreadsResponse> {
+        const params = new URLSearchParams()
+        params.set('path', path)
+        return await this.request<import('@/types/api').FileReviewThreadsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads?${params.toString()}`
+        )
+    }
+
     async writeSessionFile(
         sessionId: string,
         path: string,
         content: string,
         expectedHash?: string | null
     ): Promise<WriteFileResponse> {
-        return await this.request<WriteFileResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/file`, {
-            method: 'POST',
-            body: JSON.stringify({ path, content, expectedHash })
-        })
+        try {
+            return await this.request<WriteFileResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/file`, {
+                method: 'POST',
+                body: JSON.stringify({ path, content, expectedHash })
+            })
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 409 && error.body) {
+                try {
+                    return JSON.parse(error.body) as WriteFileResponse
+                } catch {
+                    // Fall through to the original transport error below.
+                }
+            }
+            throw error
+        }
+    }
+
+    async createSessionFileReviewThread(
+        sessionId: string,
+        payload: { path: string; line: number; body: string; author?: 'user' | 'agent' }
+    ): Promise<{ success: boolean; error?: string }> {
+        return await this.request<{ success: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads`,
+            {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            }
+        )
+    }
+
+    async replyToSessionFileReviewThread(
+        sessionId: string,
+        threadId: string,
+        payload: { body: string; author?: 'user' | 'agent' }
+    ): Promise<{ success: boolean; error?: string }> {
+        return await this.request<{ success: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads/${encodeURIComponent(threadId)}/replies`,
+            {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            }
+        )
+    }
+
+    async setSessionFileReviewThreadStatus(
+        sessionId: string,
+        threadId: string,
+        status: 'open' | 'resolved'
+    ): Promise<{ success: boolean; error?: string }> {
+        return await this.request<{ success: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads/${encodeURIComponent(threadId)}/status`,
+            {
+                method: 'PATCH',
+                body: JSON.stringify({ status })
+            }
+        )
+    }
+
+    async deleteSessionFileReviewThread(sessionId: string, threadId: string): Promise<{ success: boolean; error?: string }> {
+        return await this.request<{ success: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/file-review-threads/${encodeURIComponent(threadId)}`,
+            {
+                method: 'DELETE'
+            }
+        )
     }
 
     async listSessionDirectory(sessionId: string, path?: string): Promise<ListDirectoryResponse> {
@@ -407,6 +502,13 @@ export class ApiClient {
         })
     }
 
+    async listHubWorktrees(paths: string[]): Promise<import('@/types/api').HubWorktreesResponse> {
+        return await this.request<import('@/types/api').HubWorktreesResponse>('/api/hub/worktrees', {
+            method: 'POST',
+            body: JSON.stringify({ paths })
+        })
+    }
+
     async spawnHubSession(
         directory: string,
         name?: string,
@@ -416,11 +518,13 @@ export class ApiClient {
         autoRespawn?: boolean,
         startupCommand?: string,
         sessionType?: 'simple' | 'worktree',
-        worktreeName?: string
+        worktreeName?: string,
+        parentSessionId?: string,
+        childRole?: 'review-terminal' | 'split-terminal'
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>('/api/hub/spawn', {
             method: 'POST',
-            body: JSON.stringify({ directory, name, notesPath, createNotesFile, pinned, autoRespawn, startupCommand, sessionType, worktreeName })
+            body: JSON.stringify({ directory, name, notesPath, createNotesFile, pinned, autoRespawn, startupCommand, sessionType, worktreeName, parentSessionId, childRole })
         })
     }
 
@@ -434,10 +538,15 @@ export class ApiClient {
         })
     }
 
-    async renameSession(sessionId: string, name: string): Promise<void> {
+    async updateSession(sessionId: string, updates: {
+        name?: string
+        directory?: string
+        parentSessionId?: string | null
+        childRole?: 'review-terminal' | 'split-terminal' | null
+    }): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'PATCH',
-            body: JSON.stringify({ name })
+            body: JSON.stringify(updates)
         })
     }
 
@@ -447,11 +556,34 @@ export class ApiClient {
         })
     }
 
+    async closeSession(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/close`, {
+            method: 'POST'
+        })
+    }
+
+    async renameSession(sessionId: string, name: string): Promise<void> {
+        await this.updateSession(sessionId, { name })
+    }
+
     async setSessionPinned(sessionId: string, pinned: boolean): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/pin`, {
             method: 'PATCH',
             body: JSON.stringify({ pinned })
         })
+    }
+
+    async readSessionNotes(sessionId: string): Promise<{ success: boolean; content: string | null; error?: string }> {
+        return await this.request<{ success: boolean; content: string | null; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/notes`
+        )
+    }
+
+    async writeSessionNotes(sessionId: string, content: string): Promise<{ ok?: boolean; error?: string }> {
+        return await this.request<{ ok?: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/notes`,
+            { method: 'POST', body: JSON.stringify({ content }) }
+        )
     }
 
     async setShellSessionOptions(sessionId: string, options: {

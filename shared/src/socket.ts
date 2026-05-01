@@ -69,6 +69,16 @@ export const TerminalErrorPayloadSchema = z.object({
 
 export type TerminalErrorPayload = z.infer<typeof TerminalErrorPayloadSchema>
 
+export const TerminalStatusPayloadSchema = z.object({
+    sessionId: z.string().min(1),
+    terminalId: z.string().min(1),
+    owner: z.enum(['self', 'other']),
+    attachedAt: z.number().int().positive().nullable(),
+    canTakeOver: z.boolean()
+})
+
+export type TerminalStatusPayload = z.infer<typeof TerminalStatusPayloadSchema>
+
 export const UpdateSessionBodySchema = z.object({
     t: z.literal('update-session'),
     sid: z.string(),

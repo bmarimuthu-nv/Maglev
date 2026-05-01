@@ -24,6 +24,7 @@ function globToRegExp(glob: string): RegExp {
     const escaped = glob
         .replace(/[|\\{}()[\]^$+?.]/g, '\\$&')
         .replace(/\*/g, '.*')
+        .replace(/\\\?/g, '.')
     return new RegExp(`^${escaped}$`, 'i')
 }
 
@@ -53,8 +54,25 @@ function parseFileListFallbackArgs(args: string[]): { glob?: RegExp } | null {
     return { glob }
 }
 
-async function walkFiles(rootDir: string, currentDir: string, glob?: RegExp, limit: number = Number.POSITIVE_INFINITY): Promise<string[]> {
-    const entries = await readdir(currentDir, { withFileTypes: true })
+const SKIP_DIRECTORIES = new Set([
+    'node_modules', '__pycache__', '.venv', 'venv', '.tox',
+    'dist', 'build', 'out', '.next', '.nuxt',
+    'target', 'vendor', '.bundle',
+    '.cache', '.parcel-cache', '.turbo',
+    'coverage', '.nyc_output',
+])
+
+async function walkFiles(rootDir: string, currentDir: string, glob?: RegExp, limit: number = Number.POSITIVE_INFINITY, depth: number = 0): Promise<string[]> {
+    if (depth > 50) {
+        return []
+    }
+
+    let entries
+    try {
+        entries = await readdir(currentDir, { withFileTypes: true })
+    } catch {
+        return []
+    }
     entries.sort((left, right) => left.name.localeCompare(right.name))
     const files: string[] = []
 
@@ -72,7 +90,10 @@ async function walkFiles(rootDir: string, currentDir: string, glob?: RegExp, lim
             continue
         }
         if (entry.isDirectory()) {
-            files.push(...await walkFiles(rootDir, fullPath, glob, limit - files.length))
+            if (SKIP_DIRECTORIES.has(entry.name)) {
+                continue
+            }
+            files.push(...await walkFiles(rootDir, fullPath, glob, limit - files.length, depth + 1))
             continue
         }
         if (!entry.isFile()) {
@@ -166,10 +187,14 @@ export function registerRipgrepHandlers(rpcHandlerManager: RpcHandlerManager, wo
         }
 
         if (typeof data.limit === 'number' && Number.isFinite(data.limit) && data.limit > 0) {
-            const boundedFileList = await runFileListFallback(data.args, data.cwd, workingDirectory, data.limit)
-            if (boundedFileList) {
-                logger.debug('Using bounded file-list mode for ripgrep request')
-                return boundedFileList
+            try {
+                const boundedFileList = await runFileListFallback(data.args, data.cwd, workingDirectory, data.limit)
+                if (boundedFileList) {
+                    logger.debug('Using bounded file-list mode for ripgrep request')
+                    return boundedFileList
+                }
+            } catch (fallbackErr) {
+                logger.debug('Bounded file-list fallback failed:', fallbackErr)
             }
         }
 

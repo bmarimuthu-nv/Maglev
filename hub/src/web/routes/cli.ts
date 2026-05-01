@@ -21,6 +21,10 @@ const createOrLoadMachineSchema = z.object({
     runnerState: z.unknown().nullable().optional()
 })
 
+const writeTerminalSupervisionSchema = z.object({
+    data: z.string().min(1)
+})
+
 type CliEnv = {
     Variables: {
         namespace: string
@@ -121,6 +125,33 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             return c.json({ error: resolved.error }, resolved.status)
         }
         return c.json({ session: resolved.session })
+    })
+
+    app.post('/sessions/:id/supervisor/write', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+
+        const json = await c.req.json().catch(() => null)
+        const parsed = writeTerminalSupervisionSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            const result = await engine.writeTerminalSupervisionInput(resolved.sessionId, parsed.data.data, namespace)
+            return c.json(result)
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to write terminal supervision input' }, 409)
+        }
     })
 
     app.post('/machines', async (c) => {

@@ -10,6 +10,7 @@ import { readSettings } from '@/persistence'
 import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
 import { runtimePath } from '@/projectPath'
+import { readBranchFromGit } from '@/utils/gitBranch'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import { getMachineIdForCurrentNamespace } from '@/utils/namespace'
 import packageJson from '../../package.json'
@@ -57,11 +58,13 @@ export function buildSessionMetadata(options: {
 }): Metadata {
     const maglevLibDir = runtimePath()
     const worktreeInfo = readWorktreeEnv()
+    const branch = worktreeInfo?.branch ?? readBranchFromGit(options.workingDirectory) ?? undefined
     const now = options.now ?? Date.now()
 
     return {
         path: options.workingDirectory,
         host: os.hostname(),
+        branch,
         version: packageJson.version,
         os: os.platform(),
         machineId: options.machineId,

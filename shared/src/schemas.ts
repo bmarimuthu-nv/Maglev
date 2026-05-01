@@ -5,7 +5,7 @@ const MetadataSummarySchema = z.object({
     updatedAt: z.number()
 })
 
-export const TerminalSupervisionRoleSchema = z.enum(['worker', 'orchestrator'])
+export const TerminalSupervisionRoleSchema = z.enum(['worker', 'supervisor'])
 export type TerminalSupervisionRole = z.infer<typeof TerminalSupervisionRoleSchema>
 
 export const TerminalSupervisionStateSchema = z.enum(['active', 'paused'])
@@ -22,7 +22,7 @@ export const TerminalSupervisionEventSchema = z.object({
         'write_accepted',
         'write_blocked'
     ]),
-    actor: z.enum(['human', 'orchestrator', 'system']),
+    actor: z.enum(['human', 'supervisor', 'system']),
     message: z.string()
 })
 
@@ -86,6 +86,8 @@ export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
+    branch: z.string().optional(),
+    childRole: z.enum(['review-terminal', 'split-terminal']).optional(),
     version: z.string().optional(),
     name: z.string().optional(),
     os: z.string().optional(),
@@ -105,11 +107,14 @@ export const MetadataSchema = z.object({
     flavor: z.string().nullish(),
     worktree: WorktreeMetadataSchema.optional(),
     notesPath: z.string().optional(),
+    parentSessionId: z.string().optional(),
     pinned: z.boolean().optional(),
     autoRespawn: z.boolean().optional(),
     startupCommand: z.string().optional(),
     shellTerminalId: z.string().optional(),
     shellTerminalState: z.enum(['ready', 'stale']).optional(),
+    respawnedFromSessionId: z.string().optional(),
+    respawnedFromSessionIds: z.array(z.string()).optional(),
     terminalSupervision: TerminalSupervisionSchema.optional(),
     terminalPair: TerminalPairLinkSchema.optional()
 })

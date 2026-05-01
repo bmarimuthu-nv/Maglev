@@ -7,6 +7,7 @@ import { DEFAULT_NAMESPACE, parseAccessToken } from '../../utils/accessToken'
 import { validateTelegramInitData } from '../telegramInitData'
 import { getOrCreateOwnerId } from '../../config/ownerId'
 import type { WebAppEnv } from '../middleware/auth'
+import { enforceRateLimit, type MemoryRateLimiter, type RateLimitRule } from '../middleware/rateLimit'
 import type { Store } from '../../store'
 import { GitHubDeviceAuthService } from '../../github/deviceAuth'
 import { getBrokerSessionFromHeaders } from '../brokerSession'
@@ -24,6 +25,20 @@ const authBodySchema = z.union([telegramAuthSchema, accessTokenAuthSchema])
 const githubDevicePollSchema = z.object({
     deviceCode: z.string().min(1)
 })
+
+type AuthRouteRateLimits = {
+    auth: RateLimitRule
+    authBroker: RateLimitRule
+    githubDeviceStart: RateLimitRule
+    githubDevicePoll: RateLimitRule
+}
+
+const DEFAULT_AUTH_ROUTE_RATE_LIMITS: AuthRouteRateLimits = {
+    auth: { bucket: 'auth', max: 10, windowMs: 60_000 },
+    authBroker: { bucket: 'auth-broker', max: 20, windowMs: 60_000 },
+    githubDeviceStart: { bucket: 'github-device-start', max: 10, windowMs: 60_000 },
+    githubDevicePoll: { bucket: 'github-device-poll', max: 60, windowMs: 60_000 }
+}
 
 async function signWebJwt(jwtSecret: Uint8Array, namespace: string, options?: { username?: string; firstName?: string; lastName?: string; expiresIn?: string }) {
     const userId = await getOrCreateOwnerId()
@@ -66,11 +81,18 @@ export function createAuthRoutes(
     options?: {
         remoteMode?: boolean
         gitHubDeviceAuth?: GitHubDeviceAuthService | null
+        rateLimiter?: MemoryRateLimiter
+        rateLimits?: Partial<AuthRouteRateLimits>
     }
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
     const remoteMode = options?.remoteMode === true
     const gitHubDeviceAuth = options?.gitHubDeviceAuth ?? null
+    const rateLimiter = options?.rateLimiter
+    const rateLimits: AuthRouteRateLimits = {
+        ...DEFAULT_AUTH_ROUTE_RATE_LIMITS,
+        ...options?.rateLimits
+    }
 
     app.get('/auth/methods', (c) => {
         const methods: string[] = []
@@ -90,6 +112,11 @@ export function createAuthRoutes(
     })
 
     app.post('/auth', async (c) => {
+        const limited = enforceRateLimit(c, rateLimits.auth, { limiter: rateLimiter })
+        if (limited) {
+            return limited
+        }
+
         const json = await c.req.json().catch(() => null)
         const parsed = authBodySchema.safeParse(json)
         if (!parsed.success) {
@@ -150,6 +177,11 @@ export function createAuthRoutes(
     })
 
     app.post('/auth/broker', async (c) => {
+        const limited = enforceRateLimit(c, rateLimits.authBroker, { limiter: rateLimiter })
+        if (limited) {
+            return limited
+        }
+
         if (!remoteMode) {
             return c.json({ error: 'Broker session login is only available in remote mode' }, 404)
         }
@@ -166,6 +198,11 @@ export function createAuthRoutes(
     })
 
     app.post('/github/device/start', async (c) => {
+        const limited = enforceRateLimit(c, rateLimits.githubDeviceStart, { limiter: rateLimiter })
+        if (limited) {
+            return limited
+        }
+
         if (!gitHubDeviceAuth) {
             return c.json({ error: 'GitHub device auth is disabled' }, 404)
         }
@@ -182,6 +219,11 @@ export function createAuthRoutes(
     })
 
     app.post('/github/device/poll', async (c) => {
+        const limited = enforceRateLimit(c, rateLimits.githubDevicePoll, { limiter: rateLimiter })
+        if (limited) {
+            return limited
+        }
+
         if (!gitHubDeviceAuth) {
             return c.json({ error: 'GitHub device auth is disabled' }, 404)
         }

@@ -4,12 +4,16 @@ import type { HubLaunchFolder } from '../../hubConfig'
 import type { SyncEngine } from '../../sync/syncEngine'
 import { configuration } from '../../configuration'
 import { z } from 'zod'
+import { ensureNotesParentDir, resolveSessionNotesLocation } from '../../notes/storage'
+import { writeFileSync } from 'node:fs'
 
 const spawnBodySchema = z.object({
     directory: z.string().min(1),
     name: z.string().min(1).max(255).optional(),
     notesPath: z.string().min(1).max(1024).optional(),
     createNotesFile: z.boolean().optional(),
+    parentSessionId: z.string().optional(),
+    childRole: z.enum(['review-terminal', 'split-terminal']).optional(),
     pinned: z.boolean().optional(),
     autoRespawn: z.boolean().optional(),
     startupCommand: z.string().max(4000).optional(),
@@ -23,6 +27,10 @@ const spawnPairBodySchema = z.object({
 })
 
 const pathsExistsSchema = z.object({
+    paths: z.array(z.string().min(1)).max(1000)
+})
+
+const worktreesSchema = z.object({
     paths: z.array(z.string().min(1)).max(1000)
 })
 
@@ -85,15 +93,24 @@ export function createHubRoutes(
                 await engine.renameSession(result.sessionId, parsed.data.name.trim())
             }
             if (parsed.data.notesPath?.trim()) {
-                await engine.setSessionNotesPath(result.sessionId, parsed.data.notesPath.trim())
-                if (parsed.data.createNotesFile) {
-                    await engine.writeSessionFile(
-                        result.sessionId,
-                        parsed.data.notesPath.trim(),
-                        '',
-                        null
-                    )
+                const spawnedSession = engine.getSessionByNamespace(result.sessionId, namespace)
+                if (!spawnedSession) {
+                    return c.json({ error: 'Spawned session not found' }, 500)
                 }
+                await engine.setSessionNotesPath(result.sessionId, parsed.data.notesPath.trim())
+                const refreshedSession = engine.getSessionByNamespace(result.sessionId, namespace) ?? spawnedSession
+                const notesLocation = resolveSessionNotesLocation(refreshedSession)
+                await engine.setSessionNotesPath(result.sessionId, notesLocation.displayPath)
+                if (parsed.data.createNotesFile) {
+                    ensureNotesParentDir(notesLocation.fsPath)
+                    writeFileSync(notesLocation.fsPath, '', 'utf-8')
+                }
+            }
+            if (parsed.data.parentSessionId) {
+                await engine.setParentSessionId(result.sessionId, parsed.data.parentSessionId)
+            }
+            if (parsed.data.childRole) {
+                await engine.setChildRole(result.sessionId, parsed.data.childRole)
             }
             if (parsed.data.pinned !== undefined || parsed.data.autoRespawn !== undefined || parsed.data.startupCommand !== undefined) {
                 await engine.setShellSessionOptions(result.sessionId, {
@@ -147,6 +164,31 @@ export function createHubRoutes(
             return c.json({ exists })
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to check paths' }, 500)
+        }
+    })
+
+    app.post('/hub/worktrees', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not connected' }, 503)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = worktreesSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        const uniquePaths = Array.from(new Set(parsed.data.paths.map((path) => path.trim()).filter(Boolean)))
+        if (uniquePaths.length === 0) {
+            return c.json({ worktrees: [] })
+        }
+
+        try {
+            const worktrees = await engine.listWorktreesForBoundMachine(c.get('namespace'), uniquePaths)
+            return c.json({ worktrees })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to list worktrees' }, 500)
         }
     })
 

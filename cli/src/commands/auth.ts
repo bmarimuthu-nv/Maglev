@@ -207,6 +207,7 @@ ${chalk.bold('GitHub owner auth storage:')}
 
 export const authCommand: CommandDefinition = {
     name: 'auth',
+    description: 'Manage authentication (login, logout, status)',
     requiresRuntimeAssets: true,
     run: async ({ commandArgs }) => {
         try {

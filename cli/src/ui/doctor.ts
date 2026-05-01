@@ -17,6 +17,30 @@ import { join } from 'node:path'
 import { isBunCompiled, projectPath, runtimePath } from '@/projectPath'
 import packageJson from '../../package.json'
 
+type ChecklistStatus = 'pass' | 'warn' | 'fail'
+
+type ChecklistItem = {
+    label: string
+    status: ChecklistStatus
+    detail: string
+    nextStep?: string
+}
+
+type DoctorHubHealthResult =
+    | {
+        ok: true
+        apiUrl: string
+        healthUrl: string
+    }
+    | {
+        ok: false
+        apiUrl: string
+        healthUrl: string | null
+        reason: 'invalid-url' | 'timeout' | 'connection-refused' | 'http-error' | 'network-error'
+        detail: string
+        status?: number
+    }
+
 /**
  * Get relevant environment information for debugging
  */
@@ -44,6 +68,203 @@ export function getEnvironmentInfo(): Record<string, any> {
         shell: process.env.SHELL,
         terminal: process.env.TERM,
     };
+}
+
+function getErrorDetail(error: unknown): string {
+    if (!(error instanceof Error)) {
+        return 'unknown error'
+    }
+
+    const details = [error.name, error.message]
+    const cause = (error as Error & { cause?: unknown }).cause
+    if (cause instanceof Error) {
+        details.push(cause.name, cause.message)
+        const code = (cause as Error & { code?: string }).code
+        if (code) {
+            details.push(code)
+        }
+    }
+    const code = (error as Error & { code?: string }).code
+    if (code) {
+        details.push(code)
+    }
+
+    return details.filter(Boolean).join(': ')
+}
+
+function classifyHubHealthError(error: unknown): Pick<Extract<DoctorHubHealthResult, { ok: false }>, 'reason' | 'detail'> {
+    const detail = getErrorDetail(error)
+    const normalizedDetail = detail.toLowerCase()
+
+    if (normalizedDetail.includes('timeout')) {
+        return { reason: 'timeout', detail }
+    }
+    if (normalizedDetail.includes('econnrefused') || normalizedDetail.includes('connection refused')) {
+        return { reason: 'connection-refused', detail }
+    }
+
+    return { reason: 'network-error', detail }
+}
+
+async function inspectHubHealth(apiUrl: string, timeoutMs: number = 3000): Promise<DoctorHubHealthResult> {
+    let healthUrl: string
+
+    try {
+        healthUrl = new URL('/health', apiUrl).toString()
+    } catch (error) {
+        return {
+            ok: false,
+            apiUrl,
+            healthUrl: null,
+            reason: 'invalid-url',
+            detail: getErrorDetail(error)
+        }
+    }
+
+    try {
+        const response = await fetch(healthUrl, {
+            signal: AbortSignal.timeout(timeoutMs)
+        })
+        if (response.ok) {
+            return { ok: true, apiUrl, healthUrl }
+        }
+        return {
+            ok: false,
+            apiUrl,
+            healthUrl,
+            reason: 'http-error',
+            status: response.status,
+            detail: `HTTP ${response.status}`
+        }
+    } catch (error) {
+        return {
+            ok: false,
+            apiUrl,
+            healthUrl,
+            ...classifyHubHealthError(error)
+        }
+    }
+}
+
+async function inspectSettingsFile(settingsFile: string): Promise<ChecklistItem> {
+    if (!existsSync(settingsFile)) {
+        return {
+            label: 'settings.json',
+            status: 'pass',
+            detail: `Not created yet at ${settingsFile}`,
+            nextStep: 'This is normal on a fresh install; settings will be created as needed.'
+        }
+    }
+
+    try {
+        const content = await readFile(settingsFile, 'utf8')
+        JSON.parse(content)
+        return {
+            label: 'settings.json',
+            status: 'pass',
+            detail: `Valid JSON at ${settingsFile}`
+        }
+    } catch (error) {
+        return {
+            label: 'settings.json',
+            status: 'fail',
+            detail: `Invalid JSON at ${settingsFile}`,
+            nextStep: `Fix or remove the file, then retry. Parse error: ${getErrorDetail(error)}`
+        }
+    }
+}
+
+function inspectRequiredTool(
+    toolName: string,
+    envVarName: string,
+    env: NodeJS.ProcessEnv = process.env,
+    which: (name: string) => string | null = (name) => typeof Bun?.which === 'function' ? Bun.which(name) : null
+): ChecklistItem {
+    const overridePath = env[envVarName]?.trim()
+    if (overridePath) {
+        if (existsSync(overridePath)) {
+            return {
+                label: toolName,
+                status: 'pass',
+                detail: `${envVarName} -> ${overridePath}`
+            }
+        }
+        return {
+            label: toolName,
+            status: 'fail',
+            detail: `${envVarName} points to a missing path: ${overridePath}`,
+            nextStep: `Fix ${envVarName} or install ${toolName} on PATH.`
+        }
+    }
+
+    const resolved = which(toolName)
+    if (resolved) {
+        return {
+            label: toolName,
+            status: 'pass',
+            detail: `Found on PATH at ${resolved}`
+        }
+    }
+
+    return {
+        label: toolName,
+        status: 'fail',
+        detail: `${toolName} is not on PATH`,
+        nextStep: `Install ${toolName} or set ${envVarName} to its full path.`
+    }
+}
+
+async function buildFirstRunChecklist(apiUrl: string = configuration.apiUrl): Promise<ChecklistItem[]> {
+    const items: ChecklistItem[] = []
+    const hubHealth = await inspectHubHealth(apiUrl)
+    if (hubHealth.ok) {
+        items.push({
+            label: 'hub /health',
+            status: 'pass',
+            detail: `Reachable at ${hubHealth.healthUrl}`
+        })
+    } else {
+        const nextStepByReason: Record<Extract<DoctorHubHealthResult, { ok: false }>['reason'], string> = {
+            'invalid-url': 'Set MAGLEV_API_URL to a valid base URL such as http://localhost:3006.',
+            'timeout': 'If the hub is still starting, wait and retry; otherwise inspect `maglev hub logs -f`.',
+            'connection-refused': 'Start a hub with `maglev hub start`, or point MAGLEV_API_URL at a running hub.',
+            'http-error': 'Check whether MAGLEV_API_URL points at the right service and port.',
+            'network-error': 'Check network reachability or correct MAGLEV_API_URL.'
+        }
+        items.push({
+            label: 'hub /health',
+            status: 'fail',
+            detail: hubHealth.reason === 'http-error'
+                ? `Expected 200 OK from ${hubHealth.healthUrl ?? `${hubHealth.apiUrl}/health`}, got HTTP ${hubHealth.status ?? 'unknown'}`
+                : `Could not verify hub health at ${hubHealth.healthUrl ?? hubHealth.apiUrl}: ${hubHealth.detail}`,
+            nextStep: nextStepByReason[hubHealth.reason]
+        })
+    }
+
+    items.push(await inspectSettingsFile(configuration.settingsFile))
+    items.push(inspectRequiredTool('rg', 'MAGLEV_RIPGREP_PATH'))
+    items.push(inspectRequiredTool('difft', 'MAGLEV_DIFFTASTIC_PATH'))
+
+    return items
+}
+
+function formatChecklistStatus(status: ChecklistStatus): string {
+    switch (status) {
+        case 'pass':
+            return chalk.green('PASS')
+        case 'warn':
+            return chalk.yellow('WARN')
+        case 'fail':
+            return chalk.red('FAIL')
+    }
+}
+
+export const __test__ = {
+    classifyHubHealthError,
+    inspectHubHealth,
+    inspectSettingsFile,
+    inspectRequiredTool,
+    buildFirstRunChecklist
 }
 
 function getLogFiles(logDir: string): { file: string, path: string, modified: Date }[] {
@@ -119,6 +340,15 @@ export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<void>
         console.log(`DANGEROUSLY_LOG_TO_SERVER: ${env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING ? chalk.yellow('ENABLED') : chalk.gray('not set')}`);
         console.log(`DEBUG: ${env.DEBUG ? chalk.green(env.DEBUG) : chalk.gray('not set')}`);
         console.log(`NODE_ENV: ${env.NODE_ENV ? chalk.green(env.NODE_ENV) : chalk.gray('not set')}`);
+
+        console.log(chalk.bold('\n🚦 First-Run Checklist'));
+        const checklist = await buildFirstRunChecklist(configuration.apiUrl)
+        for (const item of checklist) {
+            console.log(`${formatChecklistStatus(item.status)} ${item.label}: ${item.detail}`)
+            if (item.nextStep) {
+                console.log(chalk.gray(`  Next: ${item.nextStep}`))
+            }
+        }
 
         // Settings
         let settings;

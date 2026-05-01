@@ -1,17 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { Machine } from '@/types/api'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSpawnSession } from '@/hooks/mutations/useSpawnSession'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useHubConfig } from '@/hooks/queries/useHubConfig'
+import { useHubWorktrees } from '@/hooks/queries/useHubWorktrees'
 import { useActiveSuggestions, type Suggestion } from '@/hooks/useActiveSuggestions'
 import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
-import type { SessionType } from './types'
 import { ActionButtons } from './ActionButtons'
 import { DirectorySection } from './DirectorySection'
-import { SessionTypeSelector } from './SessionTypeSelector'
 import { formatRunnerSpawnError } from '../../utils/formatRunnerSpawnError'
 
 export function NewSession(props: {
@@ -47,16 +46,8 @@ export function NewSession(props: {
     const [suppressSuggestions, setSuppressSuggestions] = useState(false)
     const [isDirectoryFocused, setIsDirectoryFocused] = useState(false)
     const [pathExistence, setPathExistence] = useState<Record<string, boolean>>({})
-    const [sessionType, setSessionType] = useState<SessionType>('simple')
-    const [worktreeName, setWorktreeName] = useState('')
+    const [manualWorktreePaths, setManualWorktreePaths] = useState<string[]>([])
     const [error, setError] = useState<string | null>(null)
-    const worktreeInputRef = useRef<HTMLInputElement>(null)
-
-    useEffect(() => {
-        if (sessionType === 'worktree') {
-            worktreeInputRef.current?.focus()
-        }
-    }, [sessionType])
 
     const runnerSpawnError = useMemo(
         () => formatRunnerSpawnError(props.machine),
@@ -79,6 +70,20 @@ export function NewSession(props: {
     const currentPathSaved = isSavedPath(trimmedDirectory)
 
     const allPaths = useDirectorySuggestions(sessions, recentPaths)
+    const worktreeLookupPaths = useMemo(
+        () => Array.from(new Set([
+            ...hubFolders.map((folder) => folder.path),
+            ...recentPaths,
+            ...savedPaths,
+            ...manualWorktreePaths
+        ].map((path) => path.trim()).filter(Boolean))),
+        [hubFolders, recentPaths, savedPaths, manualWorktreePaths]
+    )
+    const {
+        worktrees: detectedWorktreesRaw,
+        isLoading: isLoadingWorktrees,
+        refetch: refetchWorktrees
+    } = useHubWorktrees(props.api, worktreeLookupPaths, Boolean(props.machine?.active))
 
     const pathsToCheck = useMemo(
         () => Array.from(new Set(allPaths)).slice(0, 1000),
@@ -112,6 +117,22 @@ export function NewSession(props: {
         () => allPaths.filter((path) => pathExistence[path]),
         [allPaths, pathExistence]
     )
+    const detectedWorktrees = useMemo(() => {
+        const excludedPaths = new Set([
+            ...hubFolders.map((folder) => folder.path),
+            ...recentPaths,
+            ...savedPaths
+        ])
+        return detectedWorktreesRaw.filter((worktree) => !excludedPaths.has(worktree.path))
+    }, [detectedWorktreesRaw, hubFolders, recentPaths, savedPaths])
+
+    const handleRefreshWorktrees = useCallback(() => {
+        if (trimmedDirectory && !manualWorktreePaths.includes(trimmedDirectory)) {
+            setManualWorktreePaths((current) => Array.from(new Set([...current, trimmedDirectory])))
+            return
+        }
+        void refetchWorktrees()
+    }, [manualWorktreePaths, refetchWorktrees, trimmedDirectory])
 
     const getSuggestions = useCallback(async (query: string): Promise<Suggestion[]> => {
         const lowered = query.toLowerCase()
@@ -228,9 +249,7 @@ export function NewSession(props: {
                 createNotesFile: notesEnabled && notesMode === 'create' && trimmedNotesPath.length > 0,
                 pinned,
                 autoRespawn: pinned ? autoRespawn : undefined,
-                startupCommand: startupCommand.trim() || undefined,
-                sessionType,
-                worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined
+                startupCommand: startupCommand.trim() || undefined
             })
 
             if (result.type === 'success') {
@@ -445,6 +464,8 @@ export function NewSession(props: {
                 selectedIndex={selectedIndex}
                 isDisabled={isFormDisabled}
                 hubFolders={hubFolders}
+                detectedWorktrees={detectedWorktrees}
+                isLoadingWorktrees={isLoadingWorktrees}
                 recentPaths={recentPaths}
                 savedPaths={savedPaths}
                 canSaveCurrentPath={canSaveCurrentPath}
@@ -455,16 +476,9 @@ export function NewSession(props: {
                 onDirectoryKeyDown={handleDirectoryKeyDown}
                 onSuggestionSelect={handleSuggestionSelect}
                 onPathClick={handlePathClick}
+                onRefreshWorktrees={handleRefreshWorktrees}
                 onSaveCurrentPath={handleSaveCurrentPath}
                 onRemoveSavedPath={handleRemoveSavedPath}
-            />
-            <SessionTypeSelector
-                sessionType={sessionType}
-                worktreeName={worktreeName}
-                worktreeInputRef={worktreeInputRef}
-                isDisabled={isFormDisabled}
-                onSessionTypeChange={setSessionType}
-                onWorktreeNameChange={setWorktreeName}
             />
             {(error ?? spawnError) ? (
                 <div className="px-3 py-2 text-sm text-red-600">

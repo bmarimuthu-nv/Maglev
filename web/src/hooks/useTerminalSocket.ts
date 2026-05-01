@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { TerminalStatusPayload } from '@maglev/protocol'
 import { io, type Socket } from 'socket.io-client'
 
 type TerminalConnectionState =
@@ -6,6 +7,12 @@ type TerminalConnectionState =
     | { status: 'connecting' }
     | { status: 'connected' }
     | { status: 'error'; error: string }
+
+export type TerminalAttachmentState = {
+    owner: TerminalStatusPayload['owner']
+    attachedAt: number | null
+    canTakeOver: boolean
+}
 
 type UseTerminalSocketOptions = {
     baseUrl: string
@@ -35,6 +42,14 @@ type TerminalErrorPayload = {
     message: string
 }
 
+type TerminalStatusEventPayload = {
+    sessionId: string
+    terminalId: string
+    owner: TerminalAttachmentState['owner']
+    attachedAt: number | null
+    canTakeOver: boolean
+}
+
 type TerminalSnapshot = {
     outputBuffer: string
     exitInfo: { code: number | null; signal: string | null } | null
@@ -52,6 +67,7 @@ type TerminalController = {
     hasCreated: boolean
     outputBuffer: string
     exitInfo: { code: number | null; signal: string | null } | null
+    attachment: TerminalAttachmentState | null
     stateListeners: Set<() => void>
     outputListeners: Set<(data: string) => void>
     exitListeners: Set<(code: number | null, signal: string | null) => void>
@@ -146,6 +162,7 @@ function ensureController(options: UseTerminalSocketOptions): TerminalController
         hasCreated: false,
         outputBuffer: '',
         exitInfo: null,
+        attachment: null,
         stateListeners: new Set(),
         outputListeners: new Set(),
         exitListeners: new Set()
@@ -168,6 +185,7 @@ function connectController(controller: TerminalController, cols: number, rows: n
             if (controller.hasCreated) {
                 setControllerState(controller, { status: 'connected' })
             } else {
+                controller.attachment = null
                 emitCreate(controller, controller.socket, { cols, rows }, false, createIfMissing)
                 setControllerState(controller, { status: 'connecting' })
             }
@@ -198,6 +216,7 @@ function connectController(controller: TerminalController, cols: number, rows: n
             return
         }
         controller.exitInfo = null
+        controller.attachment = null
         setControllerState(controller, { status: 'connecting' })
         emitCreate(controller, socket, size, false, createIfMissing)
     })
@@ -243,18 +262,33 @@ function connectController(controller: TerminalController, cols: number, rows: n
         setErrorState(controller, payload.message)
     })
 
+    socket.on('terminal:status', (payload: TerminalStatusEventPayload) => {
+        if (payload.terminalId !== controller.terminalId) {
+            return
+        }
+        controller.attachment = {
+            owner: payload.owner,
+            attachedAt: payload.attachedAt,
+            canTakeOver: payload.canTakeOver
+        }
+        notifyState(controller)
+    })
+
     socket.on('connect_error', (error) => {
         const message = error instanceof Error ? error.message : 'Connection error'
+        controller.attachment = null
         setErrorState(controller, message)
     })
 
     socket.on('disconnect', (reason) => {
         if (reason === 'io client disconnect') {
             controller.hasCreated = false
+            controller.attachment = null
             setControllerState(controller, { status: 'idle' })
             return
         }
         controller.hasCreated = false
+        controller.attachment = null
         setErrorState(controller, `Disconnected: ${reason}`)
     })
 
@@ -272,6 +306,7 @@ function disconnectController(controller: TerminalController): void {
     controller.hasCreated = false
     controller.outputBuffer = ''
     controller.exitInfo = null
+    controller.attachment = null
     setControllerState(controller, { status: 'idle' })
 
     // Remove from module-level map if no listeners remain
@@ -297,6 +332,7 @@ function replayControllerSnapshot(
 
 export function useTerminalSocket(options: UseTerminalSocketOptions): {
     state: TerminalConnectionState
+    attachment: TerminalAttachmentState | null
     connect: (cols: number, rows: number) => void
     reconnectView: (cols: number, rows: number) => void
     write: (data: string) => void
@@ -309,6 +345,7 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
 } {
     const controller = useMemo(() => ensureController(options), [options.baseUrl, options.sessionId, options.terminalId, options.token])
     const [state, setState] = useState<TerminalConnectionState>(controller.state)
+    const [attachment, setAttachment] = useState<TerminalAttachmentState | null>(controller.attachment)
     const outputHandlerRef = useRef<((data: string) => void) | null>(null)
     const exitHandlerRef = useRef<((code: number | null, signal: string | null) => void) | null>(null)
 
@@ -323,6 +360,7 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
     useEffect(() => {
         const handleState = () => {
             setState(controller.state)
+            setAttachment(controller.attachment)
         }
         const handleOutput = (data: string) => {
             outputHandlerRef.current?.(data)
@@ -335,6 +373,7 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
         controller.outputListeners.add(handleOutput)
         controller.exitListeners.add(handleExit)
         setState(controller.state)
+        setAttachment(controller.attachment)
 
         return () => {
             controller.stateListeners.delete(handleState)
@@ -363,6 +402,7 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
             return
         }
         controller.exitInfo = null
+        controller.attachment = null
         emitCreate(controller, socket, { cols, rows }, false, options.createIfMissing ?? true)
         setControllerState(controller, { status: 'connecting' })
     }, [controller])
@@ -407,12 +447,14 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
             return
         }
         controller.exitInfo = null
+        controller.attachment = null
         emitCreate(controller, socket, size, true, options.createIfMissing ?? true)
         setControllerState(controller, { status: 'connecting' })
     }, [controller, options.createIfMissing])
 
     return {
         state,
+        attachment,
         connect,
         reconnectView,
         write,

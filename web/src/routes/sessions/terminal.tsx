@@ -1,20 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
+import type { FileSearchItem, TerminalSupervisionTargetResponse } from '@/types/api'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useSession } from '@/hooks/queries/useSession'
+import { useSessions } from '@/hooks/queries/useSessions'
 import { useTerminalSocket } from '@/hooks/useTerminalSocket'
 import { useLongPress } from '@/hooks/useLongPress'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useSessionFileSearch } from '@/hooks/queries/useSessionFileSearch'
 import { rankFiles } from '@/lib/file-search'
 import { getOpenFileShortcut, matchShortcutEvent } from '@/lib/open-file-shortcut'
+import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
 import { useTranslation } from '@/lib/use-translation'
 import { getOrCreateTerminalId } from '@/lib/terminal-session-store'
-import { decodeBase64, encodeBase64 } from '@/lib/utils'
-import { buildSessionExplorerUrl } from '@/utils/sessionExplorer'
+import { clearPendingTerminalFocus, hasPendingTerminalFocus } from '@/lib/pending-terminal-focus'
+import {
+    readLocalStorageItem,
+    readLocalStorageJson,
+    readLocalStorageNumber,
+    removeLocalStorageItem,
+    writeLocalStorageItem,
+    writeLocalStorageJson,
+} from '@/lib/storage-local'
+import {
+    getLegacyStickyFilePreviewStorageKey,
+    getStickyFilePreviewStorageKey,
+} from '@/lib/storage-session'
+import { useAutoScroll } from '@/hooks/useAutoScroll'
+import { FilePreviewPanel } from '@/components/FilePreviewPanel'
+import { SplitTerminalPanel } from '@/components/SplitTerminalPanel'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
@@ -27,6 +45,138 @@ import {
 } from '@/components/ui/dialog'
 
 const TERMINAL_TAKEOVER_MESSAGE = 'Terminal is attached in another browser. Reconnect here to take over.'
+const TERMINAL_MOVED_MESSAGE = 'Terminal moved to another browser.'
+const SPLIT_TERMINAL_WIDTH_KEY = 'maglev:splitTerminalWidth'
+const SPLIT_TERMINAL_DEFAULT_WIDTH = 480
+const SPLIT_TERMINAL_MIN_WIDTH = 280
+const SPLIT_TERMINAL_MAX_WIDTH = 900
+const FILE_PREVIEW_WIDTH_KEY = 'maglev:filePreviewWidth'
+const FILE_PREVIEW_DEFAULT_WIDTH = 480
+const FILE_PREVIEW_MIN_WIDTH = 280
+const COMPACT_SECONDARY_PANEL_MIN_WIDTH = 220
+const PRIMARY_PANEL_MIN_WIDTH = 360
+const MOBILE_FILE_PREVIEW_BREAKPOINT = 1024
+const RECENT_OPEN_FILES_LIMIT = 20
+const RECENT_OPEN_FILES_KEY = 'maglev:recent-open-files'
+
+type StartupState =
+    | 'creating-session'
+    | 'waiting-for-terminal-metadata'
+    | 'attaching-terminal'
+    | 'focusing-terminal'
+    | 'failed'
+
+function getViewportSecondaryPanelCapacity(): number {
+    if (typeof window === 'undefined') {
+        return SPLIT_TERMINAL_MAX_WIDTH
+    }
+    return Math.max(COMPACT_SECONDARY_PANEL_MIN_WIDTH, window.innerWidth - PRIMARY_PANEL_MIN_WIDTH)
+}
+
+function clampPanelWidth(width: number, minWidth: number, maxWidth: number): number {
+    const effectiveMinWidth = Math.min(minWidth, maxWidth)
+    return Math.max(effectiveMinWidth, Math.min(maxWidth, width))
+}
+
+function isCompactFilePreviewViewport(): boolean {
+    if (typeof window === 'undefined') {
+        return false
+    }
+    return window.innerWidth < MOBILE_FILE_PREVIEW_BREAKPOINT
+}
+
+function getFilePreviewMaxWidth(): number {
+    return Math.min(1200, getViewportSecondaryPanelCapacity())
+}
+
+function clampFilePreviewWidth(width: number): number {
+    return clampPanelWidth(width, FILE_PREVIEW_MIN_WIDTH, getFilePreviewMaxWidth())
+}
+
+function getSplitTerminalMaxWidth(): number {
+    return Math.min(SPLIT_TERMINAL_MAX_WIDTH, getViewportSecondaryPanelCapacity())
+}
+
+function clampSplitTerminalWidth(width: number): number {
+    return clampPanelWidth(width, SPLIT_TERMINAL_MIN_WIDTH, getSplitTerminalMaxWidth())
+}
+
+function formatAttachmentSince(attachedAt: number | null): string | null {
+    if (!attachedAt) {
+        return null
+    }
+    try {
+        return new Intl.DateTimeFormat(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+            month: 'short',
+            day: 'numeric'
+        }).format(new Date(attachedAt))
+    } catch {
+        return null
+    }
+}
+
+function loadRecentOpenFiles(): FileSearchItem[] {
+    const parsed = readLocalStorageJson<unknown>(RECENT_OPEN_FILES_KEY)
+    if (!Array.isArray(parsed)) {
+        return []
+    }
+
+    return parsed.filter((item): item is FileSearchItem => (
+        item !== null
+        && typeof item === 'object'
+        && typeof item.fileName === 'string'
+        && typeof item.filePath === 'string'
+        && typeof item.fullPath === 'string'
+        && (item.fileType === 'file' || item.fileType === 'folder')
+    ))
+}
+
+function saveRecentOpenFiles(files: FileSearchItem[]): void {
+    writeLocalStorageJson(RECENT_OPEN_FILES_KEY, files.slice(0, RECENT_OPEN_FILES_LIMIT))
+}
+
+function loadStickyFilePreview(scopeKey: string, baseUrl: string, sessionId: string): string | null {
+    const nextKey = getStickyFilePreviewStorageKey(scopeKey, sessionId)
+    const nextValue = readLocalStorageItem(nextKey)
+    if (nextValue && nextValue.trim().length > 0) {
+        return nextValue
+    }
+
+    const legacyValue = readLocalStorageItem(getLegacyStickyFilePreviewStorageKey(baseUrl, sessionId))
+    return legacyValue && legacyValue.trim().length > 0 ? legacyValue : null
+}
+
+function saveStickyFilePreview(scopeKey: string, baseUrl: string, sessionId: string, filePath: string | null): void {
+    const storageKey = getStickyFilePreviewStorageKey(scopeKey, sessionId)
+    if (filePath && filePath.trim().length > 0) {
+        writeLocalStorageItem(storageKey, filePath)
+    } else {
+        removeLocalStorageItem(storageKey)
+    }
+    removeLocalStorageItem(getLegacyStickyFilePreviewStorageKey(baseUrl, sessionId))
+}
+
+function globPatternToRegExp(pattern: string): RegExp {
+    const escaped = pattern
+        .replace(/[|\\{}()[\]^$+?.]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\\\?/g, '.')
+    return new RegExp(`^${escaped}$`, 'i')
+}
+
+function normalizeWheelDelta(deltaY: number, deltaMode: number): number {
+    const absDelta = Math.abs(deltaY)
+    if (deltaMode === 1) {
+        return absDelta * 16
+    }
+    if (deltaMode === 2) {
+        return absDelta * (typeof window !== 'undefined' ? window.innerHeight : 800)
+    }
+    return absDelta
+}
+
 function BackIcon() {
     return (
         <svg
@@ -59,6 +209,26 @@ function ConnectionIndicator(props: { status: 'idle' | 'connecting' | 'connected
         <div className="flex items-center" aria-label={label} title={label} role="status">
             <span className={`h-2.5 w-2.5 rounded-full ${colorClass}`} />
         </div>
+    )
+}
+
+function InfoIcon() {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
+        </svg>
     )
 }
 
@@ -99,6 +269,8 @@ type ModifierState = {
     ctrl: boolean
     alt: boolean
 }
+
+type OpenFileSearchMode = 'fuzzy' | 'glob'
 
 function applyModifierState(sequence: string, state: ModifierState): string {
     let modified = sequence
@@ -211,10 +383,17 @@ function QuickKeyButton(props: {
 export default function TerminalPage() {
     const { t } = useTranslation()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
-    const { api, token, baseUrl } = useAppContext()
+    const { api, token, baseUrl, scopeKey } = useAppContext()
+    const queryClient = useQueryClient()
     const navigate = useNavigate()
     const goBack = useAppGoBack()
-    const { session, isLoading: sessionLoading } = useSession(api, sessionId)
+    const {
+        session,
+        isLoading: sessionLoading,
+        error: sessionError,
+        refetch: refetchSession
+    } = useSession(api, sessionId)
+    const { sessions: allSessions } = useSessions(api)
     const loadedSessionId = session?.id ?? null
     const isShellSession = session?.metadata?.flavor === 'shell'
     const terminalId = useMemo(
@@ -238,19 +417,24 @@ export default function TerminalPage() {
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const modifierStateRef = useRef<ModifierState>({ ctrl: false, alt: false })
     const touchModeRef = useRef<{ startY: number | null; active: boolean }>({ startY: null, active: false })
+    const scrollAccumRef = useRef<{ delta: number; timer: ReturnType<typeof setTimeout> | null }>({ delta: 0, timer: null })
+    const tmuxCopyModeActiveRef = useRef(false)
+    const { autoScroll } = useAutoScroll()
     const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null)
     const [ctrlActive, setCtrlActive] = useState(false)
     const [altActive, setAltActive] = useState(false)
     const [tmuxCopyModeActive, setTmuxCopyModeActive] = useState(false)
     const [keyboardVisible, setKeyboardVisible] = useState(false)
     const [pasteDialogOpen, setPasteDialogOpen] = useState(false)
+    const [supervisorBridgeHelpOpen, setSupervisorBridgeHelpOpen] = useState(false)
     const [manualPasteText, setManualPasteText] = useState('')
     const [textDialogOpen, setTextDialogOpen] = useState(false)
     const [terminalTextSnapshot, setTerminalTextSnapshot] = useState('')
     const [notesDialogOpen, setNotesDialogOpen] = useState(false)
+    const [notesSetupOpen, setNotesSetupOpen] = useState(false)
+    const [notesSetupSaving, setNotesSetupSaving] = useState(false)
     const [notesContent, setNotesContent] = useState('')
     const [notesSavedContent, setNotesSavedContent] = useState('')
-    const [notesHash, setNotesHash] = useState<string | null>(null)
     const [notesLoading, setNotesLoading] = useState(false)
     const [notesSaving, setNotesSaving] = useState(false)
     const [notesError, setNotesError] = useState<string | null>(null)
@@ -259,7 +443,60 @@ export default function TerminalPage() {
     const [notesSearchMatchCount, setNotesSearchMatchCount] = useState(0)
     const [openFileDialogOpen, setOpenFileDialogOpen] = useState(false)
     const [openFileQuery, setOpenFileQuery] = useState('')
+    const [openFileSearchMode, setOpenFileSearchMode] = useState<OpenFileSearchMode>('fuzzy')
+    const [openFileSubmittedQuery, setOpenFileSubmittedQuery] = useState('')
     const [openFileActiveIndex, setOpenFileActiveIndex] = useState(0)
+    const [recentOpenFiles, setRecentOpenFiles] = useState<FileSearchItem[]>(() => loadRecentOpenFiles())
+    const [previewFilePath, setPreviewFilePath] = useState<string | null>(() => loadStickyFilePreview(scopeKey, baseUrl, sessionId))
+    const [isCompactPreviewViewport, setIsCompactPreviewViewport] = useState(() => isCompactFilePreviewViewport())
+    const [previewPanelWidth, setPreviewPanelWidth] = useState(() => {
+        const saved = readLocalStorageNumber(FILE_PREVIEW_WIDTH_KEY)
+        return clampFilePreviewWidth(saved ?? FILE_PREVIEW_DEFAULT_WIDTH)
+    })
+    const [splitSessionId, setSplitSessionId] = useState<string | null>(null)
+    const [pendingSplitStartupSessionId, setPendingSplitStartupSessionId] = useState<string | null>(null)
+    const [closingSplitSessionId, setClosingSplitSessionId] = useState<string | null>(null)
+    const [mainTerminalFocused, setMainTerminalFocused] = useState(false)
+    const [splitPanelWidth, setSplitPanelWidth] = useState(() => {
+        const saved = readLocalStorageNumber(SPLIT_TERMINAL_WIDTH_KEY)
+        return clampSplitTerminalWidth(saved ?? SPLIT_TERMINAL_DEFAULT_WIDTH)
+    })
+
+    // Auto-restore split pane: only restore real terminal split children, not review-owned companion shells.
+    useEffect(() => {
+        if (splitSessionId || !loadedSessionId) return
+        const child = allSessions.find(
+            (s) => s.active
+                && s.metadata?.parentSessionId === loadedSessionId
+                && s.metadata?.childRole === 'split-terminal'
+                && s.id !== closingSplitSessionId
+        )
+        if (child) {
+            setSplitSessionId(child.id)
+        }
+    }, [allSessions, closingSplitSessionId, loadedSessionId, splitSessionId])
+
+    useEffect(() => {
+        if (!closingSplitSessionId) {
+            return
+        }
+        const stillPresent = allSessions.some((session) => session.id === closingSplitSessionId)
+        if (!stillPresent) {
+            setClosingSplitSessionId(null)
+        }
+    }, [allSessions, closingSplitSessionId])
+
+    useEffect(() => {
+        if (!pendingSplitStartupSessionId) {
+            return
+        }
+
+        const pendingSession = allSessions.find((candidate) => candidate.id === pendingSplitStartupSessionId)
+        if (pendingSession?.active) {
+            setPendingSplitStartupSessionId(null)
+        }
+    }, [allSessions, pendingSplitStartupSessionId])
+
     const { copied, copy } = useCopyToClipboard()
     const notesAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const notesSaveInFlightRef = useRef(false)
@@ -269,32 +506,95 @@ export default function TerminalPage() {
     const openFileShortcut = useMemo(() => getOpenFileShortcut(), [])
     const [isRespawningPinnedShell, setIsRespawningPinnedShell] = useState(false)
     const [pinnedShellRespawnError, setPinnedShellRespawnError] = useState<string | null>(null)
+    const [supervisionTarget, setSupervisionTarget] = useState<TerminalSupervisionTargetResponse | null>(null)
+    const [supervisionTargetLoading, setSupervisionTargetLoading] = useState(false)
+    const [supervisionTargetError, setSupervisionTargetError] = useState<string | null>(null)
     const respawnAttemptedRef = useRef(false)
+    const [pendingNewSessionFocus, setPendingNewSessionFocus] = useState(() => hasPendingTerminalFocus(sessionId))
+    const isSupervisorSession = session?.metadata?.terminalSupervision?.role === 'supervisor'
+
+    const getTerminalTextarea = useCallback((): HTMLTextAreaElement | null => {
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return null
+        }
+        return (terminal as unknown as { textarea?: HTMLTextAreaElement | null }).textarea ?? null
+    }, [])
 
     const focusTerminalIfAllowed = useCallback(() => {
         if (keyboardVisible) {
-            return
+            return false
         }
-        terminalRef.current?.focus()
-    }, [keyboardVisible])
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return false
+        }
+        terminal.focus()
+        const textarea = getTerminalTextarea()
+        if (!textarea) {
+            return false
+        }
+        textarea?.focus({ preventScroll: true })
+        return document.activeElement === textarea
+    }, [getTerminalTextarea, keyboardVisible])
 
     const blurTerminal = useCallback(() => {
         terminalRef.current?.blur()
     }, [])
 
-    const fileSearchInventory = useSessionFileSearch(api, loadedSessionId, '', {
-        enabled: openFileDialogOpen && Boolean(loadedSessionId && session?.active && session?.metadata?.path),
-        limit: 5000
-    })
+    const fileSearchInventory = useSessionFileSearch(
+        api,
+        loadedSessionId,
+        openFileSubmittedQuery,
+        {
+            enabled: openFileDialogOpen
+                && openFileSubmittedQuery.length > 0
+                && Boolean(loadedSessionId && session?.active && session?.metadata?.path),
+            limit: 5000,
+            mode: openFileSearchMode
+        }
+    )
+    const openFileHasSubmittedSearch = openFileSubmittedQuery.length > 0
+    const recentOpenFileMatches = useMemo(
+        () => {
+            const query = openFileQuery.trim()
+            if (!query) {
+                return recentOpenFiles
+            }
+
+            if (openFileSearchMode === 'glob') {
+                const regex = globPatternToRegExp(query)
+                return recentOpenFiles.filter((file) => regex.test(file.fileName) || regex.test(file.fullPath))
+            }
+
+            return rankFiles(recentOpenFiles, query).slice(0, RECENT_OPEN_FILES_LIMIT)
+        },
+        [openFileQuery, openFileSearchMode, recentOpenFiles]
+    )
+    const searchResultFiles = useMemo(
+        () => {
+            if (!openFileHasSubmittedSearch) {
+                return []
+            }
+            const rawResults = openFileSearchMode === 'glob'
+                ? fileSearchInventory.files.slice(0, 200)
+                : rankFiles(fileSearchInventory.files, openFileSubmittedQuery).slice(0, 200)
+            const recentPaths = new Set(recentOpenFileMatches.map((file) => file.fullPath))
+            return rawResults.filter((file) => !recentPaths.has(file.fullPath))
+        },
+        [fileSearchInventory.files, openFileHasSubmittedSearch, openFileSearchMode, openFileSubmittedQuery, recentOpenFileMatches]
+    )
     const openFileResults = useMemo(
-        () => openFileQuery.trim()
-            ? rankFiles(fileSearchInventory.files, openFileQuery).slice(0, 200)
-            : fileSearchInventory.files.slice(0, 200),
-        [fileSearchInventory.files, openFileQuery]
+        () => [
+            ...recentOpenFileMatches,
+            ...searchResultFiles
+        ],
+        [recentOpenFileMatches, searchResultFiles]
     )
 
     const {
         state: terminalState,
+        attachment,
         connect,
         reconnectView,
         write,
@@ -330,6 +630,10 @@ export default function TerminalPage() {
         modifierStateRef.current = { ctrl: ctrlActive, alt: altActive }
     }, [ctrlActive, altActive])
 
+    useEffect(() => {
+        tmuxCopyModeActiveRef.current = tmuxCopyModeActive
+    }, [tmuxCopyModeActive])
+
     const resetModifiers = useCallback(() => {
         setCtrlActive(false)
         setAltActive(false)
@@ -350,18 +654,29 @@ export default function TerminalPage() {
             terminalRef.current = terminal
             inputDisposableRef.current?.dispose()
             inputDisposableRef.current = terminal.onData((data) => {
+                // Detect 'q' keypress while in tmux copy-mode to sync UI state
+                if (data === 'q' && tmuxCopyModeActiveRef.current) {
+                    setTmuxCopyModeActive(false)
+                }
                 const modifierState = modifierStateRef.current
                 dispatchSequence(data, modifierState)
             })
+            replay()
             if (terminalState.status === 'connected') {
                 focusTerminalIfAllowed()
             }
         },
-        [dispatchSequence, focusTerminalIfAllowed, terminalState.status]
+        [dispatchSequence, focusTerminalIfAllowed, replay, terminalState.status]
     )
 
     const errorMessage = terminalState.status === 'error' ? terminalState.error : null
-    const canTakeOver = errorMessage === TERMINAL_TAKEOVER_MESSAGE
+    const canTakeOver = Boolean(attachment?.canTakeOver)
+    const attachedElsewhere = attachment?.owner === 'other'
+    const attachmentSinceLabel = formatAttachmentSince(attachment?.attachedAt ?? null)
+    const takeoverStatusMessage = attachedElsewhere
+        ? `Another browser has this terminal${attachmentSinceLabel ? ` since ${attachmentSinceLabel}` : ''}.`
+        : null
+    const takeoverActionLabel = errorMessage === TERMINAL_MOVED_MESSAGE ? 'Reclaim terminal' : 'Take over here'
 
     const handleResize = useCallback(
         (cols: number, rows: number) => {
@@ -412,6 +727,18 @@ export default function TerminalPage() {
     }, [sessionId])
 
     useEffect(() => {
+        setPreviewFilePath(loadStickyFilePreview(scopeKey, baseUrl, sessionId))
+    }, [baseUrl, scopeKey, sessionId])
+
+    useEffect(() => {
+        saveStickyFilePreview(scopeKey, baseUrl, sessionId, previewFilePath)
+    }, [baseUrl, previewFilePath, scopeKey, sessionId])
+
+    useEffect(() => {
+        setPendingNewSessionFocus(hasPendingTerminalFocus(sessionId))
+    }, [sessionId])
+
+    useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
             connectOnceRef.current = false
@@ -438,17 +765,123 @@ export default function TerminalPage() {
     }, [terminalState.status, canTakeOver])
 
     useEffect(() => {
+        if (terminalState.status !== 'error' || canTakeOver) {
+            return
+        }
+        if (!session?.active || !terminalId || sessionLoading) {
+            return
+        }
+        const size = lastSizeRef.current
+        if (!size || connectOnceRef.current) {
+            return
+        }
+
+        const timer = window.setTimeout(() => {
+            if (connectOnceRef.current) {
+                return
+            }
+            connectOnceRef.current = true
+            connect(size.cols, size.rows)
+        }, 250)
+
+        return () => window.clearTimeout(timer)
+    }, [canTakeOver, connect, session?.active, sessionLoading, terminalId, terminalState.status])
+
+    useEffect(() => {
         if (terminalState.status !== 'connected') {
             return
         }
-        focusTerminalIfAllowed()
+        // Delay focus slightly to ensure the terminal textarea is ready
+        // and any navigation-triggered focus changes have settled
+        const timer = requestAnimationFrame(() => {
+            focusTerminalIfAllowed()
+        })
+        return () => cancelAnimationFrame(timer)
     }, [focusTerminalIfAllowed, terminalState.status])
+
+    useEffect(() => {
+        if (!pendingNewSessionFocus || terminalState.status !== 'connected') {
+            return
+        }
+        if (!session?.active) {
+            return
+        }
+        let cancelled = false
+        let attempt = 0
+        let frameId = 0
+        let timeoutId = 0
+
+        const maxAttempts = 12
+        const retryFocus = () => {
+            if (cancelled) {
+                return
+            }
+            if (focusTerminalIfAllowed()) {
+                setPendingNewSessionFocus(false)
+                clearPendingTerminalFocus(sessionId)
+                return
+            }
+            attempt += 1
+            if (attempt >= maxAttempts) {
+                return
+            }
+            frameId = requestAnimationFrame(() => {
+                retryFocus()
+            })
+        }
+
+        retryFocus()
+        timeoutId = window.setTimeout(() => {
+            retryFocus()
+        }, 150)
+
+        return () => {
+            cancelled = true
+            cancelAnimationFrame(frameId)
+            window.clearTimeout(timeoutId)
+        }
+    }, [focusTerminalIfAllowed, pendingNewSessionFocus, session?.active, sessionId, terminalState.status])
 
     useEffect(() => {
         respawnAttemptedRef.current = false
         setIsRespawningPinnedShell(false)
         setPinnedShellRespawnError(null)
     }, [sessionId])
+
+    useEffect(() => {
+        if (!api || !sessionId || !isSupervisorSession) {
+            setSupervisionTarget(null)
+            setSupervisionTargetLoading(false)
+            setSupervisionTargetError(null)
+            return
+        }
+
+        let cancelled = false
+        setSupervisionTargetLoading(true)
+        setSupervisionTargetError(null)
+
+        void api.getTerminalSupervisionTarget(sessionId)
+            .then((target) => {
+                if (!cancelled) {
+                    setSupervisionTarget(target)
+                }
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    setSupervisionTarget(null)
+                    setSupervisionTargetError(error instanceof Error ? error.message : 'Failed to load supervisor bridge')
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setSupervisionTargetLoading(false)
+                }
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [api, isSupervisorSession, sessionId])
 
     const quickInputDisabled = !session?.active || terminalState.status !== 'connected'
     const writePlainInput = useCallback((text: string) => {
@@ -545,7 +978,7 @@ export default function TerminalPage() {
     }, [api, errorMessage, isRespawningPinnedShell, navigate, pinnedShell, session])
 
     const saveNotes = useCallback(async (content: string) => {
-        if (!api || !notesPath) {
+        if (!api) {
             return false
         }
         if (notesSaveInFlightRef.current) {
@@ -556,17 +989,11 @@ export default function TerminalPage() {
         setNotesSaving(true)
         setNotesError(null)
         try {
-            const result = await api.writeSessionFile(
-                sessionId,
-                notesPath,
-                encodeBase64(content),
-                notesHash
-            )
-            if (!result.success) {
-                throw new Error(result.error ?? 'Failed to save notes')
+            const result = await api.writeSessionNotes(sessionId, content)
+            if (result.error) {
+                throw new Error(result.error)
             }
             setNotesSavedContent(content)
-            setNotesHash(result.hash ?? null)
             return true
         } catch (error) {
             setNotesError(error instanceof Error ? error.message : 'Failed to save notes')
@@ -575,29 +1002,25 @@ export default function TerminalPage() {
             notesSaveInFlightRef.current = false
             setNotesSaving(false)
         }
-    }, [api, notesHash, notesPath, sessionId])
+    }, [api, sessionId])
 
-    const createNotesFile = useCallback(async () => {
-        if (!api || !notesPath) {
-            return
-        }
-        setNotesSaving(true)
-        setNotesError(null)
+    const handleNotesSetup = useCallback(async () => {
+        if (!api) return
+        setNotesSetupSaving(true)
         try {
-            const result = await api.writeSessionFile(sessionId, notesPath, '', null)
-            if (!result.success) {
-                throw new Error(result.error ?? 'Failed to create notes file')
-            }
+            await api.writeSessionNotes(sessionId, '')
+            await refetchSession()
+            setNotesSetupOpen(false)
             setNotesContent('')
             setNotesSavedContent('')
-            setNotesHash(result.hash ?? null)
             setNotesLoaded(true)
+            setNotesDialogOpen(true)
         } catch (error) {
-            setNotesError(error instanceof Error ? error.message : 'Failed to create notes file')
+            setNotesError(error instanceof Error ? error.message : 'Failed to create notes')
         } finally {
-            setNotesSaving(false)
+            setNotesSetupSaving(false)
         }
-    }, [api, notesPath, sessionId])
+    }, [api, refetchSession, sessionId])
 
     const runNotesEditorCommand = useCallback((command: 'undo' | 'redo') => {
         const textarea = notesTextareaRef.current
@@ -677,39 +1100,27 @@ export default function TerminalPage() {
         let cancelled = false
         setNotesLoading(true)
         setNotesError(null)
-        void api.readSessionFile(sessionId, notesPath)
+        void api.readSessionNotes(sessionId)
             .then((result) => {
-                if (cancelled) {
-                    return
-                }
+                if (cancelled) return
                 if (!result.success) {
                     setNotesError(result.error ?? 'Failed to load notes')
                     setNotesLoaded(false)
                     return
                 }
-                const decoded = result.content ? decodeBase64(result.content) : { ok: true, text: '' }
-                if (!decoded.ok) {
-                    setNotesError('Failed to decode notes file')
-                    setNotesLoaded(false)
-                    return
-                }
-                setNotesContent(decoded.text)
-                setNotesSavedContent(decoded.text)
-                setNotesHash(result.hash ?? null)
+                const text = result.content ?? ''
+                setNotesContent(text)
+                setNotesSavedContent(text)
                 setNotesLoaded(true)
-                updateNotesSearchMatchCount(decoded.text, notesSearchQuery)
+                updateNotesSearchMatchCount(text, notesSearchQuery)
             })
             .catch((error) => {
-                if (cancelled) {
-                    return
-                }
+                if (cancelled) return
                 setNotesError(error instanceof Error ? error.message : 'Failed to load notes')
                 setNotesLoaded(false)
             })
             .finally(() => {
-                if (!cancelled) {
-                    setNotesLoading(false)
-                }
+                if (!cancelled) setNotesLoading(false)
             })
         return () => {
             cancelled = true
@@ -748,7 +1159,11 @@ export default function TerminalPage() {
 
     useEffect(() => {
         setOpenFileActiveIndex(0)
-    }, [openFileQuery])
+    }, [openFileQuery, openFileSearchMode, openFileSubmittedQuery])
+
+    useEffect(() => {
+        setRecentOpenFiles(loadRecentOpenFiles())
+    }, [])
 
     const handleOpenFileDialog = useCallback(() => {
         if (!loadedSessionId || !session?.active || !session?.metadata?.path) {
@@ -761,30 +1176,185 @@ export default function TerminalPage() {
         }, 0)
     }, [loadedSessionId, session?.active, session?.metadata?.path])
 
-    const handleOpenExplorerFile = useCallback((path: string) => {
+    const rememberRecentOpenFile = useCallback((file: FileSearchItem) => {
+        setRecentOpenFiles((prev) => {
+            const next = [file, ...prev.filter((entry) => entry.fullPath !== file.fullPath)].slice(0, RECENT_OPEN_FILES_LIMIT)
+            saveRecentOpenFiles(next)
+            return next
+        })
+    }, [])
+
+    const handleOpenExplorerFile = useCallback((file: FileSearchItem) => {
         if (!loadedSessionId) {
             return
         }
-        const url = buildSessionExplorerUrl(baseUrl, loadedSessionId, {
-            tab: 'directories',
-            path
-        })
-        window.open(url, '_blank', 'noopener,noreferrer')
+        rememberRecentOpenFile(file)
+        setPreviewFilePath(file.fullPath)
         setOpenFileDialogOpen(false)
         setOpenFileQuery('')
+        setOpenFileSubmittedQuery('')
         setOpenFileActiveIndex(0)
-    }, [baseUrl, loadedSessionId])
+    }, [loadedSessionId, rememberRecentOpenFile])
+
+    const handlePreviewResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault()
+        const startX = event.clientX
+        const startWidth = previewPanelWidth
+
+        const onMove = (e: globalThis.PointerEvent) => {
+            const delta = startX - e.clientX
+            const next = clampFilePreviewWidth(startWidth + delta)
+            setPreviewPanelWidth(next)
+            try { localStorage.setItem(FILE_PREVIEW_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+        }
+
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+    }, [previewPanelWidth])
+
+    useEffect(() => {
+        const syncViewportLayout = () => {
+            setIsCompactPreviewViewport(isCompactFilePreviewViewport())
+            setPreviewPanelWidth((current) => {
+                const next = clampFilePreviewWidth(current)
+                if (next !== current) {
+                    try { localStorage.setItem(FILE_PREVIEW_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+                }
+                return next
+            })
+            setSplitPanelWidth((current) => {
+                const next = clampSplitTerminalWidth(current)
+                if (next !== current) {
+                    try { localStorage.setItem(SPLIT_TERMINAL_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+                }
+                return next
+            })
+        }
+
+        window.addEventListener('resize', syncViewportLayout)
+        return () => window.removeEventListener('resize', syncViewportLayout)
+    }, [])
+
+    const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault()
+        const startX = event.clientX
+        const startWidth = splitPanelWidth
+
+        const onMove = (e: globalThis.PointerEvent) => {
+            const delta = startX - e.clientX
+            const next = clampSplitTerminalWidth(startWidth + delta)
+            setSplitPanelWidth(next)
+            try { localStorage.setItem(SPLIT_TERMINAL_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+        }
+
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+    }, [splitPanelWidth])
+
+    const handleSplitTerminal = useCallback(async () => {
+        if (!api || !session?.metadata?.path) return
+        try {
+            const result = await api.spawnHubSession(
+                session.metadata.path,
+                `${session.metadata.name ?? 'terminal'} (split)`,
+                undefined, undefined,
+                undefined, undefined, undefined, undefined, undefined,
+                sessionId,
+                'split-terminal'
+            )
+            if (result.type === 'success') {
+                setSplitSessionId(result.sessionId)
+                setPendingSplitStartupSessionId(result.sessionId)
+                await waitForSpawnedShellSessionReady({
+                    api,
+                    queryClient,
+                    scopeKey,
+                    sessionId: result.sessionId
+                })
+            }
+        } catch {
+            // silently fail
+        }
+    }, [api, queryClient, scopeKey, session?.metadata?.path, session?.metadata?.name, sessionId])
+
+    const handleCloseSplit = useCallback(async () => {
+        if (!api || !splitSessionId || closingSplitSessionId === splitSessionId) {
+            return
+        }
+
+        setClosingSplitSessionId(splitSessionId)
+        try {
+            await api.closeSession(splitSessionId)
+            setSplitSessionId((current) => current === splitSessionId ? null : current)
+            setPendingSplitStartupSessionId((current) => current === splitSessionId ? null : current)
+        } catch {
+            setClosingSplitSessionId(null)
+        }
+    }, [api, closingSplitSessionId, splitSessionId])
+
+    const handleUnsplitTerminal = useCallback(async (childSessionId: string) => {
+        if (!api) {
+            return
+        }
+        await api.updateSession(childSessionId, {
+            parentSessionId: null,
+            childRole: null
+        })
+        setSplitSessionId((current) => current === childSessionId ? null : current)
+        setPendingSplitStartupSessionId((current) => current === childSessionId ? null : current)
+        setClosingSplitSessionId((current) => current === childSessionId ? null : current)
+    }, [api])
+
+    useEffect(() => {
+        if (!splitSessionId) {
+            return
+        }
+
+        const splitSession = allSessions.find((candidate) => candidate.id === splitSessionId)
+        if (splitSession?.active) {
+            if (pendingSplitStartupSessionId === splitSessionId) {
+                setPendingSplitStartupSessionId(null)
+            }
+            return
+        }
+        if (pendingSplitStartupSessionId === splitSessionId) {
+            return
+        }
+        if (!splitSession || !splitSession.active) {
+            setSplitSessionId(null)
+            if (closingSplitSessionId === splitSessionId) {
+                setClosingSplitSessionId(null)
+            }
+        }
+    }, [allSessions, closingSplitSessionId, pendingSplitStartupSessionId, splitSessionId])
+
+    const splitSessionStarting = splitSessionId !== null && pendingSplitStartupSessionId === splitSessionId
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
+            // Allow the shortcut from the terminal (xterm textarea) since it always has modifiers.
+            // Only skip from real user inputs like search fields and dialogs.
             const target = event.target as HTMLElement | null
             const tagName = target?.tagName?.toLowerCase()
-            const isEditable = target?.isContentEditable
+            const isXtermTextarea = tagName === 'textarea' && target?.closest('.xterm')
+            const isUserInput = !isXtermTextarea && (
+                target?.isContentEditable
                 || tagName === 'input'
                 || tagName === 'textarea'
                 || tagName === 'select'
+            )
 
-            if (!openFileDialogOpen && !isEditable && matchShortcutEvent(event, openFileShortcut)) {
+            if (!openFileDialogOpen && !isUserInput && matchShortcutEvent(event, openFileShortcut)) {
                 event.preventDefault()
                 handleOpenFileDialog()
                 return
@@ -797,6 +1367,7 @@ export default function TerminalPage() {
             if (event.key === 'Escape') {
                 setOpenFileDialogOpen(false)
                 setOpenFileQuery('')
+                setOpenFileSubmittedQuery('')
                 setOpenFileActiveIndex(0)
                 return
             }
@@ -814,17 +1385,22 @@ export default function TerminalPage() {
             }
 
             if (event.key === 'Enter') {
+                if (event.target === openFileInputRef.current) {
+                    event.preventDefault()
+                    setOpenFileSubmittedQuery(openFileQuery.trim())
+                    return
+                }
                 const match = openFileResults[openFileActiveIndex]
                 if (match?.fileType === 'file') {
                     event.preventDefault()
-                    handleOpenExplorerFile(match.fullPath)
+                    handleOpenExplorerFile(match)
                 }
             }
         }
 
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
-    }, [handleOpenExplorerFile, handleOpenFileDialog, openFileActiveIndex, openFileDialogOpen, openFileResults, openFileShortcut])
+    }, [handleOpenExplorerFile, handleOpenFileDialog, openFileActiveIndex, openFileDialogOpen, openFileQuery, openFileResults, openFileShortcut])
 
     const handleQuickInput = useCallback(
         (sequence: string) => {
@@ -909,6 +1485,55 @@ export default function TerminalPage() {
         touchModeRef.current = { startY: null, active: false }
     }, [])
 
+    const handleTerminalWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+        if (quickInputDisabled) return
+
+        const absDelta = normalizeWheelDelta(event.deltaY, event.deltaMode)
+
+        if (tmuxCopyModeActive) {
+            // Already in copy-mode: translate wheel into tmux scroll commands
+            event.preventDefault()
+            if (absDelta < 5) return
+            if (absDelta > 200) {
+                // Fast scroll → page up/down
+                write(event.deltaY < 0 ? '\u001b[5~' : '\u001b[6~')
+            } else {
+                // Fine scroll → arrow keys (1 line per ~40px, capped at 5)
+                const lines = Math.max(1, Math.min(5, Math.round(absDelta / 40)))
+                const arrow = event.deltaY < 0 ? '\u001b[A' : '\u001b[B'
+                for (let i = 0; i < lines; i++) write(arrow)
+            }
+            return
+        }
+
+        // Auto-scroll detection: accumulate wheel delta and activate copy-mode on threshold
+        if (!autoScroll) return
+
+        const accum = scrollAccumRef.current
+        accum.delta += absDelta
+
+        if (accum.timer) clearTimeout(accum.timer)
+        accum.timer = setTimeout(() => {
+            accum.delta = 0
+            accum.timer = null
+        }, 400)
+
+        if (accum.delta > 150) {
+            // Threshold reached → enter tmux copy-mode
+            sendTmuxPrefixSequence('[')
+            setTmuxCopyModeActive(true)
+            resetModifiers()
+            accum.delta = 0
+            if (accum.timer) {
+                clearTimeout(accum.timer)
+                accum.timer = null
+            }
+            // Send initial scroll in the direction the user was scrolling
+            event.preventDefault()
+            write(event.deltaY < 0 ? '\u001b[5~' : '\u001b[6~')
+        }
+    }, [autoScroll, quickInputDisabled, tmuxCopyModeActive, sendTmuxPrefixSequence, write, resetModifiers])
+
     const handleModifierToggle = useCallback(
         (modifier: 'ctrl' | 'alt') => {
             if (quickInputDisabled) {
@@ -926,19 +1551,88 @@ export default function TerminalPage() {
         [focusTerminalIfAllowed, quickInputDisabled]
     )
 
+    const isNewShellStartup = isShellSession && pendingNewSessionFocus
+    const startupState: StartupState | null = (() => {
+        if (!isNewShellStartup) {
+            return null
+        }
+        if (sessionLoading || !session) {
+            return 'creating-session'
+        }
+        if (!session.metadata?.shellTerminalId || session.metadata?.shellTerminalState !== 'ready') {
+            return 'waiting-for-terminal-metadata'
+        }
+        if (terminalState.status === 'error' && !canTakeOver) {
+            return 'failed'
+        }
+        if (terminalState.status !== 'connected') {
+            return 'attaching-terminal'
+        }
+        if (pendingNewSessionFocus) {
+            return 'focusing-terminal'
+        }
+        return null
+    })()
+
+    const startupTitle = startupState === 'creating-session'
+        ? 'Starting shell…'
+        : startupState === 'waiting-for-terminal-metadata'
+            ? 'Preparing terminal…'
+            : startupState === 'attaching-terminal'
+                ? 'Connecting to terminal…'
+                : startupState === 'focusing-terminal'
+                    ? 'Focusing terminal…'
+                    : 'Terminal startup failed'
+
+    const startupDescription = startupState === 'creating-session'
+        ? 'Creating the session record and waiting for the shell to appear.'
+        : startupState === 'waiting-for-terminal-metadata'
+            ? 'The shell session exists, but the terminal backend is not ready yet.'
+            : startupState === 'attaching-terminal'
+                ? 'Attaching this page to the new terminal backend.'
+                : startupState === 'focusing-terminal'
+                    ? 'The terminal is connected. Handing keyboard focus over now.'
+                    : (errorMessage ?? 'The new shell did not become interactive.')
+
     if (!session) {
+        if (sessionLoading) {
+            return (
+                <div className="flex h-full items-center justify-center">
+                    <LoadingState label={pendingNewSessionFocus ? 'Starting shell…' : 'Loading session…'} className="text-sm" />
+                </div>
+            )
+        }
+
         return (
-            <div className="flex h-full items-center justify-center">
-                <LoadingState label="Loading session…" className="text-sm" />
+            <div className="flex h-full items-center justify-center px-6">
+                <div className="flex max-w-md flex-col items-center gap-3 text-center">
+                    <div className="text-base font-semibold text-[var(--app-fg)]">
+                        Select a terminal
+                    </div>
+                    <div className="text-sm text-[var(--app-hint)]">
+                        {sessionError
+                            ? 'This terminal is no longer available. Choose another session from the list.'
+                            : 'Choose a terminal session from the list to keep working.'}
+                    </div>
+                </div>
             </div>
         )
     }
 
     const subtitle = session.metadata?.path ?? sessionId
     const status = terminalState.status
+    const bridge = supervisionTarget?.bridge ?? null
+    const directCommand = `maglev supervisor send --session ${sessionId} -- <command ...>`
+    const helperCommand = bridge ? `${bridge.helperScriptPath} <command ...>` : null
+    const sessionLabel = `Session ${sessionId}`
+
+    const previewPanelOpen = !splitSessionId && Boolean(previewFilePath && loadedSessionId)
+    const previewDialogOpen = previewPanelOpen && isCompactPreviewViewport
+    const previewSidebarOpen = previewPanelOpen && !isCompactPreviewViewport
 
     return (
-        <div className="relative flex h-full flex-col">
+        <div className="relative flex h-full min-h-0 bg-[var(--app-bg)]">
+            <div className="flex min-w-0 flex-1 flex-col">
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="border-b border-[var(--app-border)] p-3">
                     <div className="flex items-center gap-2">
@@ -957,6 +1651,24 @@ export default function TerminalPage() {
                             <ConnectionIndicator status={status} />
                         </div>
                     </div>
+                    {isSupervisorSession ? (
+                        <div className="-mx-3 mt-3 overflow-x-auto px-3">
+                            <div className="flex min-w-max items-center gap-2">
+                                <code className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-1 text-xs font-medium text-[var(--app-fg)]">
+                                    {sessionLabel}: {directCommand}
+                                </code>
+                                <button
+                                    type="button"
+                                    onClick={() => setSupervisorBridgeHelpOpen(true)}
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                                    aria-label="Supervisor bridge help"
+                                    title="Supervisor bridge help"
+                                >
+                                    <InfoIcon />
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
                     <div className="-mx-3 mt-3 overflow-x-auto px-3">
                         <div className="flex min-w-max items-center gap-2">
                             <button
@@ -982,17 +1694,39 @@ export default function TerminalPage() {
                             >
                                 Text
                             </button>
-                            {notesPath ? (
-                                <button
-                                    type="button"
-                                    onClick={() => {
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (notesPath) {
                                         setNotesDialogOpen(true)
-                                    }}
-                                    className="shrink-0 rounded-full border border-[var(--app-border)] px-3 py-1 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
-                                >
-                                    Notes
-                                </button>
-                            ) : null}
+                                    } else {
+                                        setNotesSetupOpen(true)
+                                    }
+                                }}
+                                className="shrink-0 rounded-full border border-[var(--app-border)] px-3 py-1 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            >
+                                Notes
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (splitSessionId) {
+                                        void handleCloseSplit()
+                                    } else {
+                                        void handleSplitTerminal()
+                                    }
+                                }}
+                                disabled={splitSessionId !== null && closingSplitSessionId === splitSessionId}
+                                className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                    splitSessionId
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
+                                        : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                                } disabled:cursor-not-allowed disabled:opacity-60`}
+                            >
+                                {splitSessionId
+                                    ? closingSplitSessionId === splitSessionId ? 'Closing split…' : 'Close split'
+                                    : 'Split'}
+                            </button>
                             <button
                                 type="button"
                                 onClick={handleTmuxCopyModeToggle}
@@ -1020,14 +1754,6 @@ export default function TerminalPage() {
                 </div>
             </div>
 
-            {session.active ? null : (
-                <div className="px-3 pt-3">
-                    <div className="w-full rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
-                        Session is inactive. Terminal is unavailable.
-                    </div>
-                </div>
-            )}
-
             {isRespawningPinnedShell ? (
                 <div className="px-3 pt-3">
                     <div className="w-full rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
@@ -1047,7 +1773,10 @@ export default function TerminalPage() {
             {errorMessage ? (
                 <div className="w-full px-3 pt-3">
                     <div className="rounded-md border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-xs text-[var(--app-badge-error-text)]">
-                        <div>{errorMessage}</div>
+                        <div>{takeoverStatusMessage ?? errorMessage}</div>
+                        {takeoverStatusMessage && errorMessage !== TERMINAL_TAKEOVER_MESSAGE ? (
+                            <div className="mt-1 text-[11px] opacity-80">{errorMessage}</div>
+                        ) : null}
                         {canTakeOver ? (
                             <div className="mt-2">
                                 <Button
@@ -1057,7 +1786,7 @@ export default function TerminalPage() {
                                     onClick={takeOver}
                                     className="border-[var(--app-badge-error-border)] bg-transparent text-[var(--app-badge-error-text)] hover:bg-[var(--app-badge-error-bg)]"
                                 >
-                                    Take over here
+                                    {takeoverActionLabel}
                                 </Button>
                             </div>
                         ) : null}
@@ -1074,23 +1803,85 @@ export default function TerminalPage() {
                 </div>
             ) : null}
 
-            <div className="flex-1 overflow-hidden bg-[var(--app-bg)]">
-                <div className="h-full w-full p-3">
-                    <div
-                        className="h-full w-full"
-                        onTouchStart={handleTerminalTouchStart}
-                        onTouchMove={handleTerminalTouchMove}
-                        onTouchEnd={handleTerminalTouchEnd}
-                        onTouchCancel={handleTerminalTouchEnd}
-                    >
-                        <TerminalView
-                            onMount={handleTerminalMount}
-                            onResize={handleResize}
-                            className="h-full w-full"
-                            suppressFocus={keyboardVisible}
-                        />
+            {startupState ? (
+                <div className="w-full px-3 pt-3">
+                    <div className={`rounded-md border p-3 text-xs ${
+                        startupState === 'failed'
+                            ? 'border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] text-[var(--app-badge-error-text)]'
+                            : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'
+                    }`}>
+                        <div className="font-medium text-[var(--app-fg)]">{startupTitle}</div>
+                        <div className="mt-1">{startupDescription}</div>
                     </div>
                 </div>
+            ) : null}
+
+            <div className="flex flex-1 min-h-0 overflow-hidden bg-[var(--app-bg)]">
+                <div className="flex-1 min-w-0 overflow-hidden">
+                    <div className="h-full w-full p-3">
+                        <div
+                            className={`relative h-full w-full overflow-hidden rounded-xl border bg-[var(--app-bg)] transition-[border-color,box-shadow] duration-150 ${
+                                splitSessionId
+                                    ? mainTerminalFocused
+                                        ? 'border-[var(--app-link)] shadow-[0_0_0_1px_var(--app-link),0_12px_32px_rgba(37,99,235,0.10)]'
+                                        : 'border-[var(--app-border)]'
+                                    : 'border-transparent'
+                            }`}
+                            onTouchStart={handleTerminalTouchStart}
+                            onTouchMove={handleTerminalTouchMove}
+                            onTouchEnd={handleTerminalTouchEnd}
+                            onTouchCancel={handleTerminalTouchEnd}
+                            onWheelCapture={handleTerminalWheel}
+                        >
+                            <TerminalView
+                                onMount={handleTerminalMount}
+                                onResize={handleResize}
+                                onFocusChange={setMainTerminalFocused}
+                                className="h-full w-full"
+                                suppressFocus={keyboardVisible}
+                            />
+                            {session.active ? null : (
+                                <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex justify-center">
+                                    <div
+                                        role="status"
+                                        className="max-w-md rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)]/95 px-3 py-1.5 text-xs font-medium text-[var(--app-hint)] shadow-[var(--app-panel-shadow)] backdrop-blur"
+                                    >
+                                        Session is inactive. Terminal is unavailable.
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {splitSessionId ? (
+                    <div className="relative flex shrink-0 border-l border-[var(--app-border)]" style={{ width: `${splitPanelWidth}px` }}>
+                        <div
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label="Resize split terminal"
+                            onPointerDown={handleSplitResizeStart}
+                            className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
+                        >
+                            <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
+                        </div>
+                        <SplitTerminalPanel
+                            sessionId={splitSessionId}
+                            onClose={handleCloseSplit}
+                            onUnsplit={handleUnsplitTerminal}
+                            isClosing={closingSplitSessionId === splitSessionId}
+                            starting={splitSessionStarting}
+                            onNavigate={(id) => {
+                                setSplitSessionId(null)
+                                setPendingSplitStartupSessionId((current) => current === id ? null : current)
+                                void navigate({
+                                    to: '/sessions/$sessionId',
+                                    params: { sessionId: id },
+                                })
+                            }}
+                        />
+                    </div>
+                ) : null}
             </div>
 
             {keyboardVisible ? (
@@ -1136,11 +1927,81 @@ export default function TerminalPage() {
             ) : null}
 
             <Dialog
+                open={supervisorBridgeHelpOpen}
+                onOpenChange={setSupervisorBridgeHelpOpen}
+            >
+                <DialogContent className="max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Supervisor bridge help</DialogTitle>
+                        <DialogDescription>
+                            Use the supervisor command or helper script to send input to the worker. Read worker output and state from the bridge files.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 text-sm text-[var(--app-fg)]">
+                        <div className="space-y-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">Direct command</div>
+                            <div className="text-xs text-[var(--app-hint)]">{sessionLabel}</div>
+                            <code className="block break-all rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                                {directCommand}
+                            </code>
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">Examples</div>
+                            <div className="space-y-2">
+                                <code className="block break-all rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                                    maglev supervisor send --session {sessionId} -- git status
+                                </code>
+                                <code className="block break-all rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                                    maglev supervisor send --session {sessionId} -- "run the tests and summarize the failure"
+                                </code>
+                                {helperCommand ? (
+                                    <code className="block break-all rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                                        {helperCommand}
+                                    </code>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        {supervisionTargetError ? (
+                            <div className="rounded-lg border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] px-3 py-2 text-sm text-[var(--app-badge-error-text)]">
+                                {supervisionTargetError}
+                            </div>
+                        ) : bridge ? (
+                            <div className="space-y-2">
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">Read from bridge</div>
+                                <div className="grid gap-2">
+                                    <div className="rounded-lg border border-[var(--app-border)] px-3 py-2">
+                                        <div className="text-xs font-medium text-[var(--app-fg)]">Worker transcript</div>
+                                        <code className="mt-1 block break-all text-xs text-[var(--app-hint)]">{bridge.transcriptFilePath}</code>
+                                    </div>
+                                    <div className="rounded-lg border border-[var(--app-border)] px-3 py-2">
+                                        <div className="text-xs font-medium text-[var(--app-fg)]">Worker state</div>
+                                        <code className="mt-1 block break-all text-xs text-[var(--app-hint)]">{bridge.stateFilePath}</code>
+                                    </div>
+                                    <div className="rounded-lg border border-[var(--app-border)] px-3 py-2">
+                                        <div className="text-xs font-medium text-[var(--app-fg)]">Helper script</div>
+                                        <code className="mt-1 block break-all text-xs text-[var(--app-hint)]">{bridge.helperScriptPath}</code>
+                                    </div>
+                                </div>
+                                <div className="rounded-lg border border-dashed border-[var(--app-border)] px-3 py-2 text-xs text-[var(--app-hint)]">
+                                    Read <code>worker-terminal.log</code> and <code>worker-terminal.json</code>. Write back with <code>send-to-worker.sh</code> or <code>maglev supervisor send</code>, not by editing a bridge file directly.
+                                </div>
+                            </div>
+                        ) : supervisionTargetLoading ? (
+                            <div className="text-sm text-[var(--app-hint)]">Loading bridge details…</div>
+                        ) : null}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
                 open={openFileDialogOpen}
                 onOpenChange={(open) => {
                     setOpenFileDialogOpen(open)
                     if (!open) {
                         setOpenFileQuery('')
+                        setOpenFileSubmittedQuery('')
                         setOpenFileActiveIndex(0)
                     }
                 }}
@@ -1153,51 +2014,131 @@ export default function TerminalPage() {
                         </DialogDescription>
                     </DialogHeader>
                     <div className="mt-2">
-                        <input
-                            ref={openFileInputRef}
-                            type="text"
-                            value={openFileQuery}
-                            onChange={(event) => setOpenFileQuery(event.target.value)}
-                            placeholder="Type to fuzzy search files"
-                            className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                            autoCapitalize="none"
-                            autoCorrect="off"
-                            spellCheck={false}
-                        />
+                        <div className="mb-2 flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setOpenFileSearchMode('fuzzy')}
+                                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                    openFileSearchMode === 'fuzzy'
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
+                                        : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                                }`}
+                            >
+                                Fuzzy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setOpenFileSearchMode('glob')}
+                                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                    openFileSearchMode === 'glob'
+                                        ? 'border-[var(--app-link)] bg-[var(--app-link)] text-[var(--app-bg)]'
+                                        : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                                }`}
+                            >
+                                Pattern
+                            </button>
+                            <div className="text-xs text-[var(--app-hint)]">
+                                {openFileSearchMode === 'glob'
+                                    ? 'Use * for many characters and ? for one character'
+                                    : 'Matches both file names and full paths'}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input
+                                ref={openFileInputRef}
+                                type="text"
+                                value={openFileQuery}
+                                onChange={(event) => {
+                                    setOpenFileQuery(event.target.value)
+                                    setOpenFileSubmittedQuery('')
+                                }}
+                                placeholder={openFileSearchMode === 'glob'
+                                    ? 'Type a wildcard pattern like src/**/*.ts or *test?.ts'
+                                    : 'Type to fuzzy search files'}
+                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                spellCheck={false}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setOpenFileSubmittedQuery(openFileQuery.trim())}
+                                disabled={openFileQuery.trim().length === 0}
+                                className="shrink-0 rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-bg)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Search
+                            </button>
+                        </div>
                     </div>
                     <div className="mt-3 max-h-[50vh] overflow-y-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)]">
-                        {fileSearchInventory.isLoading ? (
+                        {fileSearchInventory.isLoading && openFileHasSubmittedSearch ? (
                             <div className="px-3 py-4 text-sm text-[var(--app-hint)]">Loading files…</div>
-                        ) : fileSearchInventory.error ? (
+                        ) : null}
+                        {fileSearchInventory.error && openFileHasSubmittedSearch ? (
                             <div className="px-3 py-4 text-sm text-[var(--app-badge-error-text)]">{fileSearchInventory.error}</div>
-                        ) : openFileResults.length === 0 ? (
-                            <div className="px-3 py-4 text-sm text-[var(--app-hint)]">No matching files</div>
+                        ) : null}
+                        {openFileResults.length === 0 ? (
+                            <div className="px-3 py-4 text-sm text-[var(--app-hint)]">
+                                {openFileQuery.trim().length > 0
+                                    ? 'No recent matches. Press Search to look through workspace files.'
+                                    : openFileHasSubmittedSearch
+                                        ? 'No matching files'
+                                        : 'No recent files yet. Search to find a file.'}
+                            </div>
                         ) : (
                             <div className="divide-y divide-[var(--app-divider)]">
-                                {openFileResults.map((file, index) => (
-                                    <button
-                                        key={file.fullPath}
-                                        type="button"
-                                        onClick={() => {
-                                            if (file.fileType === 'file') {
-                                                handleOpenExplorerFile(file.fullPath)
-                                            }
-                                        }}
-                                        className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors ${
-                                            index === openFileActiveIndex
-                                                ? 'bg-[var(--app-subtle-bg)]'
-                                                : 'hover:bg-[var(--app-subtle-bg)]'
-                                        }`}
-                                    >
-                                        <div className="min-w-0 flex-1">
-                                            <div className="truncate text-sm font-medium text-[var(--app-fg)]">{file.fileName}</div>
-                                            <div className="truncate text-xs text-[var(--app-hint)]">{file.fullPath}</div>
-                                        </div>
-                                        <div className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--app-hint)]">
-                                            {file.fileType}
-                                        </div>
-                                    </button>
-                                ))}
+                                {(() => {
+                                    let runningIndex = 0
+                                    const sections = [
+                                        {
+                                            title: openFileQuery.trim().length > 0 ? 'Recent matches' : 'Recent files',
+                                            files: recentOpenFileMatches
+                                        },
+                                        {
+                                            title: 'Search results',
+                                            files: searchResultFiles
+                                        }
+                                    ].filter((section) => section.files.length > 0)
+
+                                    return sections.map((section) => {
+                                        const startIndex = runningIndex
+                                        runningIndex += section.files.length
+                                        return (
+                                            <div key={section.title}>
+                                                <div className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-[var(--app-hint)]">
+                                                    {section.title}
+                                                </div>
+                                                {section.files.map((file, index) => {
+                                                    const resultIndex = startIndex + index
+                                                    return (
+                                                        <button
+                                                            key={`${section.title}:${file.fullPath}`}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (file.fileType === 'file') {
+                                                                    handleOpenExplorerFile(file)
+                                                                }
+                                                            }}
+                                                            className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors ${
+                                                                resultIndex === openFileActiveIndex
+                                                                    ? 'bg-[var(--app-subtle-bg)]'
+                                                                    : 'hover:bg-[var(--app-subtle-bg)]'
+                                                            }`}
+                                                        >
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="truncate text-sm font-medium text-[var(--app-fg)]">{file.fileName}</div>
+                                                                <div className="truncate text-xs text-[var(--app-hint)]">{file.fullPath}</div>
+                                                            </div>
+                                                            <div className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--app-hint)]">
+                                                                {file.fileType}
+                                                            </div>
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        )
+                                    })
+                                })()}
                             </div>
                         )}
                     </div>
@@ -1250,6 +2191,30 @@ export default function TerminalPage() {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={notesSetupOpen} onOpenChange={setNotesSetupOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Create Notes</DialogTitle>
+                        <DialogDescription>
+                            Attach a notes file to this session. Notes are stored under MAGLEV_HOME and won't affect your git tree.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="mt-4 flex flex-col gap-3">
+                        {notesError ? (
+                            <div className="text-xs text-red-500">{notesError}</div>
+                        ) : null}
+                        <Button
+                            type="button"
+                            className="w-full"
+                            disabled={notesSetupSaving}
+                            onClick={() => void handleNotesSetup()}
+                        >
+                            {notesSetupSaving ? 'Creating…' : 'Create notes'}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             <Dialog
                 open={notesDialogOpen}
                 onOpenChange={(open) => {
@@ -1279,19 +2244,22 @@ export default function TerminalPage() {
                             <div className="rounded-md border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-sm text-[var(--app-badge-error-text)]">
                                 {notesError}
                             </div>
-                            {notesPath ? (
-                                <div className="flex justify-end">
-                                    <Button
-                                        type="button"
-                                        onClick={() => {
-                                            void createNotesFile()
-                                        }}
-                                        disabled={notesSaving}
-                                    >
-                                        Create notes file here
-                                    </Button>
-                                </div>
-                            ) : null}
+                            <div className="flex justify-end">
+                                <Button
+                                    type="button"
+                                    onClick={() => {
+                                        void saveNotes('').then((ok) => {
+                                            if (ok) {
+                                                setNotesLoaded(true)
+                                                setNotesError(null)
+                                            }
+                                        })
+                                    }}
+                                    disabled={notesSaving}
+                                >
+                                    Create notes file
+                                </Button>
+                            </div>
                         </div>
                     ) : (
                         <>
@@ -1427,6 +2395,55 @@ export default function TerminalPage() {
                         </Button>
                     </div>
                 </DialogContent>
+            </Dialog>
+            </div>
+
+            {previewSidebarOpen && previewFilePath && loadedSessionId ? (
+                <div className="relative flex h-full shrink-0 border-l border-[var(--app-border)]" style={{ width: `${previewPanelWidth}px` }}>
+                    <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize file preview"
+                        onPointerDown={handlePreviewResizeStart}
+                        className="absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-col-resize"
+                    >
+                        <div className="mx-auto h-full w-[2px] rounded-full bg-transparent transition-colors hover:bg-[var(--app-link)]" />
+                    </div>
+                    <FilePreviewPanel
+                        sessionId={loadedSessionId}
+                        filePath={previewFilePath}
+                        api={api}
+                        presentation="sidebar"
+                        onClose={() => setPreviewFilePath(null)}
+                    />
+                </div>
+            ) : null}
+
+            <Dialog
+                open={previewDialogOpen}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setPreviewFilePath(null)
+                    }
+                }}
+            >
+                {previewDialogOpen && previewFilePath && loadedSessionId ? (
+                    <DialogContent className="left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 rounded-none border-0 p-0">
+                        <DialogHeader className="sr-only">
+                            <DialogTitle>File preview</DialogTitle>
+                            <DialogDescription>
+                                Review, annotate, or edit the selected workspace file.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <FilePreviewPanel
+                            sessionId={loadedSessionId}
+                            filePath={previewFilePath}
+                            api={api}
+                            presentation="overlay"
+                            onClose={() => setPreviewFilePath(null)}
+                        />
+                    </DialogContent>
+                ) : null}
             </Dialog>
         </div>
     )

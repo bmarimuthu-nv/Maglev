@@ -6,13 +6,14 @@ export type SSESubscription = {
     id: string
     namespace: string
     all: boolean
-    sessionId: string | null
+    sessionIds: string[]
     machineId: string | null
 }
 
 type SSEConnection = SSESubscription & {
     send: (event: SyncEvent) => void | Promise<void>
     sendHeartbeat: () => void | Promise<void>
+    failureStrikes: number
 }
 
 export class SSEManager {
@@ -20,17 +21,19 @@ export class SSEManager {
     private heartbeatTimer: NodeJS.Timeout | null = null
     private readonly heartbeatMs: number
     private readonly visibilityTracker: VisibilityTracker
+    private readonly maxFailureStrikes: number
 
-    constructor(heartbeatMs = 30_000, visibilityTracker: VisibilityTracker) {
+    constructor(heartbeatMs = 30_000, visibilityTracker: VisibilityTracker, maxFailureStrikes = 3) {
         this.heartbeatMs = heartbeatMs
         this.visibilityTracker = visibilityTracker
+        this.maxFailureStrikes = Math.max(1, maxFailureStrikes)
     }
 
     subscribe(options: {
         id: string
         namespace: string
         all?: boolean
-        sessionId?: string | null
+        sessionIds?: string[]
         machineId?: string | null
         visibility?: VisibilityState
         send: (event: SyncEvent) => void | Promise<void>
@@ -40,10 +43,11 @@ export class SSEManager {
             id: options.id,
             namespace: options.namespace,
             all: Boolean(options.all),
-            sessionId: options.sessionId ?? null,
+            sessionIds: options.sessionIds ?? [],
             machineId: options.machineId ?? null,
             send: options.send,
-            sendHeartbeat: options.sendHeartbeat
+            sendHeartbeat: options.sendHeartbeat,
+            failureStrikes: 0
         }
 
         this.connections.set(subscription.id, subscription)
@@ -57,7 +61,7 @@ export class SSEManager {
             id: subscription.id,
             namespace: subscription.namespace,
             all: subscription.all,
-            sessionId: subscription.sessionId,
+            sessionIds: subscription.sessionIds,
             machineId: subscription.machineId
         }
     }
@@ -95,10 +99,11 @@ export class SSEManager {
         let successCount = 0
         for (const result of results) {
             if (result.ok) {
+                this.resetFailureStrikes(result.id)
                 successCount += 1
                 continue
             }
-            this.unsubscribe(result.id)
+            this.recordFailure(result.id)
         }
 
         return successCount
@@ -110,8 +115,10 @@ export class SSEManager {
                 continue
             }
 
-            void Promise.resolve(connection.send(event)).catch(() => {
-                this.unsubscribe(connection.id)
+            void Promise.resolve(connection.send(event)).then(() => {
+                this.resetFailureStrikes(connection.id)
+            }, () => {
+                this.recordFailure(connection.id)
             })
         }
     }
@@ -124,6 +131,24 @@ export class SSEManager {
         this.connections.clear()
     }
 
+    getConnectionCount(namespace?: string): number {
+        if (!namespace) {
+            return this.connections.size
+        }
+
+        let count = 0
+        for (const connection of this.connections.values()) {
+            if (connection.namespace === namespace) {
+                count += 1
+            }
+        }
+        return count
+    }
+
+    getVisibleConnectionCount(namespace?: string): number {
+        return this.visibilityTracker.getVisibleConnectionCount(namespace)
+    }
+
     private ensureHeartbeat(): void {
         if (this.heartbeatTimer || this.heartbeatMs <= 0) {
             return
@@ -131,8 +156,10 @@ export class SSEManager {
 
         this.heartbeatTimer = setInterval(() => {
             for (const connection of this.connections.values()) {
-                void Promise.resolve(connection.sendHeartbeat()).catch(() => {
-                    this.unsubscribe(connection.id)
+                void Promise.resolve(connection.sendHeartbeat()).then(() => {
+                    this.resetFailureStrikes(connection.id)
+                }, () => {
+                    this.recordFailure(connection.id)
                 })
             }
         }, this.heartbeatMs)
@@ -163,7 +190,7 @@ export class SSEManager {
             return true
         }
 
-        if ('sessionId' in event && connection.sessionId === event.sessionId) {
+        if ('sessionId' in event && connection.sessionIds.includes(event.sessionId)) {
             return true
         }
 
@@ -172,5 +199,26 @@ export class SSEManager {
         }
 
         return false
+    }
+
+    private recordFailure(connectionId: string): void {
+        const connection = this.connections.get(connectionId)
+        if (!connection) {
+            return
+        }
+
+        connection.failureStrikes += 1
+        if (connection.failureStrikes >= this.maxFailureStrikes) {
+            this.unsubscribe(connectionId)
+        }
+    }
+
+    private resetFailureStrikes(connectionId: string): void {
+        const connection = this.connections.get(connectionId)
+        if (!connection || connection.failureStrikes === 0) {
+            return
+        }
+
+        connection.failureStrikes = 0
     }
 }
