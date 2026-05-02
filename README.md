@@ -6,34 +6,6 @@
 
 <p align="center">Run AI coding sessions locally, then control them from your browser or phone.</p>
 
-## Start Here
-
-Pick the setup that matches where your sessions will run:
-
-| Use case | Best fit | Open the UI from |
-|----------|----------|------------------|
-| Local laptop or devbox | Hub and sessions on the same machine | The URL printed by `maglev hub start` |
-| SSH workstation | Hub on the remote machine, browser through an SSH tunnel | The forwarded URL on your laptop |
-| Slurm/HPC node | Server on a reachable login/VNC node, hub inside the allocation | The URL printed by `maglev hub start --remote` |
-
-## Direct vs Server Mode
-
-Maglev does not guess whether your browser can reach a hub. You choose the mode when starting the hub.
-
-Use direct mode when your browser can reach the hub URL directly, including through an SSH tunnel:
-
-```bash
-maglev hub start --name devbox
-```
-
-Use server mode when the hub runs somewhere your browser cannot reach directly, such as inside a Slurm allocation or container:
-
-```bash
-maglev hub start --name "slurm-${SLURM_JOB_ID:-manual}" --remote
-```
-
-In server mode, the hub still listens on a local port, but it also registers with `maglev server`. The server URL is discovered from `~/.maglev/server-url` written by `maglev server`, from saved settings, or from `--server-url <url>`.
-
 ## Install
 
 Fast path: install the latest prebuilt release for your machine.
@@ -61,40 +33,44 @@ If `maglev` is not found after install:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## Build From Source
+## Main Features
 
-Use this path when working from a checkout, testing unreleased changes, or using a platform without a release artifact.
+- Persistent session list that survives browser disconnects and Maglev backend restarts.
+- Auto-connect browser sessions back to running terminals when the page or backend reconnects.
+- Auto-respawn terminals when the Maglev backend restarts, with optional per-terminal startup commands.
+- Code diff and review views for inspecting changes and leaving comments.
+- File browser support for each session, including sessions running inside worktrees.
+- Worktree support for creating isolated coding sessions from the web UI.
 
-Prerequisites:
+## User Workflows
 
-- `git`
-- `bun`
-- Optional but recommended: `rg` and `difft`
+Pick the setup that matches where your sessions will run:
+
+| Use case | Best fit | Open the UI from |
+|----------|----------|------------------|
+| Local laptop or devbox | Hub and sessions on the same machine | The URL printed by `maglev hub start` |
+| SSH workstation | Hub on the remote machine, browser through an SSH tunnel | The forwarded URL on your laptop |
+| Slurm/HPC node | Server on a reachable login/VNC node, hub inside the allocation | The URL printed by `maglev hub start --remote` |
+
+### Direct vs Server Mode
+
+Maglev does not guess whether your browser can reach a hub. You choose the mode when starting the hub.
+
+Use direct mode when your browser can reach the hub URL directly, including through an SSH tunnel:
 
 ```bash
-git clone https://github.com/bmarimuthu-nv/Maglev.git maglev
-cd maglev
-./install.sh
-maglev --version
+maglev hub start --name devbox
 ```
 
-`./install.sh` builds the standalone binary from source and installs `maglev` to `$HOME/.local/bin`.
-
-Common variants:
+Use server mode when the hub runs somewhere your browser cannot reach directly, such as inside a Slurm allocation or container:
 
 ```bash
-# Install somewhere else
-MAGLEV_INSTALL_DIR="$HOME/bin" ./install.sh
-
-# Force dependency reinstall before building
-FORCE=1 ./install.sh
-
-# Build only, without installing
-bun install
-bun run build:standalone
+maglev hub start --name "slurm-${SLURM_JOB_ID:-manual}" --remote
 ```
 
-## Local Setup
+In server mode, the hub still listens on a local port, but it also registers with `maglev server`. The server URL is discovered from `~/.maglev/server-url` written by `maglev server`, from saved settings, or from `--server-url <url>`.
+
+### Local Setup
 
 Use this direct-mode setup when your browser and coding environment are on the same machine.
 
@@ -118,7 +94,7 @@ Then open `http://localhost:3006`.
 
 Create sessions from the web UI. `maglev hub start` also starts the local runner for that hub, so you do not need to run `maglev shell` or `maglev runner start` manually for the normal flow.
 
-## SSH Setup
+### SSH Setup
 
 Use this direct-mode setup when Maglev runs on a remote workstation and your browser reaches it through an SSH tunnel.
 
@@ -156,7 +132,7 @@ ssh -L 3006:127.0.0.1:3006 user@devbox
 
 Create sessions from the web UI after the runner appears in the machine list.
 
-## Slurm / HPC Setup
+### Slurm / HPC Setup
 
 Use this server-mode setup when sessions run on ephemeral compute nodes that your browser cannot reach directly.
 
@@ -192,6 +168,39 @@ maglev server --public-url https://your-reachable-server.example
 ```
 
 If Linux user services are not available on the login/VNC/jump node, keep `maglev server` running in a terminal or under your site's preferred process manager.
+
+## Build From Source
+
+Use this path when working from a checkout, testing unreleased changes, or using a platform without a release artifact.
+
+Prerequisites:
+
+- `git`
+- `bun`
+- Optional but recommended: `rg` and `difft`
+
+```bash
+git clone https://github.com/bmarimuthu-nv/Maglev.git maglev
+cd maglev
+./install.sh
+maglev --version
+```
+
+`./install.sh` builds the standalone binary from source and installs `maglev` to `$HOME/.local/bin`.
+
+Common variants:
+
+```bash
+# Install somewhere else
+MAGLEV_INSTALL_DIR="$HOME/bin" ./install.sh
+
+# Force dependency reinstall before building
+FORCE=1 ./install.sh
+
+# Build only, without installing
+bun install
+bun run build:standalone
+```
 
 ## Daily Commands
 
