@@ -51,6 +51,7 @@ export function DirectorySection(props: {
     savedPaths: string[]
     canSaveCurrentPath: boolean
     isCurrentPathSaved: boolean
+    directoryStatus: 'empty' | 'checking' | 'exists' | 'missing'
     onDirectoryChange: (value: string) => void
     onDirectoryFocus: () => void
     onDirectoryBlur: () => void
@@ -92,6 +93,12 @@ export function DirectorySection(props: {
                     </div>
                 )}
             </div>
+            {props.directoryStatus === 'checking' ? (
+                <div className="text-xs text-[var(--app-hint)]">Checking directory...</div>
+            ) : null}
+            {props.directoryStatus === 'missing' ? (
+                <div className="text-xs text-red-500">Directory not found on the hub machine.</div>
+            ) : null}
 
             <div className="flex items-center justify-end">
                 <button

@@ -2,10 +2,10 @@ import { Hono } from 'hono'
 import type { WebAppEnv } from '../middleware/auth'
 import type { HubLaunchFolder } from '../../hubConfig'
 import type { SyncEngine } from '../../sync/syncEngine'
-import { configuration } from '../../configuration'
 import { z } from 'zod'
 import { ensureNotesParentDir, resolveSessionNotesLocation } from '../../notes/storage'
 import { writeFileSync } from 'node:fs'
+import { getCurrentHubIdentity } from '../../utils/hubIdentity'
 
 const spawnBodySchema = z.object({
     directory: z.string().min(1),
@@ -40,15 +40,19 @@ export function createHubRoutes(
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
+    app.get('/hub/identity', (c) => {
+        return c.json(getCurrentHubIdentity())
+    })
+
     app.get('/hub', async (c) => {
         try {
             const folders = await getLaunchFolders()
             const engine = getSyncEngine()
             const namespace = c.get('namespace')
             const machine = engine?.getBoundMachine(namespace) ?? null
+            const identity = getCurrentHubIdentity()
             return c.json({
-                name: process.env.MAGLEV_HUB_NAME ?? null,
-                machineId: configuration.boundMachineId,
+                ...identity,
                 machine,
                 folders
             })
@@ -57,9 +61,9 @@ export function createHubRoutes(
             const engine = getSyncEngine()
             const namespace = c.get('namespace')
             const machine = engine?.getBoundMachine(namespace) ?? null
+            const identity = getCurrentHubIdentity()
             return c.json({
-                name: process.env.MAGLEV_HUB_NAME ?? null,
-                machineId: configuration.boundMachineId,
+                ...identity,
                 machine,
                 folders: [],
                 error: message

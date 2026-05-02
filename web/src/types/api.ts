@@ -76,6 +76,7 @@ export type Machine = {
 
 export type AuthResponse = {
     token: string
+    hubIdentity?: HubIdentityResponse
     user: {
         id: number
         username?: string
@@ -140,6 +141,12 @@ export type SpawnTerminalPairResponse =
         message: string
     }
 export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
+export type HubIdentityResponse = {
+    name: string | null
+    namespace: string
+    machineId: string | null
+    identityKey: string
+}
 export type DetectedWorktree = {
     repoRoot: string
     path: string
@@ -158,7 +165,9 @@ export type HubWorktreesResponse = {
 }
 export type HubConfigResponse = {
     name: string | null
+    namespace: string
     machineId: string | null
+    identityKey: string
     machine: Machine | null
     folders: HubLaunchFolder[]
     error?: string

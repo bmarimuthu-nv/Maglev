@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiClient, ApiError } from '@/api/client'
-import type { AuthResponse } from '@/types/api'
+import type { AuthResponse, HubIdentityResponse } from '@/types/api'
+import { decodeJwtExpMs } from '@/lib/auth-storage'
 import { getBrokerBasepath } from '@/utils/url'
 
 export type AuthSource =
@@ -8,26 +9,6 @@ export type AuthSource =
     | { type: 'accessToken'; token: string }
     | { type: 'broker'; bootstrapToken?: string }
     | { type: 'jwt'; token: string }
-
-function decodeJwtExpMs(token: string): number | null {
-    const parts = token.split('.')
-    if (parts.length < 2) return null
-
-    const payloadBase64Url = parts[1] ?? ''
-    const payloadBase64 = payloadBase64Url
-        .replace(/-/g, '+')
-        .replace(/_/g, '/')
-        .padEnd(Math.ceil(payloadBase64Url.length / 4) * 4, '=')
-
-    try {
-        const decoded = globalThis.atob(payloadBase64)
-        const payload = JSON.parse(decoded) as { exp?: unknown }
-        if (typeof payload.exp !== 'number') return null
-        return payload.exp * 1000
-    } catch {
-        return null
-    }
-}
 
 function getAuthPayload(source: AuthSource): { initData: string } | { accessToken: string } | null {
     if (source.type === 'telegram') {
@@ -81,6 +62,7 @@ async function authenticateBrokerSessionWithRetry(client: ApiClient): Promise<Au
 export function useAuth(authSource: AuthSource | null, baseUrl: string): {
     token: string | null
     user: AuthResponse['user'] | null
+    hubIdentity: HubIdentityResponse | null
     api: ApiClient | null
     isLoading: boolean
     error: string | null
@@ -89,6 +71,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
 } {
     const [token, setToken] = useState<string | null>(null)
     const [user, setUser] = useState<AuthResponse['user'] | null>(null)
+    const [hubIdentity, setHubIdentity] = useState<HubIdentityResponse | null>(null)
     const [isLoading, setIsLoading] = useState<boolean>(false)
     const [error, setError] = useState<string | null>(null)
     const [needsBinding, setNeedsBinding] = useState<boolean>(false)
@@ -141,14 +124,16 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 tokenRef.current = auth.token
                 setToken(auth.token)
                 setUser(auth.user)
+                setHubIdentity(auth.hubIdentity ?? null)
                 setError(null)
                 setNeedsBinding(false)
                 return auth.token
             } catch (error) {
-            if (currentSource.type === 'telegram' && isNotBoundError(error)) {
+                if (currentSource.type === 'telegram' && isNotBoundError(error)) {
                     tokenRef.current = null
                     setToken(null)
                     setUser(null)
+                    setHubIdentity(null)
                     setError(null)
                     setNeedsBinding(true)
                     return null
@@ -164,14 +149,15 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                     tokenRef.current = null
                     setToken(null)
                     setUser(null)
-                const msg = currentSource.type === 'telegram'
-                    ? 'Session expired. Reopen the Mini App from Telegram.'
-                    : currentSource.type === 'broker'
-                    ? 'Server session expired. Sign in at the server and reload.'
-                    : 'Session expired. Please login again.'
-                setError(msg)
-            }
-            return null
+                    setHubIdentity(null)
+                    const msg = currentSource.type === 'telegram'
+                        ? 'Session expired. Reopen the Mini App from Telegram.'
+                        : currentSource.type === 'broker'
+                            ? 'Server session expired. Sign in at the server and reload.'
+                            : 'Session expired. Please login again.'
+                    setError(msg)
+                }
+                return null
             }
         }
 
@@ -202,6 +188,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
             tokenRef.current = auth.token
             setToken(auth.token)
             setUser(auth.user)
+            setHubIdentity(auth.hubIdentity ?? null)
             setNeedsBinding(false)
         } catch (error) {
             setError(error instanceof Error ? error.message : 'Binding failed')
@@ -233,6 +220,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
             if (authSource.type === 'jwt') {
                 setToken(authSource.token)
                 setUser(null)
+                setHubIdentity(null)
                 setNeedsBinding(false)
                 return
             }
@@ -244,6 +232,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 tokenRef.current = brokerBootstrapToken
                 setToken(brokerBootstrapToken)
                 setUser(null)
+                setHubIdentity(null)
                 setError(null)
                 setNeedsBinding(false)
             }
@@ -259,12 +248,14 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 if (isCancelled) return
                 setToken(auth.token)
                 setUser(auth.user)
+                setHubIdentity(auth.hubIdentity ?? null)
                 setNeedsBinding(false)
             } catch (e) {
                 if (isCancelled) return
                 if (authSource.type === 'telegram' && isNotBoundError(e)) {
                     setToken(null)
                     setUser(null)
+                    setHubIdentity(null)
                     setError(null)
                     setNeedsBinding(true)
                     return
@@ -273,6 +264,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                     if (isBrokerSessionExpiredError(e)) {
                         setToken(null)
                         setUser(null)
+                        setHubIdentity(null)
                         setNeedsBinding(false)
                         setError('Server session expired. Redirecting to server login...')
                         redirectToBrokerRoot()
@@ -281,6 +273,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                     if (!brokerBootstrapToken) {
                         setToken(null)
                         setUser(null)
+                        setHubIdentity(null)
                         setNeedsBinding(false)
                         setError(e instanceof Error ? e.message : 'Unable to reach the hub through the server.')
                     }
@@ -308,6 +301,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         lastRefreshAttemptRef.current = 0
         setToken(null)
         setUser(null)
+        setHubIdentity(null)
         setError(null)
         setNeedsBinding(false)
     }, [baseUrl])
@@ -375,5 +369,5 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         }
     }, [authSource, refreshAuth])
 
-    return { token, user, api, isLoading, error, needsBinding, bind }
+    return { token, user, hubIdentity, api, isLoading, error, needsBinding, bind }
 }
