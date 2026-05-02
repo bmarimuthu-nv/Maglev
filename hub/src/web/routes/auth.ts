@@ -180,12 +180,12 @@ export function createAuthRoutes(
         }
 
         if (!remoteMode) {
-            return c.json({ error: 'Broker session login is only available in remote mode' }, 404)
+            return c.json({ error: 'Server session login is only available in remote mode' }, 404)
         }
 
         const brokerSession = await getBrokerSessionFromHeaders(c.req.raw.headers)
         if (!brokerSession) {
-            return c.json({ error: 'Broker session required' }, 401)
+            return c.json({ error: 'Server session required' }, 401)
         }
 
         const auth = await signWebJwt(jwtSecret, getCurrentHubNamespace(), {
@@ -204,7 +204,7 @@ export function createAuthRoutes(
             return c.json({ error: 'GitHub device auth is disabled' }, 404)
         }
         if (remoteMode) {
-            return c.json({ error: 'GitHub device auth is managed by the broker in remote mode' }, 403)
+            return c.json({ error: 'GitHub device auth is managed by the server in remote mode' }, 403)
         }
 
         try {
@@ -225,7 +225,7 @@ export function createAuthRoutes(
             return c.json({ error: 'GitHub device auth is disabled' }, 404)
         }
         if (remoteMode) {
-            return c.json({ error: 'GitHub device auth is managed by the broker in remote mode' }, 403)
+            return c.json({ error: 'GitHub device auth is managed by the server in remote mode' }, 403)
         }
 
         const json = await c.req.json().catch(() => null)

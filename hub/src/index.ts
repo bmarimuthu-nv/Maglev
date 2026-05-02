@@ -106,10 +106,10 @@ async function main() {
     // Load configuration (async - loads from env/file with persistence)
     const remoteMode = resolveRemoteMode(process.argv)
     const config = await createConfiguration()
-    const discoveredBrokerUrl = remoteMode && !config.brokerUrl
+    const discoveredServerUrl = remoteMode && !config.serverUrl
         ? await readBrokerUrl()
         : null
-    const effectiveBrokerUrl = config.brokerUrl ?? discoveredBrokerUrl?.url ?? null
+    const effectiveServerUrl = config.serverUrl ?? discoveredServerUrl?.url ?? null
     const baseCorsOrigins = normalizeOrigins(config.corsOrigins)
     const corsOrigins = baseCorsOrigins
 
@@ -150,11 +150,11 @@ async function main() {
     // Display tunnel status
     console.log(`[Hub] Remote mode: ${remoteMode ? 'enabled (--remote)' : 'disabled'}`)
     if (remoteMode) {
-        if (effectiveBrokerUrl) {
-            if (config.brokerUrl) {
-                console.log(`[Hub] Broker URL: ${config.brokerUrl} (${formatSource(config.sources.brokerUrl)})`)
-            } else if (discoveredBrokerUrl) {
-                console.log(`[Hub] Broker URL: ${discoveredBrokerUrl.url} (${discoveredBrokerUrl.path})`)
+        if (effectiveServerUrl) {
+            if (config.serverUrl) {
+                console.log(`[Hub] Server URL: ${config.serverUrl} (${formatSource(config.sources.serverUrl)})`)
+            } else if (discoveredServerUrl) {
+                console.log(`[Hub] Server URL: ${discoveredServerUrl.url} (${discoveredServerUrl.path})`)
             }
         }
     } else {
@@ -176,8 +176,8 @@ async function main() {
         if (!config.githubOauthClientId) {
             throw new Error('Remote mode requires MAGLEV_GITHUB_OAUTH_CLIENT_ID')
         }
-        if (!effectiveBrokerUrl) {
-            throw new Error('Remote mode requires a broker URL. Start `maglev server` first so it can write ~/.maglev/broker-url, or pass `--broker-url`.')
+        if (!effectiveServerUrl) {
+            throw new Error('Remote mode requires a server URL. Start `maglev server` first so it can write ~/.maglev/server-url, or pass `--server-url`.')
         }
         if (!config.githubOwner && config.githubAllowedUsers.length === 0 && !config.githubAuth) {
             throw new Error('Remote mode requires MAGLEV_GITHUB_OWNER, MAGLEV_GITHUB_ALLOWED_USERS, or a bootstrapped owner from `maglev auth github login`')
@@ -288,20 +288,20 @@ async function main() {
             throw new Error('Remote mode requires a GitHub owner identity')
         }
 
-        const configuredBrokerToken = process.env.MAGLEV_BROKER_TOKEN?.trim() || null
-        const brokerKey = configuredBrokerToken
+        const configuredServerToken = process.env.MAGLEV_SERVER_TOKEN?.trim() || process.env.MAGLEV_BROKER_TOKEN?.trim() || null
+        const brokerKey = configuredServerToken
             ? null
             : await getOrCreateBrokerKey()
 
         if (brokerKey) {
-            console.log(`[Broker] Registration key: ${brokerKey.created ? 'created' : 'loaded'} from ${brokerKey.path}`)
+            console.log(`[Server] Registration key: ${brokerKey.created ? 'created' : 'loaded'} from ${brokerKey.path}`)
         } else {
-            console.log('[Broker] Registration key: loaded from MAGLEV_BROKER_TOKEN')
+            console.log('[Server] Registration key: loaded from MAGLEV_SERVER_TOKEN')
         }
 
         brokerClient = new BrokerClient({
-            brokerUrl: effectiveBrokerUrl!,
-            brokerToken: configuredBrokerToken ?? brokerKey?.key ?? null,
+            brokerUrl: effectiveServerUrl!,
+            brokerToken: configuredServerToken ?? brokerKey?.key ?? null,
             owner: brokerOwner,
             localHost: config.listenHost,
             localPort: config.listenPort,
@@ -309,30 +309,30 @@ async function main() {
             launchFolders: hubLaunchConfig.folders,
             configError: hubLaunchConfig.error,
             onStatusChange: (status) => {
-                console.log(`[Broker] ${status}`)
+                console.log(`[Server] ${status}`)
             }
         })
 
         try {
             tunnelUrl = await brokerClient.start()
-            console.log(`[Broker] Registered hub ${brokerClient.getHubId()}`)
+            console.log(`[Server] Registered hub ${brokerClient.getHubId()}`)
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
-            const brokerSource = config.brokerUrl
-                ? `${config.brokerUrl} (${formatSource(config.sources.brokerUrl)})`
-                : discoveredBrokerUrl
-                    ? `${discoveredBrokerUrl.url} (${discoveredBrokerUrl.path})`
-                    : effectiveBrokerUrl!
+            const serverSource = config.serverUrl
+                ? `${config.serverUrl} (${formatSource(config.sources.serverUrl)})`
+                : discoveredServerUrl
+                    ? `${discoveredServerUrl.url} (${discoveredServerUrl.path})`
+                    : effectiveServerUrl!
             throw new Error(
-                `Remote mode broker registration failed for ${brokerSource}: ${message}. ` +
-                'Pass `--broker-url <url>` or fix ~/.maglev/broker-url, then retry.'
+                `Remote mode server registration failed for ${serverSource}: ${message}. ` +
+                'Pass `--server-url <url>` or fix ~/.maglev/server-url, then retry.'
             )
         }
     }
 
     if (tunnelUrl) {
         const announceTunnelAccess = async () => {
-            console.log('[Broker] Public: ' + tunnelUrl)
+            console.log('[Server] Public: ' + tunnelUrl)
 
             console.log('')
             console.log('Open in browser:')

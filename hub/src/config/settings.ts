@@ -28,8 +28,9 @@ export interface Settings {
         login: string
         name?: string
     }
-    brokerUrl?: string
+    serverUrl?: string
     // Legacy field names (for migration, read-only)
+    brokerUrl?: string
     webappHost?: string
     webappPort?: number
     webappUrl?: string

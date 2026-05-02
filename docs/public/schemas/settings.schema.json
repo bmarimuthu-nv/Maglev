@@ -32,6 +32,11 @@
       "format": "uri",
       "description": "Public URL for external access (e.g., Telegram Mini App). ENV: MAGLEV_PUBLIC_URL"
     },
+    "serverUrl": {
+      "type": "string",
+      "format": "uri",
+      "description": "Remote access server URL for hub registration. ENV: MAGLEV_SERVER_URL"
+    },
     "corsOrigins": {
       "type": "array",
       "items": {

@@ -9,10 +9,18 @@ function getBrokerHome(): string {
 }
 
 export function getBrokerKeyPath(): string {
-    return join(getBrokerHome(), 'broker-key')
+    return join(getBrokerHome(), 'server-key')
 }
 
 export function getBrokerUrlPath(): string {
+    return join(getBrokerHome(), 'server-url')
+}
+
+function getLegacyBrokerKeyPath(): string {
+    return join(getBrokerHome(), 'broker-key')
+}
+
+function getLegacyBrokerUrlPath(): string {
     return join(getBrokerHome(), 'broker-url')
 }
 
@@ -40,8 +48,19 @@ export async function getOrCreateBrokerKey(): Promise<{ key: string; path: strin
     if (existsSync(path)) {
         const key = (await readFile(path, 'utf8')).trim()
         if (!key) {
-            throw new Error(`Broker key file is empty: ${path}`)
+            throw new Error(`Server key file is empty: ${path}`)
         }
+        return { key, path, created: false }
+    }
+
+    const legacyPath = getLegacyBrokerKeyPath()
+    if (existsSync(legacyPath)) {
+        const key = (await readFile(legacyPath, 'utf8')).trim()
+        if (!key) {
+            throw new Error(`Legacy broker key file is empty: ${legacyPath}`)
+        }
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+        await writeFile(path, `${key}\n`, { mode: 0o600 })
         return { key, path, created: false }
     }
 
@@ -61,12 +80,23 @@ export async function writeBrokerUrl(publicUrl: string): Promise<string> {
 export async function readBrokerUrl(): Promise<{ url: string; path: string } | null> {
     const path = getBrokerUrlPath()
     if (!existsSync(path)) {
-        return null
+        const legacyPath = getLegacyBrokerUrlPath()
+        if (!existsSync(legacyPath)) {
+            return null
+        }
+
+        const legacyUrl = (await readFile(legacyPath, 'utf8')).trim()
+        if (!legacyUrl) {
+            throw new Error(`Legacy broker URL file is empty: ${legacyPath}`)
+        }
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+        await writeFile(path, `${legacyUrl}\n`, { mode: 0o600 })
+        return { url: legacyUrl, path }
     }
 
     const url = (await readFile(path, 'utf8')).trim()
     if (!url) {
-        throw new Error(`Broker URL file is empty: ${path}`)
+        throw new Error(`Server URL file is empty: ${path}`)
     }
     return { url, path }
 }

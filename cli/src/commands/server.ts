@@ -30,7 +30,7 @@ function parseBrokerArgs(args: string[]): ParsedBrokerArgs {
             result.port = args[++i]
         } else if (arg === '--public-url' && i + 1 < args.length) {
             result.publicUrl = args[++i]
-        } else if (arg === '--broker-token' && i + 1 < args.length) {
+        } else if ((arg === '--server-token' || arg === '--broker-token') && i + 1 < args.length) {
             result.token = args[++i]
         } else if (arg.startsWith('--host=')) {
             result.host = arg.slice('--host='.length)
@@ -38,6 +38,8 @@ function parseBrokerArgs(args: string[]): ParsedBrokerArgs {
             result.port = arg.slice('--port='.length)
         } else if (arg.startsWith('--public-url=')) {
             result.publicUrl = arg.slice('--public-url='.length)
+        } else if (arg.startsWith('--server-token=')) {
+            result.token = arg.slice('--server-token='.length)
         } else if (arg.startsWith('--broker-token=')) {
             result.token = arg.slice('--broker-token='.length)
         } else {
@@ -244,10 +246,10 @@ function runBrokerServiceCommand(commandArgs: string[]): void {
             return
         default:
             console.log(`
-${chalk.bold('maglev server service')} - Manage the user-level broker daemon
+${chalk.bold('maglev server service')} - Manage the user-level remote access server
 
 ${chalk.bold('Usage:')}
-  maglev server service install [broker args]
+  maglev server service install [server args]
   maglev server service start
   maglev server service stop
   maglev server service restart
@@ -287,13 +289,13 @@ type BrokerHubsResponse = {
 async function listBrokerHubs(): Promise<void> {
     const brokerUrlState = await readBrokerUrl()
     if (!brokerUrlState?.url) {
-        throw new Error('Broker URL not found. Start `maglev server` first so it can write ~/.maglev/broker-url.')
+        throw new Error('Server URL not found. Start `maglev server` first so it can write ~/.maglev/server-url.')
     }
 
     const githubAuthState = await readRemoteGitHubAuthState()
     const githubAuth = githubAuthState?.state.githubAuth
     if (!githubAuth) {
-        throw new Error('Broker auth requires cached GitHub auth. Run `maglev auth github login` first.')
+        throw new Error('Server auth requires cached GitHub auth. Run `maglev auth github login` first.')
     }
 
     const brokerSessionToken = await signBrokerSessionToken({
@@ -310,13 +312,13 @@ async function listBrokerHubs(): Promise<void> {
 
     const body = await response.json().catch(() => null) as BrokerHubsResponse | null
     if (!response.ok) {
-        throw new Error(body?.error || `Broker request failed with status ${response.status}`)
+        throw new Error(body?.error || `Server request failed with status ${response.status}`)
     }
 
     const activeHubs = body?.hubs ?? []
     const recentHubs = body?.recentHubs ?? []
 
-    console.log(chalk.bold(`\nBroker Hubs (${brokerUrlState.url})\n`))
+    console.log(chalk.bold(`\nServer Hubs (${brokerUrlState.url})\n`))
 
     const printFolders = (hub: BrokerHubRecord) => {
         if (hub.configError) {
@@ -368,7 +370,7 @@ async function listBrokerHubs(): Promise<void> {
 
 export const serverCommand: CommandDefinition = {
     name: 'server',
-    description: 'Manage the broker server (start, stop, status)',
+    description: 'Manage the remote access server (start, stop, status)',
     requiresRuntimeAssets: false,
     run: async (context: CommandContext) => {
         try {
@@ -387,7 +389,7 @@ export const serverCommand: CommandDefinition = {
                 console.log(`
 ${chalk.bold('maglev server')}
 
-Start the self-hosted remote broker on a stable machine such as a VNC/login node.
+Start the self-hosted remote access server on a stable machine such as a VNC/login node.
 
 ${chalk.bold('Usage:')}
   maglev server [options]
@@ -400,19 +402,19 @@ ${chalk.bold('Options:')}
   --host <host>           Bind host (default: 0.0.0.0)
   --port <port>           Optional listen port; defaults to a free auto-picked port
   --public-url <url>      Optional public base URL; defaults to http://<hostname>:<port>
-  --broker-token <token>  Optional override for hub registration; default: ~/.maglev/broker-key
+  --server-token <token>  Optional override for hub registration; default: ~/.maglev/server-key
 
 ${chalk.bold('Environment:')}
-  MAGLEV_BROKER_LISTEN_HOST
-  MAGLEV_BROKER_LISTEN_PORT
-  MAGLEV_BROKER_PUBLIC_URL
-  MAGLEV_BROKER_TOKEN
+  MAGLEV_SERVER_LISTEN_HOST
+  MAGLEV_SERVER_LISTEN_PORT
+  MAGLEV_SERVER_PUBLIC_URL
+  MAGLEV_SERVER_TOKEN
 
 ${chalk.bold('Example:')}
   maglev server
   maglev server hubs
   maglev server --port 3010
-  maglev server --public-url https://vnc-broker.internal
+  maglev server --public-url https://vnc-server.internal
 `)
                 process.exit(0)
             }
@@ -422,16 +424,16 @@ ${chalk.bold('Example:')}
             }
 
             if (host) {
-                process.env.MAGLEV_BROKER_LISTEN_HOST = host
+                process.env.MAGLEV_SERVER_LISTEN_HOST = host
             }
             if (port) {
-                process.env.MAGLEV_BROKER_LISTEN_PORT = port
+                process.env.MAGLEV_SERVER_LISTEN_PORT = port
             }
             if (publicUrl) {
-                process.env.MAGLEV_BROKER_PUBLIC_URL = publicUrl
+                process.env.MAGLEV_SERVER_PUBLIC_URL = publicUrl
             }
             if (token) {
-                process.env.MAGLEV_BROKER_TOKEN = token
+                process.env.MAGLEV_SERVER_TOKEN = token
             }
 
             const { startBroker } = await import('../../../hub/src/broker')

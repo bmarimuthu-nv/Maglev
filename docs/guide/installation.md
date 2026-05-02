@@ -99,15 +99,15 @@ maglev auth github login
 maglev hub --remote
 ```
 
-The broker:
+The server:
 
 - stores state under `~/.maglev/`
-- writes its public URL to `~/.maglev/broker-url`
-- stores the registration key in `~/.maglev/broker-key`
+- writes its public URL to `~/.maglev/server-url`
+- stores the registration key in `~/.maglev/server-key`
 
 The hub:
 
-- reads `~/.maglev/broker-url` automatically unless overridden
+- reads `~/.maglev/server-url` automatically unless overridden
 - prints the browser URL after registration
 - uses GitHub device auth for browser sign-in
 
@@ -158,6 +158,8 @@ The runner keeps a local control server plus a list of tracked shell sessions.
 | `MAGLEV_LISTEN_HOST` | `127.0.0.1` | Hub bind address |
 | `MAGLEV_LISTEN_PORT` | `3006` | Hub port |
 | `MAGLEV_PUBLIC_URL` | - | Public HTTPS URL |
+| `MAGLEV_SERVER_URL` | `~/.maglev/server-url` | Remote access server URL for `maglev hub --remote` |
+| `MAGLEV_SERVER_TOKEN` | `~/.maglev/server-key` | Optional hub registration token override |
 | `CORS_ORIGINS` | - | Allowed browser origins |
 | `MAGLEV_HOME` | `~/.maglev` | Config directory |
 | `DB_PATH` | `~/.maglev/maglev.db` | Database file |
@@ -197,6 +199,6 @@ maglev hub logs --name devbox-a --follow
 
 ## Notes
 
-- `maglev server` runs the remote broker for coordinating hubs across machines
+- `maglev server` runs the remote access server for coordinating hubs across machines
 - browser access is terminal-first; sessions are shells, not chat agents
 - files and review continue to work for shell sessions

@@ -142,13 +142,17 @@ function getEnv(name: string): string | undefined {
     return value ? value : undefined
 }
 
+function getEnvWithLegacy(name: string, legacyName: string): string | undefined {
+    return getEnv(name) ?? getEnv(legacyName)
+}
+
 async function findFreePort(): Promise<number> {
     return await new Promise<number>((resolve, reject) => {
         const server = createServer()
         server.listen(0, '0.0.0.0', () => {
             const address = server.address()
             if (!address || typeof address === 'string') {
-                server.close(() => reject(new Error('Failed to determine an available broker port')))
+                server.close(() => reject(new Error('Failed to determine an available server port')))
                 return
             }
             const { port } = address
@@ -165,21 +169,21 @@ async function findFreePort(): Promise<number> {
 }
 
 async function getBrokerConfig(): Promise<BrokerConfig> {
-    const host = getEnv('MAGLEV_BROKER_LISTEN_HOST') ?? '0.0.0.0'
-    const portValue = getEnv('MAGLEV_BROKER_LISTEN_PORT')
+    const host = getEnvWithLegacy('MAGLEV_SERVER_LISTEN_HOST', 'MAGLEV_BROKER_LISTEN_HOST') ?? '0.0.0.0'
+    const portValue = getEnvWithLegacy('MAGLEV_SERVER_LISTEN_PORT', 'MAGLEV_BROKER_LISTEN_PORT')
     let port: number
 
     if (portValue) {
         port = Number.parseInt(portValue, 10)
         if (!Number.isFinite(port) || port <= 0 || port > 65535) {
-            throw new Error(`Invalid MAGLEV_BROKER_LISTEN_PORT: ${portValue}`)
+            throw new Error(`Invalid MAGLEV_SERVER_LISTEN_PORT: ${portValue}`)
         }
     } else {
         port = await findFreePort()
     }
 
-    const publicUrl = getEnv('MAGLEV_BROKER_PUBLIC_URL') ?? `http://${getHostname()}:${port}`
-    const configuredToken = getEnv('MAGLEV_BROKER_TOKEN')
+    const publicUrl = getEnvWithLegacy('MAGLEV_SERVER_PUBLIC_URL', 'MAGLEV_BROKER_PUBLIC_URL') ?? `http://${getHostname()}:${port}`
+    const configuredToken = getEnvWithLegacy('MAGLEV_SERVER_TOKEN', 'MAGLEV_BROKER_TOKEN')
     if (configuredToken) {
         return {
             host,
@@ -1015,7 +1019,7 @@ function createTimeoutPromise(requestId: string, targetClientId?: string): Promi
 
 async function proxyHttpRequest(config: BrokerConfig, hub: RegisteredHub, req: Request, tailPath: string, session: BrokerUserSession): Promise<Response> {
     if (!hub.socket) {
-        return new Response('Hub is not connected to the broker', { status: 503 })
+        return new Response('Hub is not connected to the server', { status: 503 })
     }
 
     const url = new URL(req.url)
@@ -1087,17 +1091,17 @@ export async function startBroker(): Promise<void> {
     const authConfig = await getBrokerAuthConfig()
     const brokerUrlPath = await writeBrokerUrl(config.publicUrl)
 
-    console.log('Maglev Broker starting...')
-    console.log(`[Broker] Listen host: ${config.host}`)
-    console.log(`[Broker] Listen port: ${config.port}`)
-    console.log(`[Broker] Public URL: ${config.publicUrl}`)
-    console.log(`[Broker] URL file: ${brokerUrlPath}`)
+    console.log('Maglev Server starting...')
+    console.log(`[Server] Listen host: ${config.host}`)
+    console.log(`[Server] Listen port: ${config.port}`)
+    console.log(`[Server] Public URL: ${config.publicUrl}`)
+    console.log(`[Server] URL file: ${brokerUrlPath}`)
     if (config.tokenPath) {
-        console.log(`[Broker] Registration key: ${config.tokenCreated ? 'created' : 'loaded'} from ${config.tokenPath}`)
+        console.log(`[Server] Registration key: ${config.tokenCreated ? 'created' : 'loaded'} from ${config.tokenPath}`)
     } else {
-        console.log('[Broker] Registration key: loaded from MAGLEV_BROKER_TOKEN')
+        console.log('[Server] Registration key: loaded from MAGLEV_SERVER_TOKEN')
     }
-    console.log('[Broker] Mode: self-hosted control plane')
+    console.log('[Server] Mode: self-hosted control plane')
 
     const pruneInterval = setInterval(pruneExpiredHubs, 5_000)
 
@@ -1113,7 +1117,7 @@ export async function startBroker(): Promise<void> {
                 if (config.token) {
                     const providedToken = url.searchParams.get('token')?.trim() || null
                     if (providedToken !== config.token) {
-                        return new Response('Broker token mismatch', { status: 401 })
+                        return new Response('Server token mismatch', { status: 401 })
                     }
                 }
                 const clientId = randomUUID()
@@ -1136,7 +1140,7 @@ export async function startBroker(): Promise<void> {
                 const activeHubs = listActiveHubs()
                 return Response.json({
                     status: 'ok',
-                    service: 'maglev-broker',
+                    service: 'maglev-server',
                     requestId: randomUUID(),
                     activeHubs: activeHubs.length,
                     recentHubs: listRecentHubs().length
@@ -1145,7 +1149,7 @@ export async function startBroker(): Promise<void> {
 
             if (url.pathname === '/api/github/device/start' && req.method === 'POST') {
                 if (!authConfig.gitHubDeviceAuth) {
-                    return Response.json({ error: 'GitHub device auth is not configured for the broker' }, { status: 503 })
+                    return Response.json({ error: 'GitHub device auth is not configured for the server' }, { status: 503 })
                 }
                 try {
                     return Response.json(await authConfig.gitHubDeviceAuth.start())
@@ -1156,7 +1160,7 @@ export async function startBroker(): Promise<void> {
 
             if (url.pathname === '/api/github/device/poll' && req.method === 'POST') {
                 if (!authConfig.gitHubDeviceAuth) {
-                    return Response.json({ error: 'GitHub device auth is not configured for the broker' }, { status: 503 })
+                    return Response.json({ error: 'GitHub device auth is not configured for the server' }, { status: 503 })
                 }
                 const body = await req.json().catch(() => null) as { deviceCode?: unknown } | null
                 const deviceCode = typeof body?.deviceCode === 'string' ? body.deviceCode.trim() : ''
@@ -1198,7 +1202,7 @@ export async function startBroker(): Promise<void> {
 
             if (url.pathname === '/api/hubs' && req.method === 'GET') {
                 if (!brokerSession) {
-                    return Response.json({ error: 'Broker session required' }, { status: 401 })
+                    return Response.json({ error: 'Server session required' }, { status: 401 })
                 }
                 const activeHubs = listActiveHubs()
                 return Response.json({
@@ -1215,7 +1219,7 @@ export async function startBroker(): Promise<void> {
 
             if (url.pathname.startsWith('/api/hubs/') && req.method === 'GET') {
                 if (!brokerSession) {
-                    return Response.json({ error: 'Broker session required' }, { status: 401 })
+                    return Response.json({ error: 'Server session required' }, { status: 401 })
                 }
                 const hubId = decodeURIComponent(url.pathname.slice('/api/hubs/'.length))
                 const hub = registry.get(hubId)
@@ -1244,7 +1248,7 @@ export async function startBroker(): Promise<void> {
 
             if (url.pathname.startsWith('/h/')) {
                 if (!brokerSession) {
-                    return new Response('Broker session required', { status: 401 })
+                    return new Response('Server session required', { status: 401 })
                 }
                 const tail = url.pathname.slice('/h/'.length)
                 const slashIndex = tail.indexOf('/')
@@ -1259,7 +1263,7 @@ export async function startBroker(): Promise<void> {
 
                 if (req.headers.get('upgrade')) {
                     if (!hub.socket) {
-                        return new Response('Hub is not connected to the broker', { status: 503 })
+                        return new Response('Hub is not connected to the server', { status: 503 })
                     }
                     const wsId = randomUUID()
                     const upgraded = serverRef.upgrade(req, {
@@ -1289,7 +1293,7 @@ export async function startBroker(): Promise<void> {
 
                 return proxyHttpRequest(config, hub, req, tailPath, brokerSession).catch((error) => {
                     return new Response(
-                        error instanceof Error ? error.message : 'Broker proxy error',
+                        error instanceof Error ? error.message : 'Server proxy error',
                         { status: 502 }
                     )
                 })
@@ -1297,7 +1301,7 @@ export async function startBroker(): Promise<void> {
 
             if (url.pathname === '/' || url.pathname === '/index.html') {
                 if (!brokerSession) {
-                    return new Response(renderBrokerLogin(config, authConfig.gitHubDeviceAuth ? undefined : 'Broker GitHub auth is not configured.'), {
+                    return new Response(renderBrokerLogin(config, authConfig.gitHubDeviceAuth ? undefined : 'Server GitHub auth is not configured.'), {
                         headers: {
                             'content-type': 'text/html; charset=utf-8'
                         }
@@ -1489,19 +1493,19 @@ export async function startBroker(): Promise<void> {
     })
 
     console.log('')
-    console.log('Maglev Broker is ready!')
-    console.log(`[Broker] Local:  http://${config.host}:${config.port}`)
-    console.log(`[Broker] Public: ${config.publicUrl}`)
+    console.log('Maglev Server is ready!')
+    console.log(`[Server] Local:  http://${config.host}:${config.port}`)
+    console.log(`[Server] Public: ${config.publicUrl}`)
 
     const shutdown = () => {
-        console.log('\nShutting down broker...')
+        console.log('\nShutting down server...')
         clearInterval(pruneInterval)
         for (const pending of pendingRequests.values()) {
-            pending.reject(new Error('Broker shutting down'))
+            pending.reject(new Error('Server shutting down'))
         }
         pendingRequests.clear()
         for (const controller of pendingStreams.values()) {
-            controller.error(new Error('Broker shutting down'))
+            controller.error(new Error('Server shutting down'))
         }
         pendingStreams.clear()
         server.stop()

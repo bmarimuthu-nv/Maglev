@@ -16,7 +16,7 @@
  * - MAGLEV_GITHUB_OAUTH_CLIENT_ID: GitHub OAuth App client ID for remote browser auth
  * - MAGLEV_GITHUB_OWNER: Single allowed GitHub login for remote browser auth
  * - MAGLEV_GITHUB_ALLOWED_USERS: Comma-separated allowed GitHub logins for remote browser auth
- * - MAGLEV_BROKER_URL: Self-hosted broker base URL for remote registration
+ * - MAGLEV_SERVER_URL: Self-hosted server base URL for remote registration
  * - VAPID_SUBJECT: Contact email or URL for Web Push (defaults to mailto:admin@maglev.run)
  * - MAGLEV_TERMINAL_SUPERVISION_HUMAN_OVERRIDE_MS: Human-priority cooldown after worker terminal input (default: 30000)
  * - MAGLEV_STALE_SESSION_ARCHIVE_MS: Inactive-session auto-archive TTL in milliseconds (default: 86400000)
@@ -44,7 +44,7 @@ export interface ConfigSources {
     githubOwner: ConfigSource
     githubAllowedUsers: ConfigSource
     githubAuth: 'file' | 'default'
-    brokerUrl: ConfigSource
+    serverUrl: ConfigSource
     cliApiToken: 'env' | 'file' | 'generated'
 }
 
@@ -106,8 +106,8 @@ class Configuration {
         name?: string
     } | null
 
-    /** Self-hosted broker base URL */
-    public readonly brokerUrl: string | null
+    /** Self-hosted server base URL */
+    public readonly serverUrl: string | null
 
     /** Bound machine for this named hub */
     public readonly boundMachineId: string | null
@@ -144,7 +144,7 @@ class Configuration {
         this.githubOwner = serverSettings.githubOwner
         this.githubAllowedUsers = serverSettings.githubAllowedUsers
         this.githubAuth = serverSettings.githubAuth
-        this.brokerUrl = serverSettings.brokerUrl
+        this.serverUrl = serverSettings.serverUrl
         this.boundMachineId = process.env.MAGLEV_MACHINE_ID?.trim() || null
         this.terminalSupervisionHumanOverrideMs = (() => {
             const raw = process.env.MAGLEV_TERMINAL_SUPERVISION_HUMAN_OVERRIDE_MS?.trim()

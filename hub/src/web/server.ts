@@ -109,7 +109,7 @@ function createWebApp(options: {
                 return await next()
             }
             if (!c.req.header(BROKER_SESSION_HEADER)) {
-                return c.text('Broker session required', 401)
+                return c.text('Server session required', 401)
             }
             return await next()
         })
