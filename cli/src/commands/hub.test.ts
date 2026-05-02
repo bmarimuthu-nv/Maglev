@@ -17,7 +17,7 @@ describe('hub command arg filtering', () => {
             '--name', 'cw-devbox-1',
             '--remote',
             '--config', '/tmp/maglev-config-Sbn3W8.yaml',
-            '--broker-url', 'http://broker:3010',
+            '--server-url', 'http://server:3010',
             '--host', '127.0.0.1',
             '--port', '15115'
         ])
@@ -25,12 +25,12 @@ describe('hub command arg filtering', () => {
         expect(args).toEqual([
             '--remote',
             '--config', '/tmp/maglev-config-Sbn3W8.yaml',
-            '--broker-url', 'http://broker:3010',
+            '--server-url', 'http://server:3010',
             '--host', '127.0.0.1',
             '--port', '15115'
         ])
         expect(__test__.parseHubArgs(args)).toEqual({
-            brokerUrl: 'http://broker:3010',
+            serverUrl: 'http://server:3010',
             configPath: '/tmp/maglev-config-Sbn3W8.yaml',
             host: '127.0.0.1',
             port: '15115'
@@ -55,21 +55,21 @@ describe('hub command arg filtering', () => {
             [
                 '--remote',
                 '--config', '/tmp/old.yaml',
-                '--broker-url', 'http://old-broker:3010',
+                '--server-url', 'http://old-server:3010',
                 '--host', '127.0.0.1',
                 '--port', '15115'
             ],
             [
                 '--remote',
                 '--config', '/tmp/new.yaml',
-                '--broker-url', 'http://new-broker:3010'
+                '--server-url', 'http://new-server:3010'
             ]
         )
 
         expect(args).toEqual([
             '--remote',
             '--config', '/tmp/new.yaml',
-            '--broker-url', 'http://new-broker:3010',
+            '--server-url', 'http://new-server:3010',
             '--host', '127.0.0.1',
             '--port', '15115'
         ])
@@ -80,7 +80,7 @@ describe('hub command arg filtering', () => {
             [
                 '--remote',
                 '--config', '/tmp/current.yaml',
-                '--broker-url', 'http://broker:3010',
+                '--server-url', 'http://server:3010',
                 '--port', '15115'
             ],
             ['--remote']
@@ -89,7 +89,7 @@ describe('hub command arg filtering', () => {
         expect(args).toEqual([
             '--remote',
             '--config', '/tmp/current.yaml',
-            '--broker-url', 'http://broker:3010',
+            '--server-url', 'http://server:3010',
             '--port', '15115'
         ])
     })

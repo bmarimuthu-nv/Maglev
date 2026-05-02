@@ -16,6 +16,24 @@ Pick the setup that matches where your sessions will run:
 | SSH workstation | Hub on the remote machine, browser through an SSH tunnel | The forwarded URL on your laptop |
 | Slurm/HPC node | Server on a reachable login/VNC node, hub inside the allocation | The URL printed by `maglev hub start --remote` |
 
+## Direct vs Server Mode
+
+Maglev does not guess whether your browser can reach a hub. You choose the mode when starting the hub.
+
+Use direct mode when your browser can reach the hub URL directly, including through an SSH tunnel:
+
+```bash
+maglev hub start --name devbox
+```
+
+Use server mode when the hub runs somewhere your browser cannot reach directly, such as inside a Slurm allocation or container:
+
+```bash
+maglev hub start --name "slurm-${SLURM_JOB_ID:-manual}" --remote
+```
+
+In server mode, the hub still listens on a local port, but it also registers with `maglev server`. The server URL is discovered from `~/.maglev/server-url` written by `maglev server`, from saved settings, or from `--server-url <url>`.
+
 ## Install
 
 Fast path: install the latest prebuilt release for your machine.
@@ -78,7 +96,7 @@ bun run build:standalone
 
 ## Local Setup
 
-Use this when your browser and coding environment are on the same machine.
+Use this direct-mode setup when your browser and coding environment are on the same machine.
 
 ```bash
 maglev hub start --name local
@@ -102,7 +120,7 @@ Create sessions from the web UI. `maglev hub start` also starts the local runner
 
 ## SSH Setup
 
-Use this when Maglev runs on a remote workstation but you browse from your laptop.
+Use this direct-mode setup when Maglev runs on a remote workstation and your browser reaches it through an SSH tunnel.
 
 On the remote workstation:
 
@@ -110,7 +128,7 @@ On the remote workstation:
 maglev hub start --name devbox --host 127.0.0.1
 ```
 
-Use the port printed by `maglev hub start` in your SSH tunnel. Example, if the hub prints `http://127.0.0.1:43891`:
+By default, the remote hub also chooses a free local port to avoid conflicts. Use the port printed by `maglev hub start` in your SSH tunnel. Example, if the hub prints `http://127.0.0.1:43891`:
 
 On your laptop:
 
@@ -124,13 +142,23 @@ Then open this on your laptop:
 http://localhost:43891
 ```
 
-If you prefer a stable tunnel command, start the remote hub with `--port 3006` and forward `3006`.
+If you prefer a stable tunnel command, pin the remote hub port:
+
+```bash
+maglev hub start --name devbox --host 127.0.0.1 --port 3006
+```
+
+Then forward `3006`:
+
+```bash
+ssh -L 3006:127.0.0.1:3006 user@devbox
+```
 
 Create sessions from the web UI after the runner appears in the machine list.
 
 ## Slurm / HPC Setup
 
-Use this when sessions run on ephemeral compute nodes that your browser cannot reach directly.
+Use this server-mode setup when sessions run on ephemeral compute nodes that your browser cannot reach directly.
 
 Assumption: the login node and allocated Slurm node/container share the same home directory. At minimum, they must share `~/.maglev`. The server writes connection and auth state there, and `maglev hub start --remote` reads it inside the allocation. If your site gives jobs a different home directory, mount or bind the login node's `~/.maglev` into the job/container before starting the hub.
 

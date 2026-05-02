@@ -13,7 +13,7 @@ import type { CommandDefinition, CommandContext } from './types'
 const HUB_SERVICE_NAME = 'maglev-hub.service'
 const HUB_DAEMON_DIR = join(configuration.maglevHomeDir, 'hub-daemons')
 
-type ParsedHubArgs = { host?: string; port?: string; brokerUrl?: string; brokerToken?: string; name?: string; configPath?: string; debug?: boolean }
+type ParsedHubArgs = { host?: string; port?: string; serverUrl?: string; serverToken?: string; name?: string; configPath?: string; debug?: boolean }
 type HubDaemonState = {
     name: string
     pid: number
@@ -73,10 +73,10 @@ function parseHubArgs(args: string[]): ParsedHubArgs {
             result.host = args[++i]
         } else if (arg === '--port' && i + 1 < args.length) {
             result.port = args[++i]
-        } else if (arg === '--broker-url' && i + 1 < args.length) {
-            result.brokerUrl = args[++i]
-        } else if (arg === '--broker-token' && i + 1 < args.length) {
-            result.brokerToken = args[++i]
+        } else if ((arg === '--server-url' || arg === '--broker-url') && i + 1 < args.length) {
+            result.serverUrl = args[++i]
+        } else if ((arg === '--server-token' || arg === '--broker-token') && i + 1 < args.length) {
+            result.serverToken = args[++i]
         } else if (arg === '--name' && i + 1 < args.length) {
             result.name = args[++i]
         } else if (arg === '--config' && i + 1 < args.length) {
@@ -87,10 +87,14 @@ function parseHubArgs(args: string[]): ParsedHubArgs {
             result.host = arg.slice('--host='.length)
         } else if (arg.startsWith('--port=')) {
             result.port = arg.slice('--port='.length)
+        } else if (arg.startsWith('--server-url=')) {
+            result.serverUrl = arg.slice('--server-url='.length)
         } else if (arg.startsWith('--broker-url=')) {
-            result.brokerUrl = arg.slice('--broker-url='.length)
+            result.serverUrl = arg.slice('--broker-url='.length)
+        } else if (arg.startsWith('--server-token=')) {
+            result.serverToken = arg.slice('--server-token='.length)
         } else if (arg.startsWith('--broker-token=')) {
-            result.brokerToken = arg.slice('--broker-token='.length)
+            result.serverToken = arg.slice('--broker-token='.length)
         } else if (arg.startsWith('--name=')) {
             result.name = arg.slice('--name='.length)
         } else if (arg.startsWith('--config=')) {
@@ -115,8 +119,8 @@ ${chalk.bold('Usage:')}
 ${chalk.bold('Options:')}
   --host <host>           Bind host
   --port <port>           Listen port
-  --broker-url <url>      Broker URL for remote mode
-  --broker-token <token>  Optional broker registration token
+  --server-url <url>      Server URL for remote mode
+  --server-token <token>  Optional server registration token
   --name <name>           Stable hub name (default: hostname)
   --config <path>         Optional hub config YAML
   --debug                 Run hub in the foreground for debugging
@@ -311,7 +315,7 @@ function ensureMachineIdForHub(name: string): string {
 
 function buildHubRuntimeEnv(args: string[], machineIdOverride?: string): NodeJS.ProcessEnv {
     const env = { ...process.env }
-    const { host, port, brokerUrl, brokerToken, name, configPath } = parseHubArgs(args)
+    const { host, port, serverUrl, serverToken, name, configPath } = parseHubArgs(args)
 
     if (host) {
         env.MAGLEV_LISTEN_HOST = host
@@ -321,11 +325,11 @@ function buildHubRuntimeEnv(args: string[], machineIdOverride?: string): NodeJS.
         env.MAGLEV_LISTEN_PORT = port
         env.WEBAPP_PORT = port
     }
-    if (brokerUrl) {
-        env.MAGLEV_BROKER_URL = brokerUrl
+    if (serverUrl) {
+        env.MAGLEV_SERVER_URL = serverUrl
     }
-    if (brokerToken) {
-        env.MAGLEV_BROKER_TOKEN = brokerToken
+    if (serverToken) {
+        env.MAGLEV_SERVER_TOKEN = serverToken
     }
     if (configPath) {
         env.MAGLEV_HUB_CONFIG = configPath
@@ -546,7 +550,7 @@ async function stopRunnerForHub(commandArgs: string[], logFd?: number): Promise<
 }
 
 function filterDaemonStartArgs(args: string[]): string[] {
-    const flagsWithValue = new Set(['--host', '--port', '--broker-url', '--broker-token', '--name', '--config'])
+    const flagsWithValue = new Set(['--host', '--port', '--server-url', '--server-token', '--broker-url', '--broker-token', '--name', '--config'])
     const filtered: string[] = []
     let skippedPositionalName = false
     for (let i = 0; i < args.length; i++) {
@@ -585,7 +589,7 @@ function mergeDaemonArgs(storedArgs: string[] | undefined, overrideArgs: string[
     const merged: string[] = []
     const overrideMap = new Map<string, string[]>()
     const passthroughFlags = new Set<string>()
-    const valueFlags = new Set(['--host', '--port', '--broker-url', '--broker-token', '--config'])
+    const valueFlags = new Set(['--host', '--port', '--server-url', '--server-token', '--broker-url', '--broker-token', '--config'])
 
     for (let i = 0; i < overrideArgs.length; i++) {
         const arg = overrideArgs[i]
@@ -1076,7 +1080,7 @@ export const hubCommand: CommandDefinition = {
 
             if (context.commandArgs[0] === 'daemon-run') {
                 const passthroughArgs = context.commandArgs.slice(1)
-                const { host, port, brokerUrl, brokerToken, name: parsedName, configPath } = parseHubArgs(passthroughArgs)
+                const { host, port, serverUrl, serverToken, name: parsedName, configPath } = parseHubArgs(passthroughArgs)
                 const name = parsedName || sanitizeDaemonName(hostname() || 'local')
                 if (host) {
                     process.env.MAGLEV_LISTEN_HOST = host
@@ -1086,11 +1090,11 @@ export const hubCommand: CommandDefinition = {
                     process.env.MAGLEV_LISTEN_PORT = port
                     process.env.WEBAPP_PORT = port
                 }
-                if (brokerUrl) {
-                    process.env.MAGLEV_BROKER_URL = brokerUrl
+                if (serverUrl) {
+                    process.env.MAGLEV_SERVER_URL = serverUrl
                 }
-                if (brokerToken) {
-                    process.env.MAGLEV_BROKER_TOKEN = brokerToken
+                if (serverToken) {
+                    process.env.MAGLEV_SERVER_TOKEN = serverToken
                 }
                 if (configPath) {
                     process.env.MAGLEV_HUB_CONFIG = configPath
@@ -1118,9 +1122,9 @@ export const hubCommand: CommandDefinition = {
                 return
             }
 
-            const { host, port, brokerUrl, brokerToken, name: parsedName, configPath, debug } = parseHubArgs(context.commandArgs)
+            const { host, port, serverUrl, serverToken, name: parsedName, configPath, debug } = parseHubArgs(context.commandArgs)
             const name = parsedName || sanitizeDaemonName(hostname() || 'local')
-            const allowedPrefixes = ['--host', '--port', '--broker-url', '--broker-token', '--name', '--config', '--remote', '--debug']
+            const allowedPrefixes = ['--host', '--port', '--server-url', '--server-token', '--broker-url', '--broker-token', '--name', '--config', '--remote', '--debug']
             const unexpectedArgs = context.commandArgs.filter((arg) => {
                 if (!arg.startsWith('-')) {
                     return true
@@ -1145,11 +1149,11 @@ export const hubCommand: CommandDefinition = {
                 process.env.MAGLEV_LISTEN_PORT = resolved.port
                 process.env.WEBAPP_PORT = resolved.port
             }
-            if (resolved.brokerUrl) {
-                process.env.MAGLEV_BROKER_URL = resolved.brokerUrl
+            if (resolved.serverUrl) {
+                process.env.MAGLEV_SERVER_URL = resolved.serverUrl
             }
-            if (resolved.brokerToken) {
-                process.env.MAGLEV_BROKER_TOKEN = resolved.brokerToken
+            if (resolved.serverToken) {
+                process.env.MAGLEV_SERVER_TOKEN = resolved.serverToken
             }
             if (resolved.configPath) {
                 process.env.MAGLEV_HUB_CONFIG = resolved.configPath

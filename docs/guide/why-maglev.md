@@ -10,9 +10,9 @@ The short version: Happy is built around a centralized service. Maglev is built 
 |--------|-------|--------|
 | **Architecture** | Centralized cloud service | Local-first, self-hosted |
 | **Data location** | Stored on the service, encrypted | Stored on your machine |
-| **Remote access** | Through the hosted service | Through your hub directly, or through your self-hosted broker |
+| **Remote access** | Through the hosted service | Through your hub directly, or through your self-hosted server |
 | **Deployment** | Multi-service stack | Single workspace / self-hosted components |
-| **Main complexity** | E2EE, key handling, service ops | Running your own hub and optional broker |
+| **Main complexity** | E2EE, key handling, service ops | Running your own hub and optional server |
 
 Choose Maglev if you want local ownership, self-hosting, and a simple mental model.
 
@@ -40,33 +40,33 @@ For remote access, Maglev supports two practical shapes:
 
 1. Direct self-hosting
    - expose the hub yourself with HTTPS, a reverse proxy, Tailscale, Cloudflare Tunnel, or similar
-2. Broker-based remote access
+2. Server-based remote access
    - run `maglev server` on a stable machine you control
    - run `maglev hub --remote` on the machine that hosts the sessions
-   - the hub opens an outbound broker connection
-   - the broker routes browser HTTP, SSE, and WebSocket traffic back to that hub
+   - the hub opens an outbound server connection
+   - the server routes browser HTTP, SSE, and WebSocket traffic back to that hub
 
-The key point is that the broker is also yours. There is no managed Maglev relay service in the architecture.
+The key point is that the server is also yours. There is no managed Maglev relay service in the architecture.
 
 ## Maglev Remote Architecture
 
 ```text
 ┌──────────────┐    HTTPS / WS     ┌────────────────┐    persistent WS    ┌──────────────┐
 │ Browser/PWA  │ ◄────────────────►│ Self-hosted    │◄───────────────────►│ Hub          │
-│ or Phone     │                   │ Broker         │                     │ + Sessions   │
+│ or Phone     │                   │ Server         │                     │ + Sessions   │
 └──────────────┘                   └────────────────┘                     └──────────────┘
                                                                                  │
                                                                                  ▼
                                                                         local SQLite + files
 ```
 
-What the broker does:
+What the server does:
 
 - gives you a stable public URL
 - keeps track of live hubs
 - forwards browser traffic to the right hub
 
-What the broker does not do:
+What the server does not do:
 
 - store your session data
 - own your long-term application state
@@ -82,9 +82,9 @@ Maglev assumes you control the infrastructure:
 
 - local-only mode: browser talks to your hub directly
 - self-hosted public mode: you secure the hub with your own HTTPS/reverse proxy setup
-- broker mode: you secure the browser-to-broker path, and the broker forwards traffic to your hub over the hub's outbound session
+- server mode: you secure the browser-to-server path, and the server forwards traffic to your hub over the hub's outbound session
 
-For internet-facing broker mode, browser sign-in is handled through GitHub-backed broker auth, then the hub issues its own JWT for app access.
+For internet-facing server mode, browser sign-in is handled through GitHub-backed server auth, then the hub issues its own JWT for app access.
 
 ## Why The Architectures Diverge
 
@@ -100,7 +100,7 @@ That leads to different tradeoffs:
 
 | Dimension | Happy | Maglev |
 |-----------|-------|--------|
-| **Server role** | Primary shared backend | Your own hub and optional broker |
+| **Server role** | Primary shared backend | Your own hub and optional server |
 | **State storage** | Hosted service | Local hub |
 | **Scaling model** | Shared multi-tenant infra | Per-user or per-team self-hosting |
 | **Trust boundary** | Hosted backend must not see plaintext | You control the machines and network path |

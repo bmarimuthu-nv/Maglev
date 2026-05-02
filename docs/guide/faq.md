@@ -38,7 +38,7 @@ maglev hub --remote
 
 ### What is the access token for?
 
-`MAGLEV_API_TOKEN` authenticates CLI-to-hub access. In local browser flows it can also be used for manual sign-in. In broker-based remote mode, browser access goes through broker/GitHub auth instead.
+`MAGLEV_API_TOKEN` authenticates CLI-to-hub access. In local browser flows it can also be used for manual sign-in. In server-based remote mode, browser access goes through server/GitHub auth instead.
 
 ### Can I use Maglev without Telegram?
 
@@ -80,7 +80,7 @@ Maglev is local-first:
 
 ### Can others access my Maglev instance?
 
-Only if they can satisfy your configured browser auth path. For public access, use HTTPS and prefer the broker-based remote flow.
+Only if they can satisfy your configured browser auth path. For public access, use HTTPS and prefer the server-based remote flow.
 
 ## Troubleshooting
 

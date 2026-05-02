@@ -174,7 +174,7 @@ export class BrokerClient {
     async start(): Promise<string> {
         if (this.started) {
             if (!this.hubUrl) {
-                throw new Error('Broker client started without a hub URL')
+                throw new Error('Server client started without a hub URL')
             }
             return this.hubUrl
         }
@@ -229,7 +229,7 @@ export class BrokerClient {
                 this.socket = socket
                 socket.send(JSON.stringify(this.buildRegisterMessage()))
                 this.reconnecting = false
-                this.emitStatus(`Connected to broker ${this.config.brokerUrl}`)
+                this.emitStatus(`Connected to server ${this.config.brokerUrl}`)
                 resolve()
             }
 
@@ -238,7 +238,7 @@ export class BrokerClient {
                     return
                 }
                 settled = true
-                reject(new Error(`Failed to connect to broker WebSocket ${this.wsUrl}`))
+                reject(new Error(`Failed to connect to server WebSocket ${this.wsUrl}`))
             }
 
             socket.onclose = () => {
@@ -246,7 +246,7 @@ export class BrokerClient {
                     return
                 }
                 settled = true
-                reject(new Error(`Broker WebSocket closed during connect ${this.wsUrl}`))
+                reject(new Error(`Server WebSocket closed during connect ${this.wsUrl}`))
             }
         })
 
@@ -263,7 +263,7 @@ export class BrokerClient {
             if (wasActiveSocket) {
                 this.socket = null
                 this.closeProxySockets()
-                this.emitStatus(`Disconnected from broker ${this.config.brokerUrl}`)
+                this.emitStatus(`Disconnected from server ${this.config.brokerUrl}`)
                 this.scheduleReconnect()
             }
         }
@@ -312,7 +312,7 @@ export class BrokerClient {
         }
 
         this.reconnecting = true
-        this.emitStatus(`Broker connection lost; retrying in ${BrokerClient.RECONNECT_DELAY_MS / 1000}s`)
+        this.emitStatus(`Server connection lost; retrying in ${BrokerClient.RECONNECT_DELAY_MS / 1000}s`)
         this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null
             void this.reconnect()
@@ -326,12 +326,12 @@ export class BrokerClient {
         }
 
         try {
-            this.emitStatus(`Reconnecting to broker ${this.config.brokerUrl}`)
+            this.emitStatus(`Reconnecting to server ${this.config.brokerUrl}`)
             await this.connect()
-            this.emitStatus(`Re-registered hub ${this.hubId} with broker`)
+            this.emitStatus(`Re-registered hub ${this.hubId} with server`)
         } catch (error) {
             this.emitStatus(
-                `Broker reconnect failed: ${error instanceof Error ? error.message : String(error)}`
+                `Server reconnect failed: ${error instanceof Error ? error.message : String(error)}`
             )
             this.reconnecting = false
             this.scheduleReconnect()
@@ -349,7 +349,7 @@ export class BrokerClient {
         try {
             message = JSON.parse(text) as BrokerMessage
         } catch {
-            console.error('[Broker] Received malformed JSON message, ignoring')
+            console.error('[Server] Received malformed JSON message, ignoring')
             return
         }
 
@@ -365,7 +365,7 @@ export class BrokerClient {
             try {
                 response = await this.forwardProxyRequest(message)
             } catch (error) {
-                console.error(`[Broker] Failed to proxy ${message.method} ${message.path}:`, error)
+                console.error(`[Server] Failed to proxy ${message.method} ${message.path}:`, error)
                 response = createProxyErrorResponse(message.requestId, error)
             }
             if (this.socket?.readyState === WebSocket.OPEN) {

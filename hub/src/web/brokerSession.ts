@@ -13,7 +13,7 @@ let brokerSecretPromise: Promise<Uint8Array> | null = null
 async function getBrokerSecret(): Promise<Uint8Array> {
     if (!brokerSecretPromise) {
         brokerSecretPromise = (async () => {
-            const configured = process.env.MAGLEV_BROKER_TOKEN?.trim()
+            const configured = process.env.MAGLEV_SERVER_TOKEN?.trim() || process.env.MAGLEV_BROKER_TOKEN?.trim()
             if (configured) {
                 return new TextEncoder().encode(configured)
             }

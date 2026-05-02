@@ -30,7 +30,7 @@ export interface ServerSettings {
         login: string
         name?: string
     } | null
-    brokerUrl: string | null
+    serverUrl: string | null
 }
 
 export interface ServerSettingsResult {
@@ -46,7 +46,7 @@ export interface ServerSettingsResult {
         githubOwner: 'env' | 'file' | 'default'
         githubAllowedUsers: 'env' | 'file' | 'default'
         githubAuth: 'file' | 'default'
-        brokerUrl: 'env' | 'file' | 'default'
+        serverUrl: 'env' | 'file' | 'default'
     }
     savedToFile: boolean
 }
@@ -125,7 +125,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         githubOwner: 'default',
         githubAllowedUsers: 'default',
         githubAuth: 'default',
-        brokerUrl: 'default',
+        serverUrl: 'default',
     }
     // telegramBotToken: env > file > null
     let telegramBotToken: string | null = null
@@ -306,17 +306,28 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         sources.githubAuth = 'file'
     }
 
-    let brokerUrl: string | null = null
-    if (process.env.MAGLEV_BROKER_URL) {
-        brokerUrl = process.env.MAGLEV_BROKER_URL.trim() || null
-        sources.brokerUrl = 'env'
-        if (settings.brokerUrl === undefined) {
-            settings.brokerUrl = brokerUrl ?? ''
+    let serverUrl: string | null = null
+    if (process.env.MAGLEV_SERVER_URL) {
+        serverUrl = process.env.MAGLEV_SERVER_URL.trim() || null
+        sources.serverUrl = 'env'
+        if (settings.serverUrl === undefined) {
+            settings.serverUrl = serverUrl ?? ''
             needsSave = true
         }
+    } else if (settings.serverUrl !== undefined) {
+        serverUrl = settings.serverUrl.trim() || null
+        sources.serverUrl = 'file'
+    } else if (process.env.MAGLEV_BROKER_URL) {
+        serverUrl = process.env.MAGLEV_BROKER_URL.trim() || null
+        sources.serverUrl = 'env'
+        settings.serverUrl = serverUrl ?? ''
+        needsSave = true
     } else if (settings.brokerUrl !== undefined) {
-        brokerUrl = settings.brokerUrl.trim() || null
-        sources.brokerUrl = 'file'
+        serverUrl = settings.brokerUrl.trim() || null
+        sources.serverUrl = 'file'
+        settings.serverUrl = serverUrl ?? ''
+        delete settings.brokerUrl
+        needsSave = true
     }
 
     // Save settings if any new values were added
@@ -336,7 +347,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
             githubOwner,
             githubAllowedUsers,
             githubAuth,
-            brokerUrl,
+            serverUrl,
         },
         sources,
         savedToFile: needsSave,

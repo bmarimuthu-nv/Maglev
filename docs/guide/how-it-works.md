@@ -85,10 +85,10 @@ The web app is terminal-first:
 Maglev supports:
 
 - local-only use on `localhost`
-- self-hosted remote access through the broker
+- self-hosted remote access through the server
 - optional public exposure through your own tunnel or reverse proxy
 
-In remote mode the broker handles hub registration and browser routing. The session itself still runs on your machine.
+In remote mode the server handles hub registration and browser routing. The session itself still runs on your machine.
 
 ## Seamless Handoff
 
