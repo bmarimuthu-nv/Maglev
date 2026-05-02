@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { Machine } from '@/types/api'
 import { usePlatform } from '@/hooks/usePlatform'
@@ -21,7 +21,7 @@ export function NewSession(props: {
     onCancel: () => void
 }) {
     const { haptic } = usePlatform()
-    const { spawnSession, spawnTerminalPair, isPending, error: spawnError } = useSpawnSession(props.api)
+    const { spawnSession, isPending, error: spawnError } = useSpawnSession(props.api)
     const { sessions } = useSessions(props.api)
     const { folders: hubFolders } = useHubConfig(props.api)
     const isFormDisabled = Boolean(isPending || props.isLoading)
@@ -35,7 +35,6 @@ export function NewSession(props: {
     } = useRecentPaths()
 
     const [directory, setDirectory] = useState('')
-    const [launchMode, setLaunchMode] = useState<'single' | 'pair'>('single')
     const [name, setName] = useState('')
     const [notesEnabled, setNotesEnabled] = useState(false)
     const [notesMode, setNotesMode] = useState<'existing' | 'create'>('create')
@@ -48,6 +47,7 @@ export function NewSession(props: {
     const [pathExistence, setPathExistence] = useState<Record<string, boolean>>({})
     const [manualWorktreePaths, setManualWorktreePaths] = useState<string[]>([])
     const [error, setError] = useState<string | null>(null)
+    const didPrefillDirectoryRef = useRef(false)
 
     const runnerSpawnError = useMemo(
         () => formatRunnerSpawnError(props.machine),
@@ -59,9 +59,10 @@ export function NewSession(props: {
         [getRecentPaths]
     )
     useEffect(() => {
-        if (directory.trim() || recentPaths.length === 0) {
+        if (didPrefillDirectoryRef.current || directory.trim() || recentPaths.length === 0) {
             return
         }
+        didPrefillDirectoryRef.current = true
         setDirectory(recentPaths[0] ?? '')
     }, [directory, recentPaths])
     const trimmedDirectory = directory.trim()
@@ -86,8 +87,8 @@ export function NewSession(props: {
     } = useHubWorktrees(props.api, worktreeLookupPaths, Boolean(props.machine?.active))
 
     const pathsToCheck = useMemo(
-        () => Array.from(new Set(allPaths)).slice(0, 1000),
-        [allPaths]
+        () => Array.from(new Set([trimmedDirectory, ...allPaths].filter(Boolean))).slice(0, 1000),
+        [allPaths, trimmedDirectory]
     )
 
     useEffect(() => {
@@ -117,6 +118,22 @@ export function NewSession(props: {
         () => allPaths.filter((path) => pathExistence[path]),
         [allPaths, pathExistence]
     )
+    const currentDirectoryExists = trimmedDirectory.length > 0 && pathExistence[trimmedDirectory] === true
+    const directoryStatus = useMemo((): 'empty' | 'checking' | 'exists' | 'missing' => {
+        if (!trimmedDirectory) {
+            return 'empty'
+        }
+        if (!props.machine?.active) {
+            return 'empty'
+        }
+        if (pathExistence[trimmedDirectory] === true) {
+            return 'exists'
+        }
+        if (pathExistence[trimmedDirectory] === false) {
+            return 'missing'
+        }
+        return 'checking'
+    }, [pathExistence, props.machine?.active, trimmedDirectory])
     const detectedWorktrees = useMemo(() => {
         const excludedPaths = new Set([
             ...hubFolders.map((folder) => folder.path),
@@ -155,6 +172,7 @@ export function NewSession(props: {
     )
 
     const handlePathClick = useCallback((path: string) => {
+        setError(null)
         setDirectory(path)
     }, [])
 
@@ -172,6 +190,7 @@ export function NewSession(props: {
     const handleSuggestionSelect = useCallback((index: number) => {
         const suggestion = suggestions[index]
         if (suggestion) {
+            setError(null)
             setDirectory(suggestion.text)
             clearSuggestions()
             setSuppressSuggestions(true)
@@ -179,6 +198,7 @@ export function NewSession(props: {
     }, [suggestions, clearSuggestions])
 
     const handleDirectoryChange = useCallback((value: string) => {
+        setError(null)
         setSuppressSuggestions(false)
         setDirectory(value)
     }, [])
@@ -218,32 +238,18 @@ export function NewSession(props: {
     }, [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions, handleSuggestionSelect])
 
     async function handleCreate() {
-        if (!props.machine?.active || !directory.trim()) return
+        if (!props.machine?.active || !trimmedDirectory) return
+
+        if (!currentDirectoryExists) {
+            haptic.notification('error')
+            setError('Directory does not exist on the hub machine.')
+            return
+        }
 
         setError(null)
         try {
-            if (launchMode === 'pair') {
-                const result = await spawnTerminalPair({
-                    directory: directory.trim(),
-                    name: name.trim()
-                })
-                if (result.type === 'success') {
-                    haptic.notification('success')
-                    addRecentPath(directory.trim())
-                    if (result.pair.workerSessionId) {
-                        props.onSuccess(result.pair.workerSessionId, 'shell')
-                    } else {
-                        props.onCancel()
-                    }
-                    return
-                }
-                haptic.notification('error')
-                setError(result.message)
-                return
-            }
-
             const result = await spawnSession({
-                directory: directory.trim(),
+                directory: trimmedDirectory,
                 name: name.trim() || undefined,
                 notesPath: notesEnabled && trimmedNotesPath ? trimmedNotesPath : undefined,
                 createNotesFile: notesEnabled && notesMode === 'create' && trimmedNotesPath.length > 0,
@@ -254,7 +260,7 @@ export function NewSession(props: {
 
             if (result.type === 'success') {
                 haptic.notification('success')
-                addRecentPath(directory.trim())
+                addRecentPath(trimmedDirectory)
                 props.onSuccess(result.sessionId, 'shell')
                 return
             }
@@ -270,62 +276,26 @@ export function NewSession(props: {
     const machineLabel = props.machine?.metadata?.displayName ?? props.machine?.metadata?.host ?? 'Offline'
     const canCreate = Boolean(
         props.machine?.active
-        && directory.trim()
-        && (launchMode === 'single' || name.trim())
+        && currentDirectoryExists
         && !isFormDisabled
         && (!notesEnabled || trimmedNotesPath.length > 0)
     )
 
     return (
         <div className="flex min-h-full flex-col divide-y divide-[var(--app-divider)]">
-            <div className="flex items-center gap-2 px-3 py-3">
-                <button
-                    type="button"
-                    onClick={() => setLaunchMode('single')}
-                    disabled={isFormDisabled}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                        launchMode === 'single'
-                            ? 'bg-[var(--app-link)] text-[var(--app-bg)]'
-                            : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
-                    } disabled:opacity-50`}
-                >
-                    Single
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setLaunchMode('pair')}
-                    disabled={isFormDisabled}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                        launchMode === 'pair'
-                            ? 'bg-[var(--app-link)] text-[var(--app-bg)]'
-                            : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
-                    } disabled:opacity-50`}
-                >
-                    Pair
-                </button>
-            </div>
             <div className="flex flex-col gap-1.5 px-3 py-3">
                 <label className="text-xs font-medium text-[var(--app-hint)]">
-                    {launchMode === 'pair' ? 'Pair name' : 'Session name'}
+                    Session name
                 </label>
                 <input
                     type="text"
                     value={name}
                     onChange={(event) => setName(event.target.value)}
-                    placeholder={launchMode === 'pair' ? 'Required' : 'Optional'}
+                    placeholder="Optional"
                     disabled={isFormDisabled}
                     className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
                 />
             </div>
-            {launchMode === 'pair' ? (
-                <div className="flex flex-col gap-3 px-3 py-3">
-                    <div className="text-xs font-medium text-[var(--app-hint)]">Shell pair</div>
-                    <div className="text-xs text-[var(--app-hint)]">
-                        Creates two pinned shell sessions named <code>{name.trim() || '<pair>'} worker</code> and <code>{name.trim() || '<pair>'} supervisor</code>,
-                        keeps them linked for recovery, and restores them as plain shells.
-                    </div>
-                </div>
-            ) : null}
             <div className="flex flex-col gap-2 px-3 py-3">
                 <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -389,61 +359,59 @@ export function NewSession(props: {
                     </>
                 ) : null}
             </div>
-            {launchMode === 'single' ? (
-                <div className="flex flex-col gap-3 px-3 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                            <div className="text-xs font-medium text-[var(--app-hint)]">Pinned shell</div>
-                            <div className="text-xs text-[var(--app-hint)]">Auto-recreate this shell if its backend terminal dies.</div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => setPinned((value) => !value)}
-                            disabled={isFormDisabled}
-                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                                pinned
-                                    ? 'bg-[var(--app-link)] text-[var(--app-bg)]'
-                                    : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
-                            } disabled:opacity-50`}
-                        >
-                            {pinned ? 'Pinned' : 'Off'}
-                        </button>
+            <div className="flex flex-col gap-3 px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <div className="text-xs font-medium text-[var(--app-hint)]">Pinned shell</div>
+                        <div className="text-xs text-[var(--app-hint)]">Auto-recreate this shell if its backend terminal dies.</div>
                     </div>
-                    <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                            <div className="text-xs font-medium text-[var(--app-hint)]">Auto-respawn on hub restart</div>
-                            <div className="text-xs text-[var(--app-hint)]">Recreate this pinned shell automatically after the hub restarts.</div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => setAutoRespawn((value) => !value)}
-                            disabled={isFormDisabled || !pinned}
-                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                                autoRespawn && pinned
-                                    ? 'bg-[var(--app-link)] text-[var(--app-bg)]'
-                                    : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
-                            } disabled:opacity-50`}
-                        >
-                            {autoRespawn && pinned ? 'Enabled' : 'Off'}
-                        </button>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-medium text-[var(--app-hint)]">
-                            Startup command
-                        </label>
-                        <textarea
-                            value={startupCommand}
-                            onChange={(event) => setStartupCommand(event.target.value)}
-                            placeholder="Optional command to run when this shell terminal is created"
-                            disabled={isFormDisabled}
-                            className="min-h-24 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
-                            autoCapitalize="none"
-                            autoCorrect="off"
-                            spellCheck={false}
-                        />
-                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setPinned((value) => !value)}
+                        disabled={isFormDisabled}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                            pinned
+                                ? 'bg-[var(--app-link)] text-[var(--app-bg)]'
+                                : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                        } disabled:opacity-50`}
+                    >
+                        {pinned ? 'Pinned' : 'Off'}
+                    </button>
                 </div>
-            ) : null}
+                <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <div className="text-xs font-medium text-[var(--app-hint)]">Auto-respawn on hub restart</div>
+                        <div className="text-xs text-[var(--app-hint)]">Recreate this pinned shell automatically after the hub restarts.</div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setAutoRespawn((value) => !value)}
+                        disabled={isFormDisabled || !pinned}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                            autoRespawn && pinned
+                                ? 'bg-[var(--app-link)] text-[var(--app-bg)]'
+                                : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]'
+                        } disabled:opacity-50`}
+                    >
+                        {autoRespawn && pinned ? 'Enabled' : 'Off'}
+                    </button>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-medium text-[var(--app-hint)]">
+                        Startup command
+                    </label>
+                    <textarea
+                        value={startupCommand}
+                        onChange={(event) => setStartupCommand(event.target.value)}
+                        placeholder="Optional command to run when this shell terminal is created"
+                        disabled={isFormDisabled}
+                        className="min-h-24 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                    />
+                </div>
+            </div>
             <div className="flex items-center justify-between gap-3 px-3 py-3">
                 <div className="min-w-0">
                     <div className="text-xs uppercase tracking-wide text-[var(--app-hint)]">Hub machine</div>
@@ -470,6 +438,7 @@ export function NewSession(props: {
                 savedPaths={savedPaths}
                 canSaveCurrentPath={canSaveCurrentPath}
                 isCurrentPathSaved={currentPathSaved}
+                directoryStatus={directoryStatus}
                 onDirectoryChange={handleDirectoryChange}
                 onDirectoryFocus={handleDirectoryFocus}
                 onDirectoryBlur={handleDirectoryBlur}

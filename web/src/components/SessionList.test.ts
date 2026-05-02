@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { buildCloneRequest, filterSessionSummaries, getGroupBranchHint, getSessionLifecycleStatus, getSessionRows, getSessionSubgroups, isVisibleInSessionList, matchesSessionSearch, reconcileOrder } from './SessionList'
+import { buildCloneRequest, filterSessionSummaries, getGroupBranchHint, getSessionLifecycleStatus, getSessionRows, getSessionSubgroups, isVisibleInSessionList, matchesSessionSearch, reconcileOrder, shouldPersistSessionListOrder } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -292,6 +292,16 @@ describe('reconcileOrder', () => {
         const items = [{ key: 'b' }, { key: 'c' }]
         const order = reconcileOrder(items, ['b', 'a', 'c'], (item) => item.key)
         expect(order).toEqual(['b', 'c'])
+    })
+})
+
+describe('shouldPersistSessionListOrder', () => {
+    it('does not persist order while search is filtering hidden groups', () => {
+        expect(shouldPersistSessionListOrder({ search: 'worker' })).toBe(false)
+    })
+
+    it('persists order when no search filter is active', () => {
+        expect(shouldPersistSessionListOrder({ search: '   ' })).toBe(true)
     })
 })
 

@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { configuration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { DEFAULT_NAMESPACE, parseAccessToken } from '../../utils/accessToken'
+import { getCurrentHubNamespace, getHubIdentityForNamespace } from '../../utils/hubIdentity'
 import { validateTelegramInitData } from '../telegramInitData'
 import { getOrCreateOwnerId } from '../../config/ownerId'
 import type { WebAppEnv } from '../middleware/auth'
@@ -50,6 +51,7 @@ async function signWebJwt(jwtSecret: Uint8Array, namespace: string, options?: { 
 
     return {
         token,
+        hubIdentity: getHubIdentityForNamespace(namespace),
         user: {
             id: userId,
             username: options?.username,
@@ -59,18 +61,13 @@ async function signWebJwt(jwtSecret: Uint8Array, namespace: string, options?: { 
     }
 }
 
-function getHubNamespace(): string {
-    const raw = process.env.MAGLEV_NAMESPACE?.trim()
-    return raw || DEFAULT_NAMESPACE
-}
-
 function resolveAccessTokenNamespace(rawAccessToken: string): string {
     const parsedToken = parseAccessToken(rawAccessToken)
     if (!parsedToken) {
-        return getHubNamespace()
+        return getCurrentHubNamespace()
     }
     if (!rawAccessToken.includes(':') && parsedToken.namespace === DEFAULT_NAMESPACE) {
-        return getHubNamespace()
+        return getCurrentHubNamespace()
     }
     return parsedToken.namespace
 }
@@ -191,7 +188,7 @@ export function createAuthRoutes(
             return c.json({ error: 'Broker session required' }, 401)
         }
 
-        const auth = await signWebJwt(jwtSecret, getHubNamespace(), {
+        const auth = await signWebJwt(jwtSecret, getCurrentHubNamespace(), {
             username: brokerSession.login
         })
         return c.json(auth)
@@ -243,7 +240,7 @@ export function createAuthRoutes(
                 return c.json(result)
             }
 
-            const auth = await signWebJwt(jwtSecret, getHubNamespace(), {
+            const auth = await signWebJwt(jwtSecret, getCurrentHubNamespace(), {
                 username: result.identity.login,
                 firstName: result.identity.name,
                 expiresIn: '30d'

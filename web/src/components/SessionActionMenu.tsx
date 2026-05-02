@@ -23,8 +23,6 @@ type SessionActionMenuProps = {
     onOpenFolder?: () => void
     canOpenReview?: boolean
     onOpenReview?: () => void
-    canAttachTerminalSupervision?: boolean
-    onAttachTerminalSupervision?: () => void
     canPauseTerminalSupervision?: boolean
     terminalSupervisionPaused?: boolean
     onToggleTerminalSupervisionPaused?: () => void
@@ -34,8 +32,6 @@ type SessionActionMenuProps = {
     onRestartTerminalPair?: () => void
     canRebindTerminalPair?: boolean
     onRebindTerminalPair?: () => void
-    canAddTerminalPairSupervisor?: boolean
-    onAddTerminalPairSupervisor?: () => void
     canPauseTerminalPair?: boolean
     terminalPairPaused?: boolean
     onToggleTerminalPairPaused?: () => void
@@ -240,8 +236,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onOpenFolder,
         canOpenReview = false,
         onOpenReview,
-        canAttachTerminalSupervision = false,
-        onAttachTerminalSupervision,
         canPauseTerminalSupervision = false,
         terminalSupervisionPaused = false,
         onToggleTerminalSupervisionPaused,
@@ -251,8 +245,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onRestartTerminalPair,
         canRebindTerminalPair = false,
         onRebindTerminalPair,
-        canAddTerminalPairSupervisor = false,
-        onAddTerminalPairSupervisor,
         canPauseTerminalPair = false,
         terminalPairPaused = false,
         onToggleTerminalPairPaused,
@@ -302,11 +294,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onCloseSession()
     }
 
-    const handleAttachTerminalSupervision = () => {
-        onClose()
-        onAttachTerminalSupervision?.()
-    }
-
     const handleToggleTerminalSupervisionPaused = () => {
         onClose()
         onToggleTerminalSupervisionPaused?.()
@@ -330,11 +317,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleRebindTerminalPair = () => {
         onClose()
         onRebindTerminalPair?.()
-    }
-
-    const handleAddTerminalPairSupervisor = () => {
-        onClose()
-        onAddTerminalPairSupervisor?.()
     }
 
     const handleClone = () => {
@@ -490,18 +472,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     Open Review
                 </button>
 
-                {canAttachTerminalSupervision ? (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
-                        onClick={handleAttachTerminalSupervision}
-                    >
-                        <TerminalIcon className="text-[var(--app-hint)]" />
-                        Attach Babysitter
-                    </button>
-                ) : null}
-
                 {canPauseTerminalSupervision ? (
                     <button
                         type="button"
@@ -547,18 +517,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     >
                         <TerminalIcon className="text-[var(--app-hint)]" />
                         Rebind Pair Side
-                    </button>
-                ) : null}
-
-                {canAddTerminalPairSupervisor ? (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
-                        onClick={handleAddTerminalPairSupervisor}
-                    >
-                        <TerminalIcon className="text-[var(--app-hint)]" />
-                        Add New Supervisor
                     </button>
                 ) : null}
 

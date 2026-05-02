@@ -10,6 +10,7 @@ import type {
     GitHubDeviceStartResponse,
     GitCommandResponse,
     HubConfigResponse,
+    HubIdentityResponse,
     MachinePathsExistsResponse,
     PushSubscriptionPayload,
     PushUnsubscribePayload,
@@ -170,6 +171,15 @@ export class ApiClient {
             throw new ApiError(`Auth methods failed: HTTP ${res.status} ${res.statusText}: ${body}`, res.status, parseErrorCode(body), body || undefined)
         }
         return await res.json() as AuthMethodsResponse
+    }
+
+    async getHubIdentity(): Promise<HubIdentityResponse> {
+        const res = await fetch(this.buildUrl('/api/hub/identity'))
+        if (!res.ok) {
+            const body = await res.text().catch(() => '')
+            throw new ApiError(`Hub identity failed: HTTP ${res.status} ${res.statusText}: ${body}`, res.status, parseErrorCode(body), body || undefined)
+        }
+        return await res.json() as HubIdentityResponse
     }
 
     async startGitHubDeviceAuth(): Promise<GitHubDeviceStartResponse> {

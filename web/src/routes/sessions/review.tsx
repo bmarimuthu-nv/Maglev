@@ -1574,20 +1574,9 @@ export default function ReviewPage() {
                     <ReviewToolbarMenu
                         id="review"
                         label="Review"
-                        value={isReloadingReviewFile ? 'Refreshing' : undefined}
                         open={openToolbarMenu === 'review'}
                         onToggle={toggleToolbarMenu}
                     >
-                        <ReviewToolbarMenuItem
-                            onClick={() => {
-                                setOpenToolbarMenu(null)
-                                void reloadReviewFile()
-                                void summaryQuery.refetch()
-                                void Promise.all(patchQueries.map((query) => query.refetch()))
-                            }}
-                        >
-                            <span className="inline-flex items-center gap-2"><RefreshIcon /> Refresh review</span>
-                        </ReviewToolbarMenuItem>
                         <ReviewToolbarMenuItem
                             onClick={() => {
                                 setOpenToolbarMenu(null)
@@ -1605,6 +1594,21 @@ export default function ReviewPage() {
                             Open review file
                         </ReviewToolbarMenuItem>
                     </ReviewToolbarMenu>
+                    <button
+                        type="button"
+                        disabled={isReloadingReviewFile}
+                        onClick={() => {
+                            setOpenToolbarMenu(null)
+                            void reloadReviewFile()
+                            void summaryQuery.refetch()
+                            void Promise.all(patchQueries.map((query) => query.refetch()))
+                        }}
+                        className="inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+                        title="Refresh review"
+                    >
+                        <RefreshIcon />
+                        <span>{isReloadingReviewFile ? 'Refreshing' : 'Refresh review'}</span>
+                    </button>
                     <ReviewToolbarMenu
                         id="view"
                         label="View"

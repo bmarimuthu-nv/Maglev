@@ -9,10 +9,12 @@ import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
 import { useSyncingState } from '@/hooks/useSyncingState'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
+import { useHubIdentity } from '@/hooks/queries/useHubIdentity'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
+import { readLocalStorageItem, writeLocalStorageItem } from '@/lib/storage-local'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
@@ -25,11 +27,16 @@ import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
 import { ToastProvider, useToastActions } from '@/lib/toast-context'
-import type { SyncEvent } from '@/types/api'
+import type { HubIdentityResponse, SyncEvent } from '@/types/api'
 
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
 const REQUIRE_SERVER_URL = requireHubUrlForLogin()
+const LAST_HUB_IDENTITY_KEY = 'maglev:lastHubIdentity'
+
+function formatHubIdentity(identity: HubIdentityResponse): string {
+    return identity.name || identity.namespace
+}
 
 export function App() {
     return (
@@ -42,6 +49,8 @@ export function App() {
 function AppInner() {
     const { t } = useTranslation()
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
+    const { addToast } = useToastActions()
+    const { identity: publicHubIdentity, isLoading: isHubIdentityLoading } = useHubIdentity(baseUrl)
     const {
         authSource,
         isLoading: isAuthSourceLoading,
@@ -49,8 +58,17 @@ function AppInner() {
         setJwtToken,
         persistJwtToken,
         clearJwtToken
-    } = useAuthSource(baseUrl)
-    const { token, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
+    } = useAuthSource(baseUrl, publicHubIdentity)
+    const {
+        token,
+        api,
+        hubIdentity: authenticatedHubIdentity,
+        isLoading: isAuthLoading,
+        error: authError,
+        needsBinding,
+        bind
+    } = useAuth(authSource, baseUrl)
+    const effectiveHubIdentity = authenticatedHubIdentity ?? publicHubIdentity
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const router = useRouter()
@@ -71,6 +89,39 @@ function AppInner() {
             appleTitle.setAttribute('content', title)
         }
     }, [baseUrl])
+
+    useEffect(() => {
+        if (!effectiveHubIdentity) {
+            return
+        }
+
+        const previousRaw = readLocalStorageItem(LAST_HUB_IDENTITY_KEY)
+        if (previousRaw) {
+            try {
+                const previous = JSON.parse(previousRaw) as Partial<HubIdentityResponse>
+                if (
+                    typeof previous.namespace === 'string'
+                    && previous.namespace !== effectiveHubIdentity.namespace
+                ) {
+                    addToast({
+                        title: 'Different hub namespace',
+                        body: `This URL points to ${formatHubIdentity(effectiveHubIdentity)}. Sessions from ${previous.name || previous.namespace} are separate.`,
+                        sessionId: '',
+                        url: ''
+                    })
+                }
+            } catch {
+                // Ignore malformed old identity snapshots.
+            }
+        }
+
+        writeLocalStorageItem(LAST_HUB_IDENTITY_KEY, JSON.stringify({
+            name: effectiveHubIdentity.name,
+            namespace: effectiveHubIdentity.namespace,
+            machineId: effectiveHubIdentity.machineId,
+            identityKey: effectiveHubIdentity.identityKey
+        }))
+    }, [addToast, effectiveHubIdentity])
 
     useEffect(() => {
         const preventDefault = (event: Event) => {
@@ -127,7 +178,7 @@ function AppInner() {
         }
     }, [goBack, pathname])
     const queryClient = useQueryClient()
-    const scopeKey = baseUrl
+    const scopeKey = effectiveHubIdentity?.identityKey ?? baseUrl
     const { isSyncing, startSync, endSync } = useSyncingState()
     const [sseDisconnected, setSseDisconnected] = useState(false)
     const [sseDisconnectReason, setSseDisconnectReason] = useState<string | null>(null)
@@ -242,7 +293,7 @@ function AppInner() {
     }, [])
 
     // Loading auth source
-    if (isAuthSourceLoading) {
+    if (isAuthSourceLoading || (isHubIdentityLoading && !authSource)) {
         return (
             <div className="h-full flex items-center justify-center p-4">
                 <LoadingState label={t('loading')} className="text-sm" />

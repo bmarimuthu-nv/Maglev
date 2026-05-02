@@ -183,6 +183,10 @@ export function filterSessionSummaries(
     return sessions.filter((session) => matchesSessionSearch(session, filters.search))
 }
 
+export function shouldPersistSessionListOrder(filters: SessionListFilters): boolean {
+    return normalizeSearch(filters.search).length === 0
+}
+
 function getGroupDisplayName(directory: string): string {
     if (directory === 'Other') return directory
     const parts = directory.split(/[\\/]+/).filter(Boolean)
@@ -709,13 +713,11 @@ function SessionItem(props: {
         closeSession,
         setPinned,
         setShellOptions,
-        attachTerminalSupervision,
         setTerminalSupervisionPaused,
         detachTerminalSupervision,
         restartTerminalPair,
         setTerminalPairPaused,
         rebindTerminalPair,
-        addTerminalPairSupervisor,
         isPending
     } = useSessionActions(
         api,
@@ -723,8 +725,6 @@ function SessionItem(props: {
         s.metadata?.flavor ?? null
     )
     const [attachOpen, setAttachOpen] = useState(false)
-    const [addSupervisorOpen, setAddSupervisorOpen] = useState(false)
-    const [pairNameInput, setPairNameInput] = useState('')
     const pairLink = s.metadata?.terminalPair
     const supervision = s.metadata?.terminalSupervision
     const attachCandidates = sessions.filter((candidate) =>
@@ -833,8 +833,6 @@ function SessionItem(props: {
                     if (!s.metadata?.path || !s.active) return
                     openSessionReviewWindow(baseUrl, s.id, { mode: 'branch' })
                 }}
-                canAttachTerminalSupervision={s.metadata?.flavor === 'shell' && !supervision && !pairLink}
-                onAttachTerminalSupervision={() => setAttachOpen(true)}
                 canPauseTerminalSupervision={Boolean(supervision && !pairLink)}
                 terminalSupervisionPaused={supervision?.state === 'paused'}
                 onToggleTerminalSupervisionPaused={() => {
@@ -851,11 +849,6 @@ function SessionItem(props: {
                 }}
                 canRebindTerminalPair={Boolean(pairLink)}
                 onRebindTerminalPair={() => setAttachOpen(true)}
-                canAddTerminalPairSupervisor={Boolean(!pairLink && !supervision && s.metadata?.flavor === 'shell' && s.metadata?.shellTerminalState === 'ready')}
-                onAddTerminalPairSupervisor={() => {
-                    setPairNameInput(s.metadata?.name || getSessionTitle(s))
-                    setAddSupervisorOpen(true)
-                }}
                 canPauseTerminalPair={Boolean(pairLink)}
                 terminalPairPaused={pairLink?.state === 'paused'}
                 onToggleTerminalPairPaused={() => {
@@ -875,11 +868,9 @@ function SessionItem(props: {
             <Dialog open={attachOpen} onOpenChange={setAttachOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>{pairLink ? 'Rebind Pair Side' : 'Attach Babysitter'}</DialogTitle>
+                        <DialogTitle>Rebind Pair Side</DialogTitle>
                         <DialogDescription>
-                            {pairLink
-                                ? `Choose the replacement shell for the ${pairLink.role} side of this pair.`
-                                : 'Choose the worker terminal this session should supervise.'}
+                            Choose the replacement shell for the {pairLink?.role ?? 'selected'} side of this pair.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="mt-4 flex max-h-[320px] flex-col gap-2 overflow-y-auto">
@@ -889,10 +880,7 @@ function SessionItem(props: {
                                 type="button"
                                 className="rounded-lg border border-[var(--app-border)] px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
                                 onClick={() => {
-                                    const action = pairLink
-                                        ? rebindTerminalPair(candidate.id)
-                                        : attachTerminalSupervision(candidate.id)
-                                    void action.then(() => setAttachOpen(false))
+                                    void rebindTerminalPair(candidate.id).then(() => setAttachOpen(false))
                                 }}
                             >
                                 <div className="font-medium">{getSessionTitle(candidate)}</div>
@@ -900,50 +888,9 @@ function SessionItem(props: {
                             </button>
                         )) : (
                             <div className="rounded-lg border border-dashed border-[var(--app-border)] px-3 py-4 text-sm text-[var(--app-hint)]">
-                                {pairLink
-                                    ? 'No eligible replacement shell sessions are available.'
-                                    : 'No eligible worker terminals are available.'}
+                                No eligible replacement shell sessions are available.
                             </div>
                         )}
-                    </div>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={addSupervisorOpen} onOpenChange={setAddSupervisorOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Add New Supervisor</DialogTitle>
-                        <DialogDescription>
-                            Upgrade this terminal into a linked worker/supervisor shell pair.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="mt-4 flex flex-col gap-3">
-                        <div className="flex flex-col gap-1.5">
-                            <label className="text-xs font-medium text-[var(--app-hint)]">Pair tag</label>
-                            <input
-                                type="text"
-                                value={pairNameInput}
-                                onChange={(event) => setPairNameInput(event.target.value)}
-                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
-                                placeholder="Required"
-                                disabled={isPending}
-                            />
-                        </div>
-                        <div className="rounded-lg border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-hint)]">
-                            This will make the current terminal the worker, spawn a new supervisor shell, and keep both shells linked as <code>{pairNameInput.trim() || '<pair>'} worker</code> and <code>{pairNameInput.trim() || '<pair>'} supervisor</code>.
-                        </div>
-                        <button
-                            type="button"
-                            className="inline-flex items-center justify-center rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                            disabled={isPending || pairNameInput.trim().length === 0}
-                            onClick={() => {
-                                void addTerminalPairSupervisor({
-                                    name: pairNameInput.trim()
-                                }).then(() => setAddSupervisorOpen(false))
-                            }}
-                        >
-                            Create Shell Pair
-                        </button>
                     </div>
                 </DialogContent>
             </Dialog>
@@ -1329,6 +1276,10 @@ export function SessionList(props: {
     }, [groups, sessionOrders, collapseOverrides])
 
     useEffect(() => {
+        if (!shouldPersistSessionListOrder(appliedFilters)) {
+            return
+        }
+
         const nextOrders: SessionListOrders = {
             groups: reconcileOrder(groupRenderStates, sessionOrders.groups, (groupState) => groupState.group.directory),
             subgroups: {},
@@ -1357,7 +1308,7 @@ export function SessionList(props: {
 
         setSessionOrders(nextOrders)
         saveSessionOrders(sessionOrderStorageKey, nextOrders)
-    }, [groupRenderStates, sessionOrderStorageKey, sessionOrders])
+    }, [appliedFilters, groupRenderStates, sessionOrderStorageKey, sessionOrders])
 
     const virtualItems = useMemo<VirtualListItem[]>(() => {
         return groupRenderStates.flatMap((groupState) => {

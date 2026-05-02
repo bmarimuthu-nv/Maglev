@@ -4,9 +4,18 @@ Install the Maglev CLI and set up the hub.
 
 ## Prerequisites
 
+For prebuilt release install:
+
+- `curl` or `wget`
+- `tar` for macOS/Linux, or `unzip` for Windows from Git Bash/MSYS
+
+For source builds:
+
 - `git`
 - `bun`
-- access to the GitLab repo
+
+Optional but recommended:
+
 - `ripgrep` (`rg`) on `PATH`, or set `MAGLEV_RIPGREP_PATH`
 - `difftastic` (`difft`) on `PATH`, or set `MAGLEV_DIFFTASTIC_PATH`
 
@@ -26,7 +35,45 @@ Typical workflows:
 - **Remote access**: `maglev server` then `maglev hub --remote`
 - **Remote spawn**: add `maglev runner start`
 
-## Install the CLI
+## Install The CLI
+
+Fast path: install the latest prebuilt release for your machine.
+
+```bash
+curl -fsSL https://github.com/bmarimuthu-nv/Maglev/releases/latest/download/install.sh | sh
+maglev --version
+```
+
+The release installer detects:
+
+- macOS Intel and Apple Silicon
+- Linux x64 and arm64
+- Linux glibc and musl
+- Windows x64 from Git Bash/MSYS
+
+It installs to `$HOME/.local/bin/maglev` by default.
+
+To change the install directory:
+
+```bash
+curl -fsSL https://github.com/bmarimuthu-nv/Maglev/releases/latest/download/install.sh | MAGLEV_INSTALL_DIR="$HOME/bin" sh
+```
+
+To install a specific release tag:
+
+```bash
+curl -fsSL https://github.com/bmarimuthu-nv/Maglev/releases/latest/download/install.sh | MAGLEV_VERSION="v0.16.2" sh
+```
+
+If `maglev` is not found after install:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+## Build From Source
+
+Use this path when working from a checkout, testing unreleased changes, or using a platform without a release artifact.
 
 ```bash
 git clone https://github.com/bmarimuthu-nv/Maglev.git maglev

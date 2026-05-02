@@ -22,6 +22,7 @@ export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<W
             path === '/api/auth'
             || path === '/api/auth/broker'
             || path === '/api/auth/methods'
+            || path === '/api/hub/identity'
             || path === '/api/bind'
             || path === '/api/github/device/start'
             || path === '/api/github/device/poll'

@@ -12,7 +12,7 @@
     },
     "cli": {
       "name": "maglev",
-      "version": "0.16.1",
+      "version": "0.16.2",
       "bin": {
         "maglev": "bin/maglev.cjs",
       },
@@ -43,11 +43,11 @@
         "vitest": "^4.0.16",
       },
       "optionalDependencies": {
-        "maglev-darwin-arm64": "0.16.1",
-        "maglev-darwin-x64": "0.16.1",
-        "maglev-linux-arm64": "0.16.1",
-        "maglev-linux-x64": "0.16.1",
-        "maglev-win32-x64": "0.16.1",
+        "maglev-darwin-arm64": "0.16.2",
+        "maglev-darwin-x64": "0.16.2",
+        "maglev-linux-arm64": "0.16.2",
+        "maglev-linux-x64": "0.16.2",
+        "maglev-win32-x64": "0.16.2",
       },
     },
     "docs": {

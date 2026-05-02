@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getTelegramWebApp, isTelegramEnvironment } from './useTelegram'
 import type { AuthSource } from './useAuth'
-
-const ACCESS_TOKEN_PREFIX = 'maglev_access_token::'
-const JWT_TOKEN_PREFIX = 'maglev_jwt_token::'
+import type { HubIdentityResponse } from '@/types/api'
+import {
+    clearStoredAccessToken,
+    clearStoredJwtToken,
+    readStoredAccessToken,
+    readStoredJwtToken,
+    storeAccessToken,
+    storeJwtToken,
+} from '@/lib/auth-storage'
 
 function getTelegramInitData(): string | null {
     const tg = getTelegramWebApp()
@@ -33,39 +39,7 @@ function isBrokerHostedPath(): boolean {
     return /^\/h\/[^/]+(?:\/|$)/.test(window.location.pathname)
 }
 
-function getAccessTokenKey(baseUrl: string): string {
-    return `${ACCESS_TOKEN_PREFIX}${baseUrl}`
-}
-
-function getJwtTokenKey(baseUrl: string): string {
-    return `${JWT_TOKEN_PREFIX}${baseUrl}`
-}
-
-function getStoredAccessToken(key: string): string | null {
-    try {
-        return localStorage.getItem(key)
-    } catch {
-        return null
-    }
-}
-
-function storeAccessToken(key: string, token: string): void {
-    try {
-        localStorage.setItem(key, token)
-    } catch {
-        // Ignore storage errors
-    }
-}
-
-function clearStoredAccessToken(key: string): void {
-    try {
-        localStorage.removeItem(key)
-    } catch {
-        // Ignore storage errors
-    }
-}
-
-export function useAuthSource(baseUrl: string): {
+export function useAuthSource(baseUrl: string, hubIdentity: HubIdentityResponse | null): {
     authSource: AuthSource | null
     isLoading: boolean
     isTelegram: boolean
@@ -79,8 +53,7 @@ export function useAuthSource(baseUrl: string): {
     const [isLoading, setIsLoading] = useState(true)
     const [isTelegram, setIsTelegram] = useState(false)
     const retryCountRef = useRef(0)
-    const accessTokenKey = useMemo(() => getAccessTokenKey(baseUrl), [baseUrl])
-    const jwtTokenKey = useMemo(() => getJwtTokenKey(baseUrl), [baseUrl])
+    const identityKey = useMemo(() => hubIdentity?.identityKey ?? null, [hubIdentity])
 
     // Initialize auth source on mount, with retry for delayed Telegram initData
     useEffect(() => {
@@ -102,16 +75,16 @@ export function useAuthSource(baseUrl: string): {
         // Check for URL token parameter (for direct access links)
         const urlToken = getTokenFromUrlParams()
         if (urlToken) {
-            storeAccessToken(accessTokenKey, urlToken) // Save to localStorage for refresh
+            storeAccessToken(baseUrl, hubIdentity, urlToken) // Save to localStorage for refresh
             setAuthSource({ type: 'accessToken', token: urlToken })
             setIsLoading(false)
             return
         }
 
-        const storedJwtToken = getStoredAccessToken(jwtTokenKey)
+        const storedJwtToken = readStoredJwtToken(baseUrl, hubIdentity)
 
         if (isBrokerHostedPath()) {
-            clearStoredAccessToken(accessTokenKey)
+            clearStoredAccessToken(baseUrl, hubIdentity)
             setAuthSource({ type: 'broker', bootstrapToken: storedJwtToken ?? undefined })
             setIsLoading(false)
             return
@@ -124,7 +97,7 @@ export function useAuthSource(baseUrl: string): {
             return
         }
 
-        const storedToken = getStoredAccessToken(accessTokenKey)
+        const storedToken = readStoredAccessToken(baseUrl, hubIdentity)
         if (storedToken) {
             setAuthSource({ type: 'accessToken', token: storedToken })
             setIsLoading(false)
@@ -162,33 +135,33 @@ export function useAuthSource(baseUrl: string): {
         return () => {
             clearInterval(interval)
         }
-    }, [accessTokenKey])
+    }, [baseUrl, hubIdentity, identityKey])
 
     const setAccessToken = useCallback((token: string) => {
-        clearStoredAccessToken(jwtTokenKey)
-        storeAccessToken(accessTokenKey, token)
+        clearStoredJwtToken(baseUrl, hubIdentity)
+        storeAccessToken(baseUrl, hubIdentity, token)
         setAuthSource({ type: 'accessToken', token })
-    }, [accessTokenKey, jwtTokenKey])
+    }, [baseUrl, hubIdentity])
 
     const setJwtToken = useCallback((token: string) => {
-        clearStoredAccessToken(accessTokenKey)
-        storeAccessToken(jwtTokenKey, token)
+        clearStoredAccessToken(baseUrl, hubIdentity)
+        storeJwtToken(baseUrl, hubIdentity, token)
         setAuthSource({ type: 'jwt', token })
-    }, [accessTokenKey, jwtTokenKey])
+    }, [baseUrl, hubIdentity])
 
     const persistJwtToken = useCallback((token: string) => {
-        storeAccessToken(jwtTokenKey, token)
-    }, [jwtTokenKey])
+        storeJwtToken(baseUrl, hubIdentity, token)
+    }, [baseUrl, hubIdentity])
 
     const clearJwtToken = useCallback(() => {
-        clearStoredAccessToken(jwtTokenKey)
-    }, [jwtTokenKey])
+        clearStoredJwtToken(baseUrl, hubIdentity)
+    }, [baseUrl, hubIdentity])
 
     const clearAuth = useCallback(() => {
-        clearStoredAccessToken(accessTokenKey)
-        clearStoredAccessToken(jwtTokenKey)
+        clearStoredAccessToken(baseUrl, hubIdentity)
+        clearStoredJwtToken(baseUrl, hubIdentity)
         setAuthSource(null)
-    }, [accessTokenKey, jwtTokenKey])
+    }, [baseUrl, hubIdentity])
 
     return {
         authSource,
