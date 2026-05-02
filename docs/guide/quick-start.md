@@ -5,14 +5,11 @@
 ## Install Maglev
 
 ```bash
-git lfs install
-git clone https://github.com/bmarimuthu-nv/Maglev.git maglev
-cd maglev
-git lfs pull
-./install.sh
+curl -fsSL https://github.com/bmarimuthu-nv/Maglev/releases/latest/download/install.sh | sh
+maglev --version
 ```
 
-Other install options: [Installation](./installation.md)
+Source builds and install-directory options: [Installation](./installation.md)
 
 ## Start the hub
 
