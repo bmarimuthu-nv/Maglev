@@ -4,17 +4,17 @@
 
 <h1 align="center">maglev</h1>
 
-<p align="center">Run AI coding shells locally, then control them from your browser or phone.</p>
+<p align="center">Run AI coding sessions locally, then control them from your browser or phone.</p>
 
 ## Start Here
 
-Pick the setup that matches where your shell will run:
+Pick the setup that matches where your sessions will run:
 
 | Use case | Best fit | Open the UI from |
 |----------|----------|------------------|
-| Local laptop or devbox | Hub and shell on the same machine | `http://localhost:3006` |
-| SSH workstation | Hub on the remote machine, browser through an SSH tunnel | `http://localhost:3006` on your laptop |
-| Slurm/HPC node | Hub inside the allocation, broker on a reachable login/VNC node | The URL printed by `maglev hub start --remote` |
+| Local laptop or devbox | Hub and sessions on the same machine | The URL printed by `maglev hub start` |
+| SSH workstation | Hub on the remote machine, browser through an SSH tunnel | The forwarded URL on your laptop |
+| Slurm/HPC node | Server on a reachable login/VNC node, hub inside the allocation | The URL printed by `maglev hub start --remote` |
 
 ## Install
 
@@ -78,24 +78,27 @@ bun run build:standalone
 
 ## Local Setup
 
-Use this when your browser and coding shell are on the same machine.
+Use this when your browser and coding environment are on the same machine.
 
 ```bash
 maglev hub start --name local
-maglev shell
 ```
 
 Open:
 
 ```text
-http://localhost:3006
+The URL printed by `maglev hub start`.
 ```
 
-Optional: start the runner if you want the web UI to create new shells later.
+By default, `maglev hub start` chooses a free local port to avoid conflicts. If you want the traditional fixed local URL, pin the port explicitly:
 
 ```bash
-maglev runner start
+maglev hub start --name local --port 3006
 ```
+
+Then open `http://localhost:3006`.
+
+Create sessions from the web UI. `maglev hub start` also starts the local runner for that hub, so you do not need to run `maglev shell` or `maglev runner start` manually for the normal flow.
 
 ## SSH Setup
 
@@ -105,69 +108,62 @@ On the remote workstation:
 
 ```bash
 maglev hub start --name devbox --host 127.0.0.1
-maglev shell
 ```
+
+Use the port printed by `maglev hub start` in your SSH tunnel. Example, if the hub prints `http://127.0.0.1:43891`:
 
 On your laptop:
 
 ```bash
-ssh -L 3006:127.0.0.1:3006 user@devbox
+ssh -L 43891:127.0.0.1:43891 user@devbox
 ```
 
 Then open this on your laptop:
 
 ```text
-http://localhost:3006
+http://localhost:43891
 ```
 
-Optional: keep remote spawning available from the web UI:
+If you prefer a stable tunnel command, start the remote hub with `--port 3006` and forward `3006`.
 
-```bash
-maglev runner start
-```
+Create sessions from the web UI after the runner appears in the machine list.
 
 ## Slurm / HPC Setup
 
-Use this when shells run on ephemeral compute nodes that your browser cannot reach directly.
+Use this when sessions run on ephemeral compute nodes that your browser cannot reach directly.
 
-On a stable login, VNC, or jump node:
+Assumption: the login node and allocated Slurm node/container share the same home directory. At minimum, they must share `~/.maglev`. The server writes connection and auth state there, and `maglev hub start --remote` reads it inside the allocation. If your site gives jobs a different home directory, mount or bind the login node's `~/.maglev` into the job/container before starting the hub.
+
+| Where | Run | Purpose |
+|-------|-----|---------|
+| Client laptop/browser | Open the URL printed by `maglev hub start --remote` | Use the web UI |
+| Login, VNC, or jump node | `maglev server service install` | Keep the Maglev server reachable |
+| Login, VNC, or jump node | `maglev auth github login` | Authenticate browser access once |
+| Slurm node/container | `maglev hub start --name "slurm-${SLURM_JOB_ID:-manual}" --remote` | Start the hub and runner inside the allocation |
+
+The default Linux setup is to run the server as a user service on the stable login/VNC/jump node:
 
 ```bash
-# Terminal 1: keep the broker running
-maglev server
-
-# Terminal 2: authenticate browser access once
+maglev server service install
 maglev auth github login
 ```
 
-Inside the Slurm allocation:
+Then, inside the Slurm allocation:
 
 ```bash
 srun --pty bash
 maglev hub start --name "slurm-${SLURM_JOB_ID:-manual}" --remote
-maglev shell
 ```
 
 Open the URL printed by `maglev hub start --remote`.
 
-If the browser cannot reach the broker hostname, start the broker with the public URL you actually use:
+If the browser cannot reach the server hostname, start the server with the public URL you actually use:
 
 ```bash
-maglev server --public-url https://your-reachable-broker.example
+maglev server --public-url https://your-reachable-server.example
 ```
 
-If the login node and compute node do not share `~/.maglev`, pass broker details explicitly:
-
-```bash
-# On the login/VNC node
-cat ~/.maglev/broker-url
-cat ~/.maglev/broker-key
-
-# Inside the Slurm allocation
-maglev hub start --remote \
-  --broker-url http://login-node:3010 \
-  --broker-token "<broker-key-from-login-node>"
-```
+If Linux user services are not available on the login/VNC/jump node, keep `maglev server` running in a terminal or under your site's preferred process manager.
 
 ## Daily Commands
 
@@ -185,11 +181,11 @@ maglev server hubs
 
 ## Services
 
-For long-running Linux user services:
+For long-running Linux hosts, install services instead of keeping foreground terminals open:
 
 ```bash
-maglev hub service install
 maglev server service install
+maglev hub service install
 ```
 
 For named hubs:
@@ -203,9 +199,9 @@ maglev hub logs --name devbox-a --follow
 ## Mental Model
 
 - `maglev hub` stores session state and serves the web UI.
-- `maglev shell` starts a shell session and registers it with the hub.
-- `maglev runner` lets the web UI spawn new shells on that machine.
-- `maglev server` is the optional broker for machines your browser cannot reach directly.
+- `maglev hub start` starts the matching runner automatically.
+- `maglev runner` lets the web UI create sessions on that machine; direct runner commands are mostly for status, logs, and troubleshooting.
+- `maglev server` is the remote access entrypoint for machines your browser cannot reach directly.
 
 ## More Docs
 
