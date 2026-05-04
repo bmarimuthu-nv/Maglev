@@ -233,6 +233,10 @@ function runBrokerServiceCommand(commandArgs: string[]): void {
             stopBrokerUserService()
             return
         case 'restart':
+            if (commandArgs.length > 2) {
+                installBrokerUserService(commandArgs)
+                return
+            }
             restartBrokerUserService()
             return
         case 'status':
@@ -252,7 +256,7 @@ ${chalk.bold('Usage:')}
   maglev server service install [server args]
   maglev server service start
   maglev server service stop
-  maglev server service restart
+  maglev server service restart [server args]
   maglev server service status
   maglev server service logs [-f|--follow]
   maglev server service uninstall
@@ -395,6 +399,7 @@ ${chalk.bold('Usage:')}
   maglev server [options]
   maglev server hubs
   maglev server service install [options]
+  maglev server service restart [options]
   maglev server service status
   maglev server service logs --follow
 
