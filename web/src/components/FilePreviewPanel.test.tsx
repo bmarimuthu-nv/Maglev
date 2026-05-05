@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { AppContextProvider } from '@/lib/app-context'
-import type { FileReviewThread } from '@/types/api'
-import { encodeBase64 } from '@/lib/utils'
+import { decodeBase64, encodeBase64 } from '@/lib/utils'
 import { FilePreviewPanel } from './FilePreviewPanel'
 
 vi.mock('@/lib/shiki', () => ({
@@ -16,36 +15,6 @@ vi.mock('@/components/MarkdownRenderer', () => ({
         <div data-testid="markdown-renderer">{content}</div>
     )
 }))
-
-function makeThread(overrides: Partial<FileReviewThread> & { id: string }): FileReviewThread {
-    const now = Date.now()
-    const { id, ...rest } = overrides
-    return {
-        id,
-        filePath: '/repo/src/example.ts',
-        absolutePath: '/repo/src/example.ts',
-        createdAt: now,
-        updatedAt: now,
-        status: 'open',
-        anchor: {
-            line: overrides.resolvedLine ?? 1,
-            preview: 'const value = 1',
-            contextBefore: [],
-            contextAfter: []
-        },
-        comments: [
-            {
-                id: `${overrides.id}-comment-1`,
-                author: 'user',
-                createdAt: now,
-                body: 'Review note'
-            }
-        ],
-        resolvedLine: 1,
-        orphaned: false,
-        ...rest
-    }
-}
 
 function createApi(overrides?: Partial<{
     readSessionFile: ReturnType<typeof vi.fn>
@@ -96,6 +65,7 @@ function renderPreview(
                     sessionId="session-1"
                     filePath={filePath}
                     api={api as never}
+                    workspacePath="/repo"
                     onClose={vi.fn()}
                     presentation={presentation}
                 />
@@ -133,27 +103,50 @@ describe('FilePreviewPanel', () => {
     })
 
     it('loads a code file and switches into review mode with inline thread content', async () => {
-        const thread = makeThread({
-            id: 'thread-1',
-            resolvedLine: 2,
-            comments: [
-                {
-                    id: 'thread-1-root',
-                    author: 'user',
-                    createdAt: Date.now(),
-                    body: 'Need a null guard here.'
-                }
-            ]
-        })
+        const now = Date.now()
         const api = createApi({
-            readSessionFile: vi.fn().mockResolvedValue({
-                success: true,
-                content: encodeBase64(['const a = 1', 'const b = a + 1'].join('\n')),
-                hash: 'file-hash'
+            readSessionFile: vi.fn().mockImplementation(async (_sessionId: string, path: string) => {
+                if (path === '.maglev-review/review.json') {
+                    return {
+                        success: true,
+                        content: encodeBase64(JSON.stringify({
+                            version: 1,
+                            workspacePath: '/repo',
+                            currentBranch: null,
+                            defaultBranch: null,
+                            mergeBase: null,
+                            reviewContext: null,
+                            updatedAt: now,
+                            threads: [{
+                                id: 'thread-1',
+                                diffMode: 'branch',
+                                filePath: '/repo/src/example.ts',
+                                anchor: {
+                                    side: 'right',
+                                    line: 2,
+                                    preview: 'const b = a + 1'
+                                },
+                                status: 'open',
+                                comments: [{
+                                    id: 'thread-1-root',
+                                    author: 'user',
+                                    createdAt: now,
+                                    body: 'Need a null guard here.'
+                                }]
+                            }]
+                        })),
+                        hash: 'review-hash'
+                    }
+                }
+                return {
+                    success: true,
+                    content: encodeBase64(['const a = 1', 'const b = a + 1'].join('\n')),
+                    hash: 'file-hash'
+                }
             }),
             getSessionFileReviewThreads: vi.fn().mockResolvedValue({
                 success: true,
-                threads: [thread]
+                threads: []
             })
         })
 
@@ -166,7 +159,7 @@ describe('FilePreviewPanel', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Review' }))
 
         expect(await screen.findByText('Review annotations')).toBeInTheDocument()
-        expect(screen.getByText('1 total threads')).toBeInTheDocument()
+        expect(await screen.findByText('1 total threads')).toBeInTheDocument()
         expect(screen.getAllByText('1 unresolved').length).toBeGreaterThanOrEqual(1)
         expect(screen.getByText('Need a null guard here.')).toBeInTheDocument()
         expect(screen.getByPlaceholderText('Search in file')).toBeInTheDocument()
@@ -195,30 +188,116 @@ describe('FilePreviewPanel', () => {
         })
     })
 
-    it('uses rendered markdown in code mode and falls back to the code canvas in review mode', async () => {
-        const thread = makeThread({
-            id: 'thread-md',
-            filePath: '/repo/README.md',
-            absolutePath: '/repo/README.md',
-            resolvedLine: 1,
-            comments: [
-                {
-                    id: 'thread-md-root',
-                    author: 'agent',
-                    createdAt: Date.now(),
-                    body: 'Consider tightening this heading.'
-                }
-            ]
+    it('creates open-file review comments in the shared review JSON file', async () => {
+        const writeSessionFile = vi.fn().mockResolvedValue({
+            success: true,
+            hash: 'review-hash'
         })
         const api = createApi({
-            readSessionFile: vi.fn().mockResolvedValue({
-                success: true,
-                content: encodeBase64('# Hello Maglev\n\nPreview text'),
-                hash: 'md-hash'
+            readSessionFile: vi.fn().mockImplementation(async (_sessionId: string, path: string) => {
+                if (path === '.maglev-review/review.json') {
+                    return {
+                        success: false,
+                        error: 'ENOENT: no such file or directory'
+                    }
+                }
+                return {
+                    success: true,
+                    content: encodeBase64(['const a = 1', 'const b = a + 1'].join('\n')),
+                    hash: 'file-hash'
+                }
+            }),
+            writeSessionFile
+        })
+
+        renderPreview(api, '/repo/src/example.ts')
+
+        expect(await screen.findByText('/repo/src/example.ts')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+        expect(await screen.findByText('Review annotations')).toBeInTheDocument()
+
+        const addCommentButton = await screen.findByTitle('Add comment on line 2')
+        await waitFor(() => {
+            expect(addCommentButton).not.toBeDisabled()
+        })
+        fireEvent.click(addCommentButton)
+        fireEvent.change(screen.getByPlaceholderText('Add comment for line 2'), {
+            target: { value: 'Use the shared review file.' }
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Save comment' }))
+
+        await waitFor(() => {
+            expect(writeSessionFile).toHaveBeenCalled()
+        })
+        const [, reviewPath, encodedContent, expectedHash] = writeSessionFile.mock.calls[0]
+        const decoded = decodeBase64(encodedContent)
+        expect(reviewPath).toBe('.maglev-review/review.json')
+        expect(expectedHash).toBeNull()
+        expect(decoded.ok).toBe(true)
+        const payload = JSON.parse(decoded.text)
+        expect(payload.workspacePath).toBe('/repo')
+        expect(payload.threads).toHaveLength(1)
+        expect(payload.threads[0]).toMatchObject({
+            diffMode: 'branch',
+            filePath: '/repo/src/example.ts',
+            anchor: {
+                side: 'right',
+                line: 2,
+                preview: 'const b = a + 1'
+            },
+            status: 'open'
+        })
+        expect(payload.threads[0].comments[0]).toMatchObject({
+            author: 'user',
+            body: 'Use the shared review file.'
+        })
+    })
+
+    it('uses rendered markdown in code mode and falls back to the code canvas in review mode', async () => {
+        const now = Date.now()
+        const api = createApi({
+            readSessionFile: vi.fn().mockImplementation(async (_sessionId: string, path: string) => {
+                if (path === '.maglev-review/review.json') {
+                    return {
+                        success: true,
+                        content: encodeBase64(JSON.stringify({
+                            version: 1,
+                            workspacePath: '/repo',
+                            currentBranch: null,
+                            defaultBranch: null,
+                            mergeBase: null,
+                            reviewContext: null,
+                            updatedAt: now,
+                            threads: [{
+                                id: 'thread-md',
+                                diffMode: 'branch',
+                                filePath: '/repo/README.md',
+                                anchor: {
+                                    side: 'right',
+                                    line: 1,
+                                    preview: '# Hello Maglev'
+                                },
+                                status: 'open',
+                                comments: [{
+                                    id: 'thread-md-root',
+                                    author: 'agent',
+                                    createdAt: now,
+                                    body: 'Consider tightening this heading.'
+                                }]
+                            }]
+                        })),
+                        hash: 'review-hash'
+                    }
+                }
+                return {
+                    success: true,
+                    content: encodeBase64('# Hello Maglev\n\nPreview text'),
+                    hash: 'md-hash'
+                }
             }),
             getSessionFileReviewThreads: vi.fn().mockResolvedValue({
                 success: true,
-                threads: [thread]
+                threads: []
             })
         })
 
@@ -232,7 +311,7 @@ describe('FilePreviewPanel', () => {
 
         expect(await screen.findByText('Review annotations')).toBeInTheDocument()
         expect(screen.getByPlaceholderText('Search in file')).toBeInTheDocument()
-        expect(screen.getByText('Consider tightening this heading.')).toBeInTheDocument()
+        expect(await screen.findByText('Consider tightening this heading.')).toBeInTheDocument()
 
         await waitFor(() => {
             expect(screen.getAllByTestId('markdown-renderer').map((element) => element.textContent)).toEqual([

@@ -2413,6 +2413,7 @@ export default function TerminalPage() {
                         sessionId={loadedSessionId}
                         filePath={previewFilePath}
                         api={api}
+                        workspacePath={session?.metadata?.path ?? null}
                         presentation="sidebar"
                         onClose={() => setPreviewFilePath(null)}
                     />
@@ -2439,6 +2440,7 @@ export default function TerminalPage() {
                             sessionId={loadedSessionId}
                             filePath={previewFilePath}
                             api={api}
+                            workspacePath={session?.metadata?.path ?? null}
                             presentation="overlay"
                             onClose={() => setPreviewFilePath(null)}
                         />

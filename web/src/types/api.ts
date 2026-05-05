@@ -242,7 +242,7 @@ export type FileReadResponse = {
 
 export type FileReviewComment = {
     id: string
-    author: 'user' | 'agent'
+    author: string
     createdAt: number
     body: string
 }
