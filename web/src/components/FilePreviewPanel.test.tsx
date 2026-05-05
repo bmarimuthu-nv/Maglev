@@ -172,6 +172,29 @@ describe('FilePreviewPanel', () => {
         expect(screen.getByPlaceholderText('Search in file')).toBeInTheDocument()
     })
 
+    it('copies the review JSON path from the header', async () => {
+        const api = createApi({
+            readSessionFile: vi.fn().mockResolvedValue({
+                success: true,
+                content: encodeBase64('const value = 1'),
+                hash: 'file-hash'
+            }),
+            getSessionFileReviewThreads: vi.fn().mockResolvedValue({
+                success: true,
+                threads: []
+            })
+        })
+
+        renderPreview(api, '/repo/src/example.ts')
+
+        expect(await screen.findByText('/repo/src/example.ts')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Copy review JSON path' }))
+
+        await waitFor(() => {
+            expect(navigator.clipboard.writeText).toHaveBeenCalledWith('.maglev-review/review.json')
+        })
+    })
+
     it('uses rendered markdown in code mode and falls back to the code canvas in review mode', async () => {
         const thread = makeThread({
             id: 'thread-md',
@@ -212,7 +235,9 @@ describe('FilePreviewPanel', () => {
         expect(screen.getByText('Consider tightening this heading.')).toBeInTheDocument()
 
         await waitFor(() => {
-            expect(screen.queryByTestId('markdown-renderer')).not.toBeInTheDocument()
+            expect(screen.getAllByTestId('markdown-renderer').map((element) => element.textContent)).toEqual([
+                'Consider tightening this heading.'
+            ])
         })
     })
 
