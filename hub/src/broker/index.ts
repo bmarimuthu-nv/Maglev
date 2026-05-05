@@ -26,8 +26,17 @@ type BrokerUserSession = {
     token: string
 }
 
-const DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Ov23liS6nujzeYeDnZxL'
+const DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Iv23lisoLXKLFuPpGRGe'
+const LEGACY_DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Ov23liS6nujzeYeDnZxL'
 const BROKER_SESSION_COOKIE = 'maglev_broker_session'
+
+function normalizePersistedGitHubOauthClientId(clientId: string | null | undefined): string | undefined {
+    const trimmed = clientId?.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    return trimmed === LEGACY_DEFAULT_GITHUB_OAUTH_CLIENT_ID ? DEFAULT_GITHUB_OAUTH_CLIENT_ID : trimmed
+}
 
 type RegisterHubMessage = {
     type: 'register'
@@ -218,7 +227,7 @@ function parseAllowedUsers(raw: string): string[] {
 async function getBrokerAuthConfig(): Promise<BrokerAuthConfig> {
     const bootstrapped = await readRemoteGitHubAuthState()
     const clientId = getEnv('MAGLEV_GITHUB_OAUTH_CLIENT_ID')
-        ?? bootstrapped?.state.githubOauthClientId
+        ?? normalizePersistedGitHubOauthClientId(bootstrapped?.state.githubOauthClientId)
         ?? DEFAULT_GITHUB_OAUTH_CLIENT_ID
     const owner = getEnv('MAGLEV_GITHUB_OWNER')?.toLowerCase() ?? bootstrapped?.state.githubAuth?.login?.toLowerCase() ?? null
     const allowlist = getEnv('MAGLEV_GITHUB_ALLOWED_USERS')

@@ -11,7 +11,16 @@
 import { getSettingsFile, readSettings, writeSettings } from './settings'
 import { readRemoteGitHubAuthState } from '../broker/key'
 
-const DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Ov23liS6nujzeYeDnZxL'
+const DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Iv23lisoLXKLFuPpGRGe'
+const LEGACY_DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Ov23liS6nujzeYeDnZxL'
+
+function normalizePersistedGitHubOauthClientId(clientId: string | null | undefined): string | undefined {
+    const trimmed = clientId?.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    return trimmed === LEGACY_DEFAULT_GITHUB_OAUTH_CLIENT_ID ? DEFAULT_GITHUB_OAUTH_CLIENT_ID : trimmed
+}
 
 export interface ServerSettings {
     telegramBotToken: string | null
@@ -247,11 +256,15 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
             needsSave = true
         }
     } else if (remoteGitHubAuth?.state.githubOauthClientId) {
-        githubOauthClientId = remoteGitHubAuth.state.githubOauthClientId
+        githubOauthClientId = normalizePersistedGitHubOauthClientId(remoteGitHubAuth.state.githubOauthClientId) ?? DEFAULT_GITHUB_OAUTH_CLIENT_ID
         sources.githubOauthClientId = 'file'
     } else if (settings.githubOauthClientId !== undefined) {
-        githubOauthClientId = settings.githubOauthClientId
+        githubOauthClientId = normalizePersistedGitHubOauthClientId(settings.githubOauthClientId) ?? DEFAULT_GITHUB_OAUTH_CLIENT_ID
         sources.githubOauthClientId = 'file'
+        if (settings.githubOauthClientId !== githubOauthClientId) {
+            settings.githubOauthClientId = githubOauthClientId
+            needsSave = true
+        }
     } else {
         if (settings.githubOauthClientId === undefined) {
             settings.githubOauthClientId = githubOauthClientId

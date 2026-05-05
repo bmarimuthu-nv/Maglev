@@ -9,7 +9,16 @@ import { getCurrentNamespace, getMachineIdForCurrentNamespace } from '@/utils/na
 import { readRemoteGitHubAuthState, writeRemoteGitHubAuthState } from '../../../hub/src/broker/key'
 import type { CommandDefinition } from './types'
 
-const DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Ov23liS6nujzeYeDnZxL'
+const DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Iv23lisoLXKLFuPpGRGe'
+const LEGACY_DEFAULT_GITHUB_OAUTH_CLIENT_ID = 'Ov23liS6nujzeYeDnZxL'
+
+function normalizePersistedGitHubOauthClientId(clientId: string | null | undefined): string | undefined {
+    const trimmed = clientId?.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    return trimmed === LEGACY_DEFAULT_GITHUB_OAUTH_CLIENT_ID ? DEFAULT_GITHUB_OAUTH_CLIENT_ID : trimmed
+}
 
 export async function handleAuthCommand(args: string[]): Promise<void> {
     const subcommand = args[0]
@@ -104,8 +113,12 @@ async function handleGitHubAuthCommand(args: string[]): Promise<void> {
 
     if (subcommand === 'status') {
         const githubAuth = githubSettings.githubAuth
+        const clientId = process.env.MAGLEV_GITHUB_OAUTH_CLIENT_ID?.trim()
+            || normalizePersistedGitHubOauthClientId(githubSettings.githubOauthClientId)
+            || normalizePersistedGitHubOauthClientId(settings.githubOauthClientId)
+            || DEFAULT_GITHUB_OAUTH_CLIENT_ID
         console.log(chalk.bold('\nGitHub Auth Status\n'))
-        console.log(chalk.gray(`  OAuth Client ID: ${githubSettings.githubOauthClientId ?? settings.githubOauthClientId ?? process.env.MAGLEV_GITHUB_OAUTH_CLIENT_ID ?? DEFAULT_GITHUB_OAUTH_CLIENT_ID}`))
+        console.log(chalk.gray(`  OAuth Client ID: ${clientId}`))
         console.log(chalk.gray(`  Storage: ${remoteGitHubAuth?.path ?? '~/.maglev/github-auth.json (not created)'}`))
         if (!githubAuth) {
             console.log(chalk.gray('  Owner: not authenticated'))
@@ -118,7 +131,10 @@ async function handleGitHubAuthCommand(args: string[]): Promise<void> {
     }
 
     if (subcommand === 'login') {
-        const clientId = (process.env.MAGLEV_GITHUB_OAUTH_CLIENT_ID || githubSettings.githubOauthClientId || settings.githubOauthClientId || DEFAULT_GITHUB_OAUTH_CLIENT_ID).trim()
+        const clientId = process.env.MAGLEV_GITHUB_OAUTH_CLIENT_ID?.trim()
+            || normalizePersistedGitHubOauthClientId(githubSettings.githubOauthClientId)
+            || normalizePersistedGitHubOauthClientId(settings.githubOauthClientId)
+            || DEFAULT_GITHUB_OAUTH_CLIENT_ID
 
         console.log(chalk.bold('\nGitHub Device Login\n'))
         const started = await startGitHubDeviceFlow(clientId)
@@ -152,7 +168,7 @@ async function handleGitHubAuthCommand(args: string[]): Promise<void> {
             }
             if (result.status === 'authorized') {
                 const path = await writeRemoteGitHubAuthState({
-                    githubOauthClientId: githubSettings.githubOauthClientId ?? clientId,
+                    githubOauthClientId: clientId,
                     githubAuth: {
                         provider: 'github',
                         accessToken: result.identity.accessToken,
@@ -171,7 +187,8 @@ async function handleGitHubAuthCommand(args: string[]): Promise<void> {
 
     if (subcommand === 'logout') {
         await writeRemoteGitHubAuthState({
-            githubOauthClientId: githubSettings.githubOauthClientId ?? settings.githubOauthClientId,
+            githubOauthClientId: normalizePersistedGitHubOauthClientId(githubSettings.githubOauthClientId)
+                ?? normalizePersistedGitHubOauthClientId(settings.githubOauthClientId),
             githubAuth: undefined
         })
         console.log(chalk.green('Cleared cached GitHub authentication.'))
