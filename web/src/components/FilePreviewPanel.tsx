@@ -10,6 +10,9 @@ import { isBinaryContent } from '@/lib/file-utils'
 import type { FileReviewThread, WriteFileConflict } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { SourceReviewFileCard } from '@/components/review/SourceReviewFileCard'
+import { CheckIcon, CopyIcon } from '@/components/icons'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { REVIEW_FILE_PATH } from '@/lib/review-file'
 
 function CloseIcon() {
     return (
@@ -149,6 +152,7 @@ export function FilePreviewPanel(props: {
     const { scopeKey } = useAppContext()
     const { sessionId, filePath, api, onClose, presentation = 'sidebar' } = props
     const queryClient = useQueryClient()
+    const { copied: reviewPathCopied, copy: copyReviewPath } = useCopyToClipboard()
     const isOverlay = presentation === 'overlay'
 
     const fileQuery = useQuery({
@@ -442,6 +446,10 @@ export function FilePreviewPanel(props: {
         }) ?? Promise.resolve({ success: false, error: 'API unavailable' }))
     }, [api, runReviewMutation, sessionId])
 
+    const handleCopyReviewPath = useCallback(() => {
+        void copyReviewPath(REVIEW_FILE_PATH)
+    }, [copyReviewPath])
+
     return (
         <div className={`flex h-full w-full flex-col overflow-hidden ${isOverlay ? 'bg-[var(--app-surface-raised)]' : ''}`}>
             <div className={`border-b border-[var(--app-border)] ${isOverlay ? 'px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))]' : 'px-3 py-2.5'}`}>
@@ -452,6 +460,15 @@ export function FilePreviewPanel(props: {
                         </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={handleCopyReviewPath}
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface-raised)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                            title={reviewPathCopied ? 'Copied review JSON path' : 'Copy review JSON path'}
+                            aria-label={reviewPathCopied ? 'Copied review JSON path' : 'Copy review JSON path'}
+                        >
+                            {reviewPathCopied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                        </button>
                         <button
                             type="button"
                             onClick={() => void handleRefresh()}
