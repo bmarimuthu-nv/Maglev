@@ -12,7 +12,7 @@ import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { SourceReviewFileCard } from '@/components/review/SourceReviewFileCard'
 import { CheckIcon, CopyIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
-import { REVIEW_FILE_PATH } from '@/lib/review-file'
+import { createEmptyReviewFile, parseReviewFile, REVIEW_FILE_PATH, type ReviewFile, type ReviewThread } from '@/lib/review-file'
 
 function CloseIcon() {
     return (
@@ -142,15 +142,88 @@ function getConflictMessage(conflict: WriteFileConflict): string {
     }
 }
 
+function isMissingReviewFileError(message: string): boolean {
+    const normalized = message.toLowerCase()
+    return normalized.includes('enoent')
+        || normalized.includes('enotdir')
+        || normalized.includes('no such file')
+        || normalized.includes('not a directory')
+}
+
+function makeId(prefix: string): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return `${prefix}-${crypto.randomUUID()}`
+    }
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+function getThreadTimestamp(thread: ReviewThread, fallback: number): number {
+    return thread.comments[0]?.createdAt ?? fallback
+}
+
+function getThreadUpdatedAt(thread: ReviewThread, fallback: number): number {
+    return thread.comments.at(-1)?.createdAt ?? fallback
+}
+
+function resolveReviewThreadLine(thread: ReviewThread, sourceLines: string[]): { resolvedLine: number | null; orphaned: boolean } {
+    if (thread.anchor.side !== 'right') {
+        return { resolvedLine: null, orphaned: true }
+    }
+
+    const originalLine = thread.anchor.line
+    const preview = thread.anchor.preview
+    if (originalLine >= 1 && originalLine <= sourceLines.length) {
+        if (!preview || sourceLines[originalLine - 1] === preview) {
+            return { resolvedLine: originalLine, orphaned: false }
+        }
+    }
+
+    if (preview) {
+        const relocatedIndex = sourceLines.findIndex((line) => line === preview)
+        if (relocatedIndex >= 0) {
+            return { resolvedLine: relocatedIndex + 1, orphaned: false }
+        }
+    }
+
+    return { resolvedLine: null, orphaned: true }
+}
+
+function toFileReviewThread(thread: ReviewThread, sourceLines: string[]): FileReviewThread {
+    const now = Date.now()
+    const resolved = resolveReviewThreadLine(thread, sourceLines)
+    return {
+        id: thread.id,
+        filePath: thread.filePath,
+        absolutePath: thread.filePath,
+        createdAt: getThreadTimestamp(thread, now),
+        updatedAt: getThreadUpdatedAt(thread, now),
+        status: thread.status,
+        anchor: {
+            line: thread.anchor.line,
+            preview: thread.anchor.preview ?? sourceLines[Math.max(0, thread.anchor.line - 1)] ?? '',
+            contextBefore: [],
+            contextAfter: []
+        },
+        comments: thread.comments,
+        resolvedLine: resolved.resolvedLine,
+        orphaned: resolved.orphaned
+    }
+}
+
+type ReviewFileLoadResult =
+    | { success: true; reviewFile: ReviewFile; hash: string | null }
+    | { success: false; error: string }
+
 export function FilePreviewPanel(props: {
     sessionId: string
     filePath: string
     api: ApiClient | null
     onClose: () => void
     presentation?: 'sidebar' | 'overlay'
+    workspacePath?: string | null
 }) {
     const { scopeKey } = useAppContext()
-    const { sessionId, filePath, api, onClose, presentation = 'sidebar' } = props
+    const { sessionId, filePath, api, onClose, presentation = 'sidebar', workspacePath = null } = props
     const queryClient = useQueryClient()
     const { copied: reviewPathCopied, copy: copyReviewPath } = useCopyToClipboard()
     const isOverlay = presentation === 'overlay'
@@ -163,16 +236,6 @@ export function FilePreviewPanel(props: {
         },
         enabled: Boolean(api && filePath),
         retry: false,
-    })
-
-    const reviewThreadsQuery = useQuery({
-        queryKey: queryKeys.sessionFileReviewThreads(scopeKey, sessionId, filePath),
-        queryFn: async () => {
-            if (!api) throw new Error('API unavailable')
-            return await api.getSessionFileReviewThreads(sessionId, filePath)
-        },
-        enabled: Boolean(api && filePath),
-        retry: false
     })
 
     const decoded = fileQuery.data?.success && fileQuery.data.content
@@ -209,6 +272,43 @@ export function FilePreviewPanel(props: {
     const editViewRef = useRef<CodeEditSurfaceHandle | null>(null)
     const restoredDraftKeyRef = useRef<string | null>(null)
     const isEditing = panelMode === 'edit'
+
+    const reviewFileQuery = useQuery<ReviewFileLoadResult>({
+        queryKey: queryKeys.sessionFile(scopeKey, sessionId, REVIEW_FILE_PATH),
+        queryFn: async () => {
+            if (!api) throw new Error('API unavailable')
+            const result = await api.readSessionFile(sessionId, REVIEW_FILE_PATH)
+            if (!result.success) {
+                const errorMessage = result.error ?? 'Failed to load review file'
+                if (isMissingReviewFileError(errorMessage)) {
+                    return {
+                        success: true,
+                        reviewFile: createEmptyReviewFile(workspacePath ?? ''),
+                        hash: null
+                    }
+                }
+                return { success: false, error: errorMessage }
+            }
+
+            const decodedReview = result.content ? decodeBase64(result.content) : { ok: true, text: '' }
+            if (!decodedReview.ok) {
+                return { success: false, error: 'Failed to decode review file' }
+            }
+
+            const parsed = parseReviewFile(decodedReview.text, workspacePath ?? '')
+            if (!parsed.ok) {
+                return { success: false, error: parsed.error }
+            }
+
+            return {
+                success: true,
+                reviewFile: parsed.value,
+                hash: result.hash ?? null
+            }
+        },
+        enabled: Boolean(api && filePath && panelMode === 'review' && !binary),
+        retry: false
+    })
 
     useEffect(() => {
         setViewMode('rendered')
@@ -311,13 +411,13 @@ export function FilePreviewPanel(props: {
             setPanelMode('read')
             setDraft('')
             await fileQuery.refetch()
-            await reviewThreadsQuery.refetch()
+            await reviewFileQuery.refetch()
         } catch (error) {
             setSaveError(error instanceof Error ? error.message : 'Failed to save')
         } finally {
             setIsSaving(false)
         }
-    }, [api, draft, draftStorageKey, fileHash, filePath, fileQuery, isSaving, reviewThreadsQuery, sessionId])
+    }, [api, draft, draftStorageKey, fileHash, filePath, fileQuery, isSaving, reviewFileQuery, sessionId])
 
     const discardDraft = useCallback(async () => {
         clearDraftSnapshot(draftStorageKey)
@@ -327,29 +427,54 @@ export function FilePreviewPanel(props: {
         setDraftRecovered(false)
         setPanelMode('read')
         await fileQuery.refetch()
-        await reviewThreadsQuery.refetch()
-    }, [draftStorageKey, fileQuery, reviewThreadsQuery])
+        await reviewFileQuery.refetch()
+    }, [draftStorageKey, fileQuery, reviewFileQuery])
 
     const invalidateReviewThreads = useCallback(async () => {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.sessionFileReviewThreads(scopeKey, sessionId, filePath) })
-        await reviewThreadsQuery.refetch()
-    }, [filePath, queryClient, reviewThreadsQuery, scopeKey, sessionId])
+        await queryClient.invalidateQueries({ queryKey: queryKeys.sessionFile(scopeKey, sessionId, REVIEW_FILE_PATH) })
+        await reviewFileQuery.refetch()
+    }, [queryClient, reviewFileQuery, scopeKey, sessionId])
 
-    const runReviewMutation = useCallback(async (mutate: () => Promise<{ success: boolean; error?: string }>) => {
+    const runReviewMutation = useCallback(async (mutate: (current: ReviewFile) => ReviewFile) => {
         setReviewSaving(true)
         setReviewError(null)
         try {
-            const result = await mutate()
+            if (!api) {
+                throw new Error('API unavailable')
+            }
+            if (reviewFileQuery.isLoading) {
+                throw new Error('Review file is still loading')
+            }
+            const loaded = reviewFileQuery.data
+            if (loaded && !loaded.success) {
+                throw new Error(loaded.error)
+            }
+
+            const current = loaded?.success
+                ? loaded.reviewFile
+                : createEmptyReviewFile(workspacePath ?? '')
+            const next = mutate(current)
+            const payload: ReviewFile = {
+                ...next,
+                workspacePath: next.workspacePath || workspacePath || '',
+                updatedAt: Date.now()
+            }
+            const result = await api.writeSessionFile(
+                sessionId,
+                REVIEW_FILE_PATH,
+                encodeBase64(`${JSON.stringify(payload, null, 2)}\n`),
+                loaded?.success ? loaded.hash : null
+            )
             if (!result.success) {
-                throw new Error(result.error ?? 'Failed to update review threads')
+                throw new Error(result.error ?? 'Failed to update review file')
             }
             await invalidateReviewThreads()
         } catch (error) {
-            setReviewError(error instanceof Error ? error.message : 'Failed to update review threads')
+            setReviewError(error instanceof Error ? error.message : 'Failed to update review file')
         } finally {
             setReviewSaving(false)
         }
-    }, [invalidateReviewThreads])
+    }, [api, invalidateReviewThreads, reviewFileQuery.data, reviewFileQuery.isLoading, sessionId, workspacePath])
 
     const handleRefresh = useCallback(async () => {
         if (!api || isEditing || isSaving || reviewSaving) {
@@ -361,13 +486,20 @@ export function FilePreviewPanel(props: {
         setReviewError(null)
         await Promise.all([
             fileQuery.refetch(),
-            reviewThreadsQuery.refetch(),
+            reviewFileQuery.refetch(),
         ])
-    }, [api, fileQuery, isEditing, isSaving, reviewSaving, reviewThreadsQuery])
+    }, [api, fileQuery, isEditing, isSaving, reviewFileQuery, reviewSaving])
 
     const isDirty = isEditing && draft !== content
-    const isRefreshing = (fileQuery.isFetching && !fileQuery.isLoading) || (reviewThreadsQuery.isFetching && !reviewThreadsQuery.isLoading)
-    const reviewThreads = reviewThreadsQuery.data?.success ? (reviewThreadsQuery.data.threads ?? []) : []
+    const isRefreshing = (fileQuery.isFetching && !fileQuery.isLoading) || (reviewFileQuery.isFetching && !reviewFileQuery.isLoading)
+    const reviewThreads = useMemo(
+        () => reviewFileQuery.data?.success
+            ? reviewFileQuery.data.reviewFile.threads
+                .filter((thread) => thread.filePath === filePath)
+                .map((thread) => toFileReviewThread(thread, sourceLines))
+            : [],
+        [filePath, reviewFileQuery.data, sourceLines]
+    )
     const lineThreads = useMemo(() => {
         const map = new Map<number, FileReviewThread[]>()
         for (const thread of reviewThreads) {
@@ -406,15 +538,36 @@ export function FilePreviewPanel(props: {
         if (!api || !body) {
             return
         }
-        await runReviewMutation(() => api.createSessionFileReviewThread(sessionId, {
-            path: filePath,
-            line,
-            body,
-            author: 'user'
-        }))
+        await runReviewMutation((current) => {
+            const now = Date.now()
+            const threadId = makeId('thread')
+            return {
+                ...current,
+                threads: [
+                    ...current.threads,
+                    {
+                        id: threadId,
+                        diffMode: current.reviewContext?.mode ?? 'branch',
+                        filePath,
+                        anchor: {
+                            side: 'right',
+                            line,
+                            preview: sourceLines[Math.max(0, line - 1)] ?? ''
+                        },
+                        status: 'open',
+                        comments: [{
+                            id: makeId('comment'),
+                            author: 'user',
+                            createdAt: now,
+                            body
+                        }]
+                    }
+                ]
+            }
+        })
         setComposerLine(null)
         setComposerText('')
-    }, [api, composerText, filePath, runReviewMutation, sessionId])
+    }, [api, composerText, filePath, runReviewMutation, sourceLines])
 
     const toggleCollapsedThread = useCallback((threadId: string) => {
         setCollapsedResolvedThreadIds((current) => ({
@@ -424,27 +577,43 @@ export function FilePreviewPanel(props: {
     }, [])
 
     const handleResolveThread = useCallback((thread: FileReviewThread) => {
-        void runReviewMutation(() => api?.setSessionFileReviewThreadStatus(
-            sessionId,
-            thread.id,
-            thread.status === 'resolved' ? 'open' : 'resolved'
-        ) ?? Promise.resolve({ success: false, error: 'API unavailable' }))
-    }, [api, runReviewMutation, sessionId])
+        void runReviewMutation((current) => ({
+            ...current,
+            threads: current.threads.map((candidate) => candidate.id === thread.id
+                ? { ...candidate, status: candidate.status === 'resolved' ? 'open' : 'resolved' }
+                : candidate)
+        }))
+    }, [runReviewMutation])
 
     const handleDeleteThread = useCallback((thread: FileReviewThread) => {
         if (!window.confirm('Delete this review thread permanently?')) {
             return
         }
-        void runReviewMutation(() => api?.deleteSessionFileReviewThread(sessionId, thread.id)
-            ?? Promise.resolve({ success: false, error: 'API unavailable' }))
-    }, [api, runReviewMutation, sessionId])
+        void runReviewMutation((current) => ({
+            ...current,
+            threads: current.threads.filter((candidate) => candidate.id !== thread.id)
+        }))
+    }, [runReviewMutation])
 
     const handleReplyToThread = useCallback((thread: FileReviewThread, body: string) => {
-        void runReviewMutation(() => api?.replyToSessionFileReviewThread(sessionId, thread.id, {
-            body,
-            author: 'user'
-        }) ?? Promise.resolve({ success: false, error: 'API unavailable' }))
-    }, [api, runReviewMutation, sessionId])
+        void runReviewMutation((current) => ({
+            ...current,
+            threads: current.threads.map((candidate) => candidate.id === thread.id
+                ? {
+                    ...candidate,
+                    comments: [
+                        ...candidate.comments,
+                        {
+                            id: makeId('comment'),
+                            author: 'user',
+                            createdAt: Date.now(),
+                            body
+                        }
+                    ]
+                }
+                : candidate)
+        }))
+    }, [runReviewMutation])
 
     const handleCopyReviewPath = useCallback(() => {
         void copyReviewPath(REVIEW_FILE_PATH)
@@ -602,10 +771,10 @@ export function FilePreviewPanel(props: {
                     <span className="text-[var(--app-hint)]">{reviewThreads.length} total threads</span>
                     <span className="text-[var(--app-hint)]">{unresolvedCount} unresolved</span>
                     {reviewSaving ? <span className="text-[var(--app-hint)]">Saving…</span> : null}
-                    {reviewThreadsQuery.isLoading ? <span className="text-[var(--app-hint)]">Loading threads…</span> : null}
+                    {reviewFileQuery.isLoading ? <span className="text-[var(--app-hint)]">Loading threads…</span> : null}
                     {reviewError ? <span className="text-[var(--app-badge-error-text)]">{reviewError}</span> : null}
-                    {reviewThreadsQuery.data && !reviewThreadsQuery.data.success ? (
-                        <span className="text-[var(--app-badge-error-text)]">{reviewThreadsQuery.data.error ?? 'Failed to load review threads'}</span>
+                    {reviewFileQuery.data && !reviewFileQuery.data.success ? (
+                        <span className="text-[var(--app-badge-error-text)]">{reviewFileQuery.data.error ?? 'Failed to load review file'}</span>
                     ) : null}
                 </div>
             ) : null}
@@ -675,7 +844,7 @@ export function FilePreviewPanel(props: {
                             codeViewRef={reviewViewRef}
                             filePath={filePath}
                             sourceLines={sourceLines}
-                            reviewSaving={reviewSaving}
+                            reviewSaving={reviewSaving || reviewFileQuery.isLoading}
                             reviewThreads={reviewThreads}
                             lineThreads={lineThreads}
                             orphanedThreads={orphanedThreads}
