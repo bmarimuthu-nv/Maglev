@@ -102,8 +102,8 @@ Assumption: the login node and Slurm node/container share the same home director
 On the stable login, VNC, or jump node:
 
 ```bash
-maglev server service install --port <some port> --public-url http://<login-or-vnc-host>:<some port>
 maglev auth github login
+maglev server service install --port <some port> --public-url http://<login-or-vnc-host>:<some port>
 ```
 
 If you later change the server port or public URL:
