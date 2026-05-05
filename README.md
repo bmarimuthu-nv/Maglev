@@ -4,7 +4,7 @@
 
 <h1 align="center">maglev</h1>
 
-<p align="center">Run AI coding sessions locally, then control them from your browser or phone.</p>
+<p align="center">Bringing terminals, file browsing, and local code review to the browser.</p>
 
 ## Install
 
@@ -52,7 +52,8 @@ Pick the setup that matches where your sessions will run:
 | SSH workstation | Hub on the remote machine, browser through an SSH tunnel | The forwarded URL on your laptop |
 | Slurm/HPC node | Server on a reachable login/VNC node, hub inside the allocation | The URL printed by `maglev hub start --remote` |
 
-### Local
+<details>
+<summary><strong>Local</strong></summary>
 
 Use this when your browser and coding sessions run on the same machine.
 
@@ -68,7 +69,10 @@ maglev hub start --name local --port 3006
 
 Create sessions from the web UI. `maglev hub start` also starts the matching runner.
 
-### SSH Workstation
+</details>
+
+<details>
+<summary><strong>SSH Workstation</strong></summary>
 
 Use this when Maglev runs on a remote workstation and your browser reaches it through SSH.
 
@@ -93,7 +97,10 @@ maglev hub start --name devbox --host 127.0.0.1 --port 3006
 ssh -L 3006:127.0.0.1:3006 user@devbox
 ```
 
-### Slurm / HPC
+</details>
+
+<details>
+<summary><strong>Slurm / HPC</strong></summary>
 
 Use this when sessions run on allocated nodes that your browser cannot reach directly.
 
@@ -119,6 +126,8 @@ maglev hub start --name "<custom_name>" --remote
 ```
 
 Open the URL printed by `maglev hub start --remote`. If `~/.maglev/server-url` already contains the right server URL, you can omit `--server-url`.
+
+</details>
 
 ## More Docs
 
