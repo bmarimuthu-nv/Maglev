@@ -40,7 +40,8 @@ function createApi(overrides?: Partial<{
 function renderPreview(
     api: ReturnType<typeof createApi>,
     filePath: string,
-    presentation: 'sidebar' | 'overlay' = 'sidebar'
+    presentation: 'sidebar' | 'overlay' = 'sidebar',
+    workspacePath: string | null = '/repo'
 ) {
     const queryClient = new QueryClient({
         defaultOptions: {
@@ -65,9 +66,9 @@ function renderPreview(
                     sessionId="session-1"
                     filePath={filePath}
                     api={api as never}
-                    workspacePath="/repo"
                     onClose={vi.fn()}
                     presentation={presentation}
+                    workspacePath={workspacePath}
                 />
             </AppContextProvider>
         </QueryClientProvider>
@@ -184,7 +185,7 @@ describe('FilePreviewPanel', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Copy review JSON path' }))
 
         await waitFor(() => {
-            expect(navigator.clipboard.writeText).toHaveBeenCalledWith('.maglev-review/review.json')
+            expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repo/.maglev-review/review.json')
         })
     })
 

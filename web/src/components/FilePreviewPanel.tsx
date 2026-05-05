@@ -214,6 +214,20 @@ type ReviewFileLoadResult =
     | { success: true; reviewFile: ReviewFile; hash: string | null }
     | { success: false; error: string }
 
+function buildReviewFilePath(workspacePath: string | null | undefined): string {
+    const basePath = workspacePath?.trim()
+    if (!basePath) {
+        return REVIEW_FILE_PATH
+    }
+
+    const useBackslash = basePath.includes('\\') && !basePath.includes('/')
+    const separator = useBackslash ? '\\' : '/'
+    const reviewPath = useBackslash ? REVIEW_FILE_PATH.replace(/\//g, '\\') : REVIEW_FILE_PATH
+    const trimmedBase = basePath.replace(/[\\/]+$/, '')
+
+    return `${trimmedBase || separator}${trimmedBase ? separator : ''}${reviewPath}`
+}
+
 export function FilePreviewPanel(props: {
     sessionId: string
     filePath: string
@@ -616,8 +630,8 @@ export function FilePreviewPanel(props: {
     }, [runReviewMutation])
 
     const handleCopyReviewPath = useCallback(() => {
-        void copyReviewPath(REVIEW_FILE_PATH)
-    }, [copyReviewPath])
+        void copyReviewPath(buildReviewFilePath(workspacePath))
+    }, [copyReviewPath, workspacePath])
 
     return (
         <div className={`flex h-full w-full flex-col overflow-hidden ${isOverlay ? 'bg-[var(--app-surface-raised)]' : ''}`}>
