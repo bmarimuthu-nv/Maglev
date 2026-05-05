@@ -137,20 +137,62 @@ function isReviewThreadCollapsed(thread: ReviewThread, collapsedThreadIds: Recor
     return false
 }
 
-function getLineAnchorPreviews(filePath: string, line: ParsedDiffLine): Array<{ key: string; preview: string }> {
+type LineAnchorPreview = {
+    key: string
+    side: 'left' | 'right'
+    line: number
+    preview: string
+}
+
+function getLineAnchorPreviews(filePath: string, line: ParsedDiffLine): LineAnchorPreview[] {
     if (line.kind === 'add') {
-        return [{ key: getAnchorKey(filePath, 'right', line.newLine), preview: line.text }]
+        return [{ key: getAnchorKey(filePath, 'right', line.newLine), side: 'right', line: line.newLine, preview: line.text }]
     }
     if (line.kind === 'delete') {
-        return [{ key: getAnchorKey(filePath, 'left', line.oldLine), preview: line.text }]
+        return [{ key: getAnchorKey(filePath, 'left', line.oldLine), side: 'left', line: line.oldLine, preview: line.text }]
     }
     if (line.kind === 'context') {
         return [
-            { key: getAnchorKey(filePath, 'left', line.oldLine), preview: line.text },
-            { key: getAnchorKey(filePath, 'right', line.newLine), preview: line.text }
+            { key: getAnchorKey(filePath, 'left', line.oldLine), side: 'left', line: line.oldLine, preview: line.text },
+            { key: getAnchorKey(filePath, 'right', line.newLine), side: 'right', line: line.newLine, preview: line.text }
         ]
     }
     return []
+}
+
+function getThreadDisplayAnchorKey(thread: ReviewThread, anchorsByFile: Map<string, LineAnchorPreview[]>): string | null {
+    const anchors = anchorsByFile.get(thread.filePath) ?? []
+    if (anchors.length === 0) {
+        return null
+    }
+
+    const exactKey = getAnchorKey(thread.filePath, thread.anchor.side, thread.anchor.line)
+    if (anchors.some((anchor) => anchor.key === exactKey)) {
+        return exactKey
+    }
+
+    let best = anchors[0]
+    let bestDistance = Math.abs(best.line - thread.anchor.line)
+    let bestSidePenalty = best.side === thread.anchor.side ? 0 : 1
+    let bestBeforePenalty = best.line < thread.anchor.line ? 1 : 0
+
+    for (const candidate of anchors.slice(1)) {
+        const distance = Math.abs(candidate.line - thread.anchor.line)
+        const sidePenalty = candidate.side === thread.anchor.side ? 0 : 1
+        const beforePenalty = candidate.line < thread.anchor.line ? 1 : 0
+        if (
+            distance < bestDistance
+            || (distance === bestDistance && sidePenalty < bestSidePenalty)
+            || (distance === bestDistance && sidePenalty === bestSidePenalty && beforePenalty < bestBeforePenalty)
+        ) {
+            best = candidate
+            bestDistance = distance
+            bestSidePenalty = sidePenalty
+            bestBeforePenalty = beforePenalty
+        }
+    }
+
+    return best.key
 }
 
 function buildReviewContextComparison(context: {
@@ -1066,31 +1108,27 @@ export default function ReviewPage() {
         [relevantThreads]
     )
 
-    const anchorKeysByFile = useMemo(() => {
-        const map = new Map<string, Set<string>>()
+    const anchorsByFile = useMemo(() => {
+        const map = new Map<string, LineAnchorPreview[]>()
         for (const file of parsedFileDiffs) {
-            const keys = new Set<string>()
+            const anchors: LineAnchorPreview[] = []
             for (const line of file.lines) {
-                for (const anchor of getLineAnchorPreviews(file.filePath, line)) {
-                    keys.add(anchor.key)
-                }
+                anchors.push(...getLineAnchorPreviews(file.filePath, line))
             }
-            map.set(file.filePath, keys)
+            map.set(file.filePath, anchors)
         }
         return map
     }, [parsedFileDiffs])
 
     const currentPreviewByAnchor = useMemo(() => {
         const map = new Map<string, string>()
-        for (const file of parsedFileDiffs) {
-            for (const line of file.lines) {
-                for (const anchor of getLineAnchorPreviews(file.filePath, line)) {
-                    map.set(anchor.key, anchor.preview)
-                }
+        for (const anchors of anchorsByFile.values()) {
+            for (const anchor of anchors) {
+                map.set(anchor.key, anchor.preview)
             }
         }
         return map
-    }, [parsedFileDiffs])
+    }, [anchorsByFile])
 
     const outdatedThreadIds = useMemo(() => {
         const ids = new Set<string>()
@@ -1107,8 +1145,8 @@ export default function ReviewPage() {
     const threadsByAnchor = useMemo(() => {
         const map = new Map<string, ReviewThread[]>()
         for (const thread of relevantThreads) {
-            const anchorKey = getAnchorKey(thread.filePath, thread.anchor.side, thread.anchor.line)
-            if (!(anchorKeysByFile.get(thread.filePath)?.has(anchorKey))) {
+            const anchorKey = getThreadDisplayAnchorKey(thread, anchorsByFile)
+            if (!anchorKey) {
                 continue
             }
             const existing = map.get(anchorKey) ?? []
@@ -1116,13 +1154,13 @@ export default function ReviewPage() {
             map.set(anchorKey, existing)
         }
         return map
-    }, [anchorKeysByFile, relevantThreads])
+    }, [anchorsByFile, relevantThreads])
 
     const orphanedThreadsByFile = useMemo(() => {
         const map = new Map<string, ReviewThread[]>()
         for (const thread of relevantThreads) {
-            const anchorKey = getAnchorKey(thread.filePath, thread.anchor.side, thread.anchor.line)
-            if (anchorKeysByFile.get(thread.filePath)?.has(anchorKey)) {
+            const anchorKey = getThreadDisplayAnchorKey(thread, anchorsByFile)
+            if (anchorKey) {
                 continue
             }
             const existing = map.get(thread.filePath) ?? []
@@ -1130,7 +1168,7 @@ export default function ReviewPage() {
             map.set(thread.filePath, existing)
         }
         return map
-    }, [anchorKeysByFile, relevantThreads])
+    }, [anchorsByFile, relevantThreads])
 
     useEffect(() => {
         if (!selectedPath) {

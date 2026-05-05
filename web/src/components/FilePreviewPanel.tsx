@@ -165,12 +165,25 @@ function getThreadUpdatedAt(thread: ReviewThread, fallback: number): number {
     return thread.comments.at(-1)?.createdAt ?? fallback
 }
 
-function resolveReviewThreadLine(thread: ReviewThread, sourceLines: string[]): { resolvedLine: number | null; orphaned: boolean } {
-    if (thread.anchor.side !== 'right') {
-        return { resolvedLine: null, orphaned: true }
+function getAnchoredDisplayLine(line: number, sourceLines: string[]): number | null {
+    if (!Number.isFinite(line)) {
+        return null
+    }
+    if (sourceLines.length === 0) {
+        return null
     }
 
+    return Math.min(Math.max(1, Math.trunc(line)), sourceLines.length)
+}
+
+function resolveReviewThreadLine(thread: ReviewThread, sourceLines: string[]): { resolvedLine: number | null; orphaned: boolean } {
     const originalLine = thread.anchor.line
+    const anchoredDisplayLine = getAnchoredDisplayLine(originalLine, sourceLines)
+
+    if (thread.anchor.side !== 'right') {
+        return { resolvedLine: anchoredDisplayLine, orphaned: true }
+    }
+
     const preview = thread.anchor.preview
     if (originalLine >= 1 && originalLine <= sourceLines.length) {
         if (!preview || sourceLines[originalLine - 1] === preview) {
@@ -178,14 +191,7 @@ function resolveReviewThreadLine(thread: ReviewThread, sourceLines: string[]): {
         }
     }
 
-    if (preview) {
-        const relocatedIndex = sourceLines.findIndex((line) => line === preview)
-        if (relocatedIndex >= 0) {
-            return { resolvedLine: relocatedIndex + 1, orphaned: false }
-        }
-    }
-
-    return { resolvedLine: null, orphaned: true }
+    return { resolvedLine: anchoredDisplayLine, orphaned: true }
 }
 
 function toFileReviewThread(thread: ReviewThread, sourceLines: string[]): FileReviewThread {
@@ -323,6 +329,12 @@ export function FilePreviewPanel(props: {
         enabled: Boolean(api && filePath && panelMode === 'review' && !binary),
         retry: false
     })
+    const reviewJsonCopyPath = useMemo(() => {
+        const loadedWorkspacePath = reviewFileQuery.data?.success
+            ? reviewFileQuery.data.reviewFile.workspacePath
+            : null
+        return buildReviewFilePath(loadedWorkspacePath || workspacePath)
+    }, [reviewFileQuery.data, workspacePath])
 
     useEffect(() => {
         setViewMode('rendered')
@@ -517,7 +529,7 @@ export function FilePreviewPanel(props: {
     const lineThreads = useMemo(() => {
         const map = new Map<number, FileReviewThread[]>()
         for (const thread of reviewThreads) {
-            if (thread.orphaned || thread.resolvedLine == null) {
+            if (thread.resolvedLine == null) {
                 continue
             }
             const existing = map.get(thread.resolvedLine) ?? []
@@ -527,7 +539,7 @@ export function FilePreviewPanel(props: {
         return map
     }, [reviewThreads])
     const orphanedThreads = useMemo(
-        () => reviewThreads.filter((thread) => thread.orphaned || thread.resolvedLine == null),
+        () => reviewThreads.filter((thread) => thread.resolvedLine == null),
         [reviewThreads]
     )
     const unresolvedCount = useMemo(
@@ -630,8 +642,8 @@ export function FilePreviewPanel(props: {
     }, [runReviewMutation])
 
     const handleCopyReviewPath = useCallback(() => {
-        void copyReviewPath(buildReviewFilePath(workspacePath))
-    }, [copyReviewPath, workspacePath])
+        void copyReviewPath(reviewJsonCopyPath)
+    }, [copyReviewPath, reviewJsonCopyPath])
 
     return (
         <div className={`flex h-full w-full flex-col overflow-hidden ${isOverlay ? 'bg-[var(--app-surface-raised)]' : ''}`}>
