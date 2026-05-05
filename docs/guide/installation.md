@@ -62,7 +62,7 @@ curl -fsSL https://github.com/bmarimuthu-nv/Maglev/releases/latest/download/inst
 To install a specific release tag:
 
 ```bash
-curl -fsSL https://github.com/bmarimuthu-nv/Maglev/releases/latest/download/install.sh | MAGLEV_VERSION="v0.16.3" sh
+curl -fsSL https://github.com/bmarimuthu-nv/Maglev/releases/latest/download/install.sh | MAGLEV_VERSION="v0.16.4" sh
 ```
 
 If `maglev` is not found after install:
