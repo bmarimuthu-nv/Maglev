@@ -129,7 +129,7 @@ describe('CodeLinesView', () => {
         expect(onCreateThread).toHaveBeenCalledWith(2, 'Please tighten this branch.')
     })
 
-    it('renders inline and orphaned review threads and forwards replies', () => {
+    it('renders inline and orphaned review threads and forwards added comments', () => {
         const lineThread = makeThread({
             id: 'thread-1',
             resolvedLine: 2,
@@ -170,10 +170,10 @@ describe('CodeLinesView', () => {
         expect(screen.getByText('Orphaned')).toBeInTheDocument()
         expect(screen.getByText('This comment lost its anchor.')).toBeInTheDocument()
 
-        fireEvent.change(screen.getAllByPlaceholderText('Reply to thread')[0], {
+        fireEvent.change(screen.getAllByPlaceholderText('Add a comment')[0], {
             target: { value: 'Good catch.' }
         })
-        fireEvent.click(screen.getAllByRole('button', { name: 'Reply' })[0])
+        fireEvent.click(screen.getAllByRole('button', { name: 'Comment' })[0])
 
         expect(onReplyToThread).toHaveBeenCalledWith(lineThread, 'Good catch.')
     })

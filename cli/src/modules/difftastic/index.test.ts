@@ -4,11 +4,26 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { run } from './index';
-import { writeFileSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { join } from 'path';
-import { tmpdir } from 'os';
+import { platform, tmpdir } from 'os';
+import { runtimePath } from '@/projectPath';
 
-describe('difftastic', () => {
+function isDifftasticAvailable(): boolean {
+    const binaryName = platform() === 'win32' ? 'difft.exe' : 'difft';
+    const configuredPath = process.env.MAGLEV_DIFFTASTIC_PATH?.trim();
+    const bundledPath = join(runtimePath(), 'tools', 'unpacked', binaryName);
+    const command = configuredPath || (existsSync(bundledPath)
+        ? bundledPath
+        : binaryName);
+    const result = spawnSync(command, ['--version'], { stdio: 'ignore', env: process.env });
+    return !result.error && result.status === 0;
+}
+
+const describeIfDifftasticAvailable = isDifftasticAvailable() ? describe : describe.skip;
+
+describeIfDifftasticAvailable('difftastic', () => {
     let testDir: string;
     let file1Path: string;
     let file2Path: string;

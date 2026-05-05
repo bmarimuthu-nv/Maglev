@@ -4,8 +4,26 @@
 
 import { describe, it, expect } from 'vitest'
 import { run } from './index'
+import { existsSync } from 'fs'
+import { spawnSync } from 'child_process'
+import { join } from 'path'
+import { platform } from 'os'
+import { runtimePath } from '@/projectPath'
 
-describe('ripgrep low-level wrapper', () => {
+function isRipgrepAvailable(): boolean {
+    const binaryName = platform() === 'win32' ? 'rg.exe' : 'rg'
+    const configuredPath = process.env.MAGLEV_RIPGREP_PATH?.trim()
+    const bundledPath = join(runtimePath(), 'tools', 'unpacked', binaryName)
+    const command = configuredPath || (existsSync(bundledPath)
+        ? bundledPath
+        : binaryName)
+    const result = spawnSync(command, ['--version'], { stdio: 'ignore', env: process.env })
+    return !result.error && result.status === 0
+}
+
+const describeIfRipgrepAvailable = isRipgrepAvailable() ? describe : describe.skip
+
+describeIfRipgrepAvailable('ripgrep low-level wrapper', () => {
     it('should get version', async () => {
         const result = await run(['--version'])
         expect(result.exitCode).toBe(0)
