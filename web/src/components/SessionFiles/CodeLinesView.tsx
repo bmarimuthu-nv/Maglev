@@ -491,7 +491,7 @@ function CodeLinesViewInner(props: {
                                         <ReviewThreadCard
                                             key={thread.id}
                                             thread={thread}
-                                            metaLabel={thread.orphaned ? 'orphaned' : thread.resolvedLine ? `line ${thread.resolvedLine}` : null}
+                                            metaLabel={thread.orphaned ? 'Outdated' : thread.resolvedLine ? `line ${thread.resolvedLine}` : null}
                                             collapsed={thread.status === 'resolved' && collapsedResolvedThreadIds[thread.id] !== false}
                                             disabled={props.reviewSaving}
                                             onToggleResolved={() => props.onToggleResolvedCollapse?.(thread.id)}
@@ -521,7 +521,7 @@ function CodeLinesViewInner(props: {
                                 <ReviewThreadCard
                                     key={thread.id}
                                     thread={thread}
-                                    metaLabel="orphaned"
+                                    metaLabel="Outdated"
                                     collapsed={thread.status === 'resolved' && collapsedResolvedThreadIds[thread.id] !== false}
                                     disabled={props.reviewSaving}
                                     onToggleResolved={() => props.onToggleResolvedCollapse?.(thread.id)}

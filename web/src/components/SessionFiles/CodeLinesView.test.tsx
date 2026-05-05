@@ -129,7 +129,7 @@ describe('CodeLinesView', () => {
         expect(onCreateThread).toHaveBeenCalledWith(2, 'Please tighten this branch.')
     })
 
-    it('renders inline and orphaned review threads and forwards added comments', () => {
+    it('renders inline and outdated review threads and forwards added comments', () => {
         const lineThread = makeThread({
             id: 'thread-1',
             resolvedLine: 2,
@@ -142,9 +142,9 @@ describe('CodeLinesView', () => {
                 }
             ]
         })
-        const orphanedThread = makeThread({
+        const outdatedThread = makeThread({
             id: 'thread-2',
-            resolvedLine: null,
+            resolvedLine: 2,
             orphaned: true,
             comments: [
                 {
@@ -159,15 +159,16 @@ describe('CodeLinesView', () => {
 
         render(
             <ReviewHarness
-                lineThreads={new Map([[2, [lineThread]]])}
-                orphanedThreads={[orphanedThread]}
+                lineThreads={new Map([[2, [lineThread, outdatedThread]]])}
+                orphanedThreads={[]}
                 onReplyToThread={onReplyToThread}
             />
         )
 
-        expect(screen.getByText('1 unresolved')).toBeInTheDocument()
+        expect(screen.getByText('2 unresolved')).toBeInTheDocument()
         expect(screen.getByText('Need a null guard here.')).toBeInTheDocument()
-        expect(screen.getByText('Orphaned')).toBeInTheDocument()
+        expect(screen.getByText('Outdated')).toBeInTheDocument()
+        expect(screen.queryByText('Orphaned')).not.toBeInTheDocument()
         expect(screen.getByText('This comment lost its anchor.')).toBeInTheDocument()
 
         fireEvent.change(screen.getAllByPlaceholderText('Add a comment')[0], {

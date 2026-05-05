@@ -166,12 +166,87 @@ describe('FilePreviewPanel', () => {
         expect(screen.getByPlaceholderText('Search in file')).toBeInTheDocument()
     })
 
-    it('copies the review JSON path from the header', async () => {
+    it('keeps outdated review threads at their original line instead of the orphaned footer', async () => {
+        const now = Date.now()
         const api = createApi({
-            readSessionFile: vi.fn().mockResolvedValue({
-                success: true,
-                content: encodeBase64('const value = 1'),
-                hash: 'file-hash'
+            readSessionFile: vi.fn().mockImplementation(async (_sessionId: string, path: string) => {
+                if (path === '.maglev-review/review.json') {
+                    return {
+                        success: true,
+                        content: encodeBase64(JSON.stringify({
+                            version: 1,
+                            workspacePath: '/repo',
+                            currentBranch: null,
+                            defaultBranch: null,
+                            mergeBase: null,
+                            reviewContext: null,
+                            updatedAt: now,
+                            threads: [{
+                                id: 'thread-stale',
+                                diffMode: 'branch',
+                                filePath: '/repo/src/example.ts',
+                                anchor: {
+                                    side: 'right',
+                                    line: 2,
+                                    preview: 'const oldValue = true'
+                                },
+                                status: 'open',
+                                comments: [{
+                                    id: 'thread-stale-root',
+                                    author: 'agent',
+                                    createdAt: now,
+                                    body: 'This should stay near line 2.'
+                                }]
+                            }]
+                        })),
+                        hash: 'review-hash'
+                    }
+                }
+                return {
+                    success: true,
+                    content: encodeBase64(['const a = 1', 'const newValue = true', 'const oldValue = true'].join('\n')),
+                    hash: 'file-hash'
+                }
+            })
+        })
+
+        renderPreview(api, '/repo/src/example.ts')
+
+        expect(await screen.findByText('/repo/src/example.ts')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+
+        expect(await screen.findByText('This should stay near line 2.')).toBeInTheDocument()
+        expect(screen.getByText('Outdated')).toBeInTheDocument()
+        expect(screen.queryByText('Orphaned')).not.toBeInTheDocument()
+        expect(document.querySelector('[data-line-number="2"]')?.parentElement).toHaveTextContent('This should stay near line 2.')
+        expect(document.querySelector('[data-line-number="3"]')?.parentElement).not.toHaveTextContent('This should stay near line 2.')
+    })
+
+    it('copies the review JSON path from the header', async () => {
+        const openFilePath = '/repo/src/example.ts'
+        const api = createApi({
+            readSessionFile: vi.fn().mockImplementation(async (_sessionId: string, path: string) => {
+                if (path === '.maglev-review/review.json') {
+                    return {
+                        success: true,
+                        content: encodeBase64(JSON.stringify({
+                            version: 1,
+                            workspacePath: '/review-workspace',
+                            currentBranch: null,
+                            defaultBranch: null,
+                            mergeBase: null,
+                            reviewContext: null,
+                            updatedAt: Date.now(),
+                            threads: []
+                        })),
+                        hash: 'review-hash'
+                    }
+                }
+                return {
+                    success: true,
+                    content: encodeBase64('const value = 1'),
+                    hash: 'file-hash'
+                }
             }),
             getSessionFileReviewThreads: vi.fn().mockResolvedValue({
                 success: true,
@@ -179,14 +254,17 @@ describe('FilePreviewPanel', () => {
             })
         })
 
-        renderPreview(api, '/repo/src/example.ts')
+        renderPreview(api, openFilePath, 'sidebar', '/session-workspace')
 
-        expect(await screen.findByText('/repo/src/example.ts')).toBeInTheDocument()
+        expect(await screen.findByText(openFilePath)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+        await screen.findByText('Review annotations')
         fireEvent.click(screen.getByRole('button', { name: 'Copy review JSON path' }))
 
         await waitFor(() => {
-            expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repo/.maglev-review/review.json')
+            expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/session-workspace/.maglev-review/review.json')
         })
+        expect(navigator.clipboard.writeText).not.toHaveBeenCalledWith(openFilePath)
     })
 
     it('creates open-file review comments in the shared review JSON file', async () => {
