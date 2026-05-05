@@ -2,7 +2,13 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
+import { CheckIcon } from '@/components/icons'
 import { useTranslation } from '@/lib/use-translation'
+
+function normalizeShortcutPath(path: string): string {
+    const normalized = path.trim().replace(/\\/g, '/').replace(/\/+$/g, '')
+    return normalized || (path.trim() ? '/' : '')
+}
 
 function ShortcutRow(props: {
     label: string
@@ -10,21 +16,34 @@ function ShortcutRow(props: {
     onClick: () => void
     onRemove?: () => void
     disabled: boolean
+    isSelected: boolean
 }) {
     return (
-        <div className="flex items-center gap-2 rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-2 py-2">
+        <div className={`flex items-center gap-2 rounded-md border px-2 py-2 transition-colors ${
+            props.isSelected
+                ? 'border-[var(--app-link)] bg-[color-mix(in_srgb,var(--app-link)_14%,var(--app-bg))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--app-link)_45%,transparent)]'
+                : 'border-[var(--app-border)] bg-[var(--app-secondary-bg)]'
+        }`}>
             <button
                 type="button"
                 onClick={props.onClick}
                 disabled={props.disabled}
+                aria-pressed={props.isSelected}
                 className="min-w-0 flex-1 text-left disabled:opacity-50"
                 title={props.description ?? props.label}
             >
-                <div className="truncate text-sm text-[var(--app-fg)]">{props.label}</div>
+                <div className={`truncate text-sm ${props.isSelected ? 'font-medium text-[var(--app-link)]' : 'text-[var(--app-fg)]'}`}>
+                    {props.label}
+                </div>
                 {props.description ? (
                     <div className="truncate text-xs text-[var(--app-hint)]">{props.description}</div>
                 ) : null}
             </button>
+            {props.isSelected ? (
+                <span className="shrink-0 rounded-full bg-[var(--app-link)] p-1 text-[var(--app-bg)]" aria-hidden="true">
+                    <CheckIcon className="h-3 w-3" />
+                </span>
+            ) : null}
             {props.onRemove ? (
                 <button
                     type="button"
@@ -63,6 +82,8 @@ export function DirectorySection(props: {
     onRemoveSavedPath: (path: string) => void
 }) {
     const { t } = useTranslation()
+    const selectedPath = normalizeShortcutPath(props.directory)
+    const isPathSelected = (path: string) => selectedPath.length > 0 && normalizeShortcutPath(path) === selectedPath
 
     return (
         <div className="flex flex-col gap-1.5 px-3 py-3">
@@ -124,6 +145,7 @@ export function DirectorySection(props: {
                                     description={folder.path}
                                     onClick={() => props.onPathClick(folder.path)}
                                     disabled={props.isDisabled}
+                                    isSelected={isPathSelected(folder.path)}
                                 />
                             ))}
                         </div>
@@ -149,6 +171,7 @@ export function DirectorySection(props: {
                                     description={worktree.path === worktree.repoRoot ? worktree.path : `${worktree.path} · ${worktree.repoRoot}`}
                                     onClick={() => props.onPathClick(worktree.path)}
                                     disabled={props.isDisabled}
+                                    isSelected={isPathSelected(worktree.path)}
                                 />
                             ))
                         ) : (
@@ -167,6 +190,7 @@ export function DirectorySection(props: {
                                     label={path}
                                     onClick={() => props.onPathClick(path)}
                                     disabled={props.isDisabled}
+                                    isSelected={isPathSelected(path)}
                                 />
                             ))}
                         </div>
@@ -182,6 +206,7 @@ export function DirectorySection(props: {
                                     onClick={() => props.onPathClick(path)}
                                     onRemove={() => props.onRemoveSavedPath(path)}
                                     disabled={props.isDisabled}
+                                    isSelected={isPathSelected(path)}
                                 />
                             ))}
                         </div>
