@@ -1,6 +1,6 @@
 {
   "name": "maglev",
-  "version": "0.16.4",
+  "version": "0.16.5",
   "description": "App for agentic coding - access coding agent anywhere",
   "author": "Kirill Dubovitskiy & weishu",
   "license": "AGPL-3.0-only",
@@ -18,11 +18,11 @@
     "NOTICE"
   ],
   "optionalDependencies": {
-    "maglev-darwin-arm64": "0.16.4",
-    "maglev-darwin-x64": "0.16.4",
-    "maglev-linux-arm64": "0.16.4",
-    "maglev-linux-x64": "0.16.4",
-    "maglev-win32-x64": "0.16.4"
+    "maglev-darwin-arm64": "0.16.5",
+    "maglev-darwin-x64": "0.16.5",
+    "maglev-linux-arm64": "0.16.5",
+    "maglev-linux-x64": "0.16.5",
+    "maglev-win32-x64": "0.16.5"
   },
   "scripts": {
     "postinstall": "node -e \"try{require('fs').chmodSync(require('path').join(__dirname,'bin','maglev.cjs'),0o755)}catch(e){}\"",
