@@ -7,6 +7,7 @@ import FilesPage from './files'
 
 const navigateMock = vi.fn()
 const useSessionFileSearchMock = vi.fn()
+const readSessionFileMock = vi.fn()
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
@@ -16,7 +17,9 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
-        api: {},
+        api: {
+            readSessionFile: readSessionFileMock
+        },
         scopeKey: 'test-scope',
         baseUrl: 'http://localhost:3000'
     })
@@ -79,13 +82,15 @@ describe('FilesPage', () => {
 
         renderPage(queryClient)
 
-        const input = screen.getByPlaceholderText('Go to file')
+        const input = screen.getByPlaceholderText('Search or absolute path')
         fireEvent.change(input, { target: { value: 'README' } })
         fireEvent.click(screen.getByRole('button', { name: 'Search files' }))
 
         await waitFor(() => {
             expect(useSessionFileSearchMock).toHaveBeenLastCalledWith(
-                {},
+                expect.objectContaining({
+                    readSessionFile: readSessionFileMock
+                }),
                 'session-1',
                 'README',
                 expect.objectContaining({
@@ -94,6 +99,43 @@ describe('FilesPage', () => {
                 })
             )
         })
+    })
+
+    it('opens an absolute path directly instead of searching for it', async () => {
+        readSessionFileMock.mockResolvedValue({
+            success: true,
+            content: '',
+            hash: 'hash'
+        })
+        useSessionFileSearchMock.mockImplementation(() => ({
+            files: [],
+            error: null,
+            isLoading: false,
+            refetch: vi.fn()
+        }))
+
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: {
+                    retry: false,
+                    gcTime: 0
+                }
+            }
+        })
+
+        renderPage(queryClient)
+
+        const absolutePath = '/tmp/project/src/app.ts'
+        const input = screen.getByPlaceholderText('Search or absolute path')
+        fireEvent.change(input, { target: { value: absolutePath } })
+        fireEvent.click(screen.getByRole('button', { name: 'Search files' }))
+
+        await waitFor(() => {
+            expect(readSessionFileMock).toHaveBeenCalledWith('session-1', absolutePath)
+        })
+        expect(useSessionFileSearchMock.mock.calls.some((call) => call[2] === absolutePath)).toBe(false)
+        expect(screen.getAllByText('app.ts').length).toBeGreaterThan(0)
+        expect(screen.getByText(absolutePath)).toBeInTheDocument()
     })
 
     it('filters file results with regex mode', async () => {
@@ -129,13 +171,15 @@ describe('FilesPage', () => {
         renderPage(queryClient)
 
         fireEvent.click(screen.getByRole('button', { name: 'Use regex search' }))
-        const input = screen.getByPlaceholderText('Go to file')
+        const input = screen.getByPlaceholderText('Search or absolute path')
         fireEvent.change(input, { target: { value: '.*\\.ts$' } })
         fireEvent.click(screen.getByRole('button', { name: 'Search files' }))
 
         await waitFor(() => {
             expect(useSessionFileSearchMock).toHaveBeenLastCalledWith(
-                {},
+                expect.objectContaining({
+                    readSessionFile: readSessionFileMock
+                }),
                 'session-1',
                 '',
                 expect.objectContaining({
@@ -144,7 +188,7 @@ describe('FilesPage', () => {
                 })
             )
         })
-        expect(screen.getByText('app.ts')).toBeInTheDocument()
+        expect(screen.getAllByText('app.ts').length).toBeGreaterThan(0)
         expect(screen.queryByText('README.md')).not.toBeInTheDocument()
     })
 
@@ -168,13 +212,15 @@ describe('FilesPage', () => {
 
         renderPage(queryClient)
 
-        const input = screen.getByPlaceholderText('Go to file')
+        const input = screen.getByPlaceholderText('Search or absolute path')
         fireEvent.change(input, { target: { value: 'README' } })
         fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
 
         await waitFor(() => {
             expect(useSessionFileSearchMock).toHaveBeenLastCalledWith(
-                {},
+                expect.objectContaining({
+                    readSessionFile: readSessionFileMock
+                }),
                 'session-1',
                 'README',
                 expect.objectContaining({

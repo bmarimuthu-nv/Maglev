@@ -13,6 +13,7 @@ import { useLongPress } from '@/hooks/useLongPress'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useSessionFileSearch } from '@/hooks/queries/useSessionFileSearch'
 import { rankFiles } from '@/lib/file-search'
+import { getPathFileName, getPathParentPath, isAbsoluteFilePathInput } from '@/lib/file-utils'
 import { getOpenFileShortcut, matchShortcutEvent } from '@/lib/open-file-shortcut'
 import { waitForSpawnedShellSessionReady } from '@/lib/spawn-session-ready'
 import { useTranslation } from '@/lib/use-translation'
@@ -156,6 +157,15 @@ function saveStickyFilePreview(scopeKey: string, baseUrl: string, sessionId: str
         removeLocalStorageItem(storageKey)
     }
     removeLocalStorageItem(getLegacyStickyFilePreviewStorageKey(baseUrl, sessionId))
+}
+
+function createDirectOpenFileItem(path: string): FileSearchItem {
+    return {
+        fileName: getPathFileName(path),
+        filePath: getPathParentPath(path),
+        fullPath: path,
+        fileType: 'file'
+    }
 }
 
 function globPatternToRegExp(pattern: string): RegExp {
@@ -1196,6 +1206,18 @@ export default function TerminalPage() {
         setOpenFileActiveIndex(0)
     }, [loadedSessionId, rememberRecentOpenFile])
 
+    const submitOpenFileQuery = useCallback(() => {
+        const query = openFileQuery.trim()
+        if (!query) {
+            return
+        }
+        if (isAbsoluteFilePathInput(query)) {
+            handleOpenExplorerFile(createDirectOpenFileItem(query))
+            return
+        }
+        setOpenFileSubmittedQuery(query)
+    }, [handleOpenExplorerFile, openFileQuery])
+
     const handlePreviewResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         event.preventDefault()
         const startX = event.clientX
@@ -1387,7 +1409,7 @@ export default function TerminalPage() {
             if (event.key === 'Enter') {
                 if (event.target === openFileInputRef.current) {
                     event.preventDefault()
-                    setOpenFileSubmittedQuery(openFileQuery.trim())
+                    submitOpenFileQuery()
                     return
                 }
                 const match = openFileResults[openFileActiveIndex]
@@ -1400,7 +1422,7 @@ export default function TerminalPage() {
 
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
-    }, [handleOpenExplorerFile, handleOpenFileDialog, openFileActiveIndex, openFileDialogOpen, openFileQuery, openFileResults, openFileShortcut])
+    }, [handleOpenExplorerFile, handleOpenFileDialog, openFileActiveIndex, openFileDialogOpen, openFileResults, openFileShortcut, submitOpenFileQuery])
 
     const handleQuickInput = useCallback(
         (sequence: string) => {
@@ -2010,7 +2032,7 @@ export default function TerminalPage() {
                     <DialogHeader>
                         <DialogTitle>Open file</DialogTitle>
                         <DialogDescription>
-                            Search workspace files. Shortcut: {openFileShortcut}
+                            Search workspace files or paste an absolute path. Shortcut: {openFileShortcut}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="mt-2">
@@ -2062,7 +2084,7 @@ export default function TerminalPage() {
                             />
                             <button
                                 type="button"
-                                onClick={() => setOpenFileSubmittedQuery(openFileQuery.trim())}
+                                onClick={submitOpenFileQuery}
                                 disabled={openFileQuery.trim().length === 0}
                                 className="shrink-0 rounded-md bg-[var(--app-link)] px-3 py-2 text-sm font-medium text-[var(--app-bg)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                             >

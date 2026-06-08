@@ -607,6 +607,20 @@ describe('TerminalPage open file dialog', () => {
         })
     })
 
+    it('opens an absolute file path directly instead of searching for it', async () => {
+        renderWithProviders()
+
+        const absolutePath = '/tmp/project/src/app.ts'
+        fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+        fireEvent.change(screen.getByPlaceholderText('Type to fuzzy search files'), {
+            target: { value: absolutePath }
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+        expect(await screen.findByText(absolutePath)).toBeInTheDocument()
+        expect(useSessionFileSearchMock.mock.calls.some((call) => call[2] === absolutePath)).toBe(false)
+    })
+
     it('shows recently opened files before running a new search', async () => {
         useSessionFileSearchMock.mockImplementation((_api, _sessionId, query: string) => ({
             files: query === 'helper'

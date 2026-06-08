@@ -103,6 +103,19 @@ describe('FilePreviewPanel', () => {
         cleanup()
     })
 
+    it('shows the read failure message when the selected file cannot be opened', async () => {
+        const api = createApi({
+            readSessionFile: vi.fn().mockResolvedValue({
+                success: false,
+                error: 'File does not exist: /tmp/missing.txt'
+            })
+        })
+
+        renderPreview(api, '/tmp/missing.txt')
+
+        expect(await screen.findByText('File does not exist: /tmp/missing.txt')).toBeInTheDocument()
+    })
+
     it('loads a code file and switches into review mode with inline thread content', async () => {
         const now = Date.now()
         const api = createApi({

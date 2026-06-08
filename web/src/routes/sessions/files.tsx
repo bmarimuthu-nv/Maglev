@@ -11,7 +11,7 @@ import { useSessionFileSearch } from '@/hooks/queries/useSessionFileSearch'
 import { rankFiles } from '@/lib/file-search'
 import { buildSessionExplorerUrl } from '@/utils/sessionExplorer'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
-import { decodePath, getUtf8ByteLength, isBinaryContent } from '@/lib/file-utils'
+import { decodePath, getPathFileName, getPathParentPath, getUtf8ByteLength, isAbsoluteFilePathInput, isBinaryContent } from '@/lib/file-utils'
 import { queryKeys } from '@/lib/query-keys'
 
 type ExplorerTab = {
@@ -177,15 +177,15 @@ function PanelIcon(props: { className?: string }) {
 }
 
 function getFileName(path: string): string {
-    return path.split('/').pop() || path
+    return getPathFileName(path)
 }
 
 function getCompactParentPath(path: string): string {
-    const parent = path.split('/').slice(0, -1).join('/')
+    const parent = getPathParentPath(path)
     if (!parent) {
         return 'project root'
     }
-    const parts = parent.split('/').filter(Boolean)
+    const parts = parent.split(/[/\\]/).filter(Boolean)
     if (parts.length <= 2) {
         return parent
     }
@@ -327,7 +327,7 @@ function getTabId(path: string): string {
 }
 
 function createEmptyTab(path: string): ExplorerTab {
-    const fileName = path.split('/').pop() || path
+    const fileName = getPathFileName(path)
     return {
         id: getTabId(path),
         path,
@@ -553,8 +553,13 @@ export default function FilesPage() {
     }, [openFileTab])
 
     const submitSearch = useCallback(() => {
+        if (isAbsoluteFilePathInput(normalizedSearchQuery)) {
+            openFileTab(normalizedSearchQuery)
+            setSubmittedSearchQuery('')
+            return
+        }
         setSubmittedSearchQuery(normalizedSearchQuery)
-    }, [normalizedSearchQuery])
+    }, [normalizedSearchQuery, openFileTab])
 
     const handleExplorerBack = useCallback(() => {
         if (explorerHistoryRef.current.length <= 1) {
@@ -773,7 +778,7 @@ export default function FilesPage() {
                                             submitSearch()
                                         }
                                     }}
-                                    placeholder="Go to file"
+                                    placeholder="Search or absolute path"
                                     className="w-full bg-transparent text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none"
                                     autoCapitalize="none"
                                     autoCorrect="off"

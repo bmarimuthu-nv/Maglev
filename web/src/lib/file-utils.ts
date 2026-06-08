@@ -6,6 +6,30 @@ export function decodePath(value: string): string {
     return decoded.ok ? decoded.text : value
 }
 
+export function isAbsoluteFilePathInput(value: string): boolean {
+    const path = value.trim()
+    if (!path) {
+        return false
+    }
+
+    return path.startsWith('/')
+        || path.startsWith('\\\\')
+        || path.startsWith('//')
+        || /^[a-zA-Z]:[/\\]/.test(path)
+}
+
+export function getPathFileName(path: string): string {
+    const normalized = path.replace(/[/\\]+$/, '')
+    const parts = normalized.split(/[/\\]/).filter(Boolean)
+    return parts[parts.length - 1] ?? path
+}
+
+export function getPathParentPath(path: string): string {
+    const normalized = path.replace(/[/\\]+$/, '')
+    const lastSlash = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
+    return lastSlash > 0 ? normalized.slice(0, lastSlash) : ''
+}
+
 export function getUtf8ByteLength(value: string): number {
     return new TextEncoder().encode(value).length
 }

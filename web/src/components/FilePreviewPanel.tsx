@@ -6,7 +6,7 @@ import { CodeEditSurface, type CodeEditSurfaceHandle } from '@/components/Sessio
 import { useAppContext } from '@/lib/app-context'
 import { queryKeys } from '@/lib/query-keys'
 import { decodeBase64, encodeBase64 } from '@/lib/utils'
-import { isBinaryContent } from '@/lib/file-utils'
+import { getPathFileName, isBinaryContent } from '@/lib/file-utils'
 import type { FileReviewThread, WriteFileConflict } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { SourceReviewFileCard } from '@/components/review/SourceReviewFileCard'
@@ -252,7 +252,11 @@ export function FilePreviewPanel(props: {
         queryKey: queryKeys.sessionFile(scopeKey, sessionId, filePath),
         queryFn: async () => {
             if (!api) throw new Error('API unavailable')
-            return await api.readSessionFile(sessionId, filePath)
+            const result = await api.readSessionFile(sessionId, filePath)
+            if (!result.success) {
+                throw new Error(result.error ?? 'Failed to load file')
+            }
+            return result
         },
         enabled: Boolean(api && filePath),
         retry: false,
@@ -271,7 +275,7 @@ export function FilePreviewPanel(props: {
         : null
     const markdown = isMarkdownFile(filePath)
     const sourceLines = useMemo(() => normalizeSourceLines(content), [content])
-    const fileName = filePath.split('/').pop() ?? filePath
+    const fileName = getPathFileName(filePath)
     const buildPreviewLink = useCallback((line: number) => `${window.location.href.split('#')[0]}#L${line}`, [])
     const draftStorageKey = useMemo(() => buildDraftStorageKey(scopeKey, sessionId, filePath), [filePath, scopeKey, sessionId])
 

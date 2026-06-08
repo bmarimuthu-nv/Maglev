@@ -1,7 +1,7 @@
 import { logger } from '@/ui/logger'
 import { mkdir, readFile, stat, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
-import { dirname, resolve } from 'path'
+import { dirname, isAbsolute, resolve } from 'path'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
 import { getErrorMessage, rpcError } from '../rpcResponses'
@@ -41,24 +41,52 @@ function hashBuffer(buffer: Buffer): string {
     return createHash('sha256').update(buffer).digest('hex')
 }
 
+function resolveReadablePath(targetPath: string, workingDirectory: string): { path: string } | { error: string } {
+    if (isAbsolute(targetPath)) {
+        return { path: targetPath }
+    }
+
+    const validation = validatePath(targetPath, workingDirectory)
+    if (!validation.valid) {
+        return { error: validation.error ?? 'Invalid file path' }
+    }
+
+    return { path: resolve(workingDirectory, targetPath) }
+}
+
+function getReadFileErrorMessage(error: unknown, filePath: string): string {
+    const nodeError = error as NodeJS.ErrnoException
+    switch (nodeError.code) {
+        case 'ENOENT':
+        case 'ENOTDIR':
+            return `File does not exist: ${filePath}`
+        case 'EISDIR':
+            return `Path is a directory, not a file: ${filePath}`
+        case 'EACCES':
+        case 'EPERM':
+            return `File is not accessible: ${filePath}`
+        default:
+            return getErrorMessage(error, 'Failed to read file')
+    }
+}
+
 export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
     rpcHandlerManager.registerHandler<ReadFileRequest, ReadFileResponse>('readFile', async (data) => {
         logger.debug('Read file request:', data.path)
 
-        const validation = validatePath(data.path, workingDirectory)
-        if (!validation.valid) {
-            return rpcError(validation.error ?? 'Invalid file path')
+        const resolved = resolveReadablePath(data.path, workingDirectory)
+        if ('error' in resolved) {
+            return rpcError(resolved.error)
         }
 
         try {
-            const resolvedPath = resolve(workingDirectory, data.path)
-            const buffer = await readFile(resolvedPath)
+            const buffer = await readFile(resolved.path)
             const content = buffer.toString('base64')
             const hash = hashBuffer(buffer)
             return { success: true, content, hash }
         } catch (error) {
             logger.debug('Failed to read file:', error)
-            return rpcError(getErrorMessage(error, 'Failed to read file'))
+            return rpcError(getReadFileErrorMessage(error, resolved.path))
         }
     })
 

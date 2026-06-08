@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -18,19 +18,22 @@ function hashText(value: string): string {
 
 describe('file RPC handlers', () => {
     let rootDir: string
+    let externalDir: string
     let rpc: RpcHandlerManager
 
     beforeEach(async () => {
-        if (rootDir) {
-            await rm(rootDir, { recursive: true, force: true })
-        }
-
         rootDir = await createTempDir('maglev-file-handler')
+        externalDir = await createTempDir('maglev-file-handler-external')
         await mkdir(join(rootDir, 'src'), { recursive: true })
         await writeFile(join(rootDir, 'src', 'example.ts'), 'const value = 1\n', 'utf8')
 
         rpc = new RpcHandlerManager({ scopePrefix: 'session-test' })
         registerFileHandlers(rpc, rootDir)
+    })
+
+    afterEach(async () => {
+        await rm(rootDir, { recursive: true, force: true })
+        await rm(externalDir, { recursive: true, force: true })
     })
 
     it('returns structured conflict data for hash mismatches', async () => {
@@ -79,5 +82,33 @@ describe('file RPC handlers', () => {
         expect(parsed.success).toBe(true)
         expect(parsed.hash).toBe(hashText('const value = 3\n'))
         await expect(readFile(join(rootDir, 'src', 'example.ts'), 'utf8')).resolves.toBe('const value = 3\n')
+    })
+
+    it('reads an absolute file path outside the workspace when the user can access it', async () => {
+        const absolutePath = join(externalDir, 'notes.txt')
+        await writeFile(absolutePath, 'hello from outside workspace')
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:readFile',
+            params: JSON.stringify({ path: absolutePath })
+        })
+
+        const parsed = JSON.parse(response) as { success: boolean; content?: string; error?: string }
+        expect(parsed.success).toBe(true)
+        expect(Buffer.from(parsed.content ?? '', 'base64').toString('utf8')).toBe('hello from outside workspace')
+        expect(parsed.error).toBeUndefined()
+    })
+
+    it('returns a clear error when an absolute file path does not exist', async () => {
+        const missingPath = join(externalDir, 'missing.txt')
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:readFile',
+            params: JSON.stringify({ path: missingPath })
+        })
+
+        const parsed = JSON.parse(response) as { success: boolean; error?: string }
+        expect(parsed.success).toBe(false)
+        expect(parsed.error).toBe(`File does not exist: ${missingPath}`)
     })
 })
